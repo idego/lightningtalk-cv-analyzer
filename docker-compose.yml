@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "${CV_VALIDATOR_PORT:-8000}:8000"
+    environment:
+      CV_VALIDATOR_DB_PATH: /app/data/cv_validator.db
+      CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
+      CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
+    volumes:
+      - cv_validator_data:/app/data
+    restart: unless-stopped
+
+  test:
+    build:
+      context: .
+      target: dev
+    environment:
+      CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
+    command: ["pytest", "-q"]
+    profiles:
+      - test
+
+volumes:
+  cv_validator_data:

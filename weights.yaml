@@ -1,0 +1,49 @@
+version: "1.0.0"
+
+# Strong weights must dominate the entire weak pool (sum ~15) alone.
+signals:
+  phone_country:
+    strength: strong
+    weight: 35
+  address_postal:
+    strength: strong
+    weight: 30
+  employer_location:
+    strength: medium
+    weight: 20
+  date_format:
+    strength: medium
+    weight: 15
+  spelling_locale:
+    strength: weak
+    weight: 5
+  education_location:
+    strength: weak
+    weight: 4
+  currency:
+    strength: weak
+    weight: 3
+  email_tld:
+    strength: weak
+    weight: 3
+  right_to_work:
+    strength: weak
+    weight: 0  # surfaced as informational finding
+  national_id:
+    strength: weak
+    weight: 0  # surfaced as informational finding
+
+bands:
+  green_min: 75
+  amber_min: 50
+  red_min: 25
+
+scoring:
+  min_signals_for_assessment: 2
+  borderline_bias_toward_review: true
+  base_score: 50
+
+disclaimer: >-
+  Decision-support only — this report analyzes location consistency within the CV
+  and does not verify physical location. Human review is required; no automated
+  rejection or advancement is performed.

@@ -1,0 +1,12 @@
+John Smith
+Berlin, Germany
++1 (415) 555-0100
+john@example.com
+94105
+
+Experience
+Engineer — TechCo, San Francisco
+01/2020 – 12/2023
+
+Education
+Stanford University, California
