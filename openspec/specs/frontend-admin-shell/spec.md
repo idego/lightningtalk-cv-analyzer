@@ -47,6 +47,10 @@ The frontend SHALL provide a reusable admin shell with sidebar, sticky header, c
 - **WHEN** shell pages are rendered
 - **THEN** they are wrapped by sidebar + header + main content + footer structure suitable for later auth/upload pages
 
+#### Scenario: Shell routes require authentication
+- **WHEN** an unauthenticated request targets a page inside the `(app)` route group
+- **THEN** the request is redirected to `/sign-in` instead of rendering shell content
+
 ### Requirement: Containerized web build target
 The frontend SHALL include a Docker build/runtime definition suitable for later docker-compose integration.
 

@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { titleFromPathname } from "@/components/layout/sidebar-data";
 
 export function AppHeader() {
@@ -15,8 +16,9 @@ export function AppHeader() {
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-base font-medium">{title}</h1>
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         <ThemeToggle />
+        <SignOutButton />
       </div>
     </header>
   );
