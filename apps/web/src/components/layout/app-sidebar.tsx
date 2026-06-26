@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +22,8 @@ type AppSidebarProps = React.ComponentProps<typeof Sidebar> & {
 };
 
 export function AppSidebar({ nav, ...props }: AppSidebarProps) {
+  const pathname = usePathname();
+
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader className="relative z-10 border-b border-sidebar-border py-4 pl-6 pr-4 group-data-[collapsible=icon]:py-3 group-data-[collapsible=icon]:pl-3 group-data-[collapsible=icon]:pr-2">
@@ -55,6 +58,9 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
+                    isActive={pathname.replace(/\/+$/, "") === item.url.replace(/\/+$/, "")}
+                    tooltip={item.title}
+                    className="[&>svg]:size-5!"
                     render={
                       <Link href={item.url}>
                         {item.icon ? <item.icon /> : null}
@@ -69,7 +75,7 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="relative z-10 border-t border-sidebar-border px-5 py-4 text-xs text-sidebar-foreground">
+      <SidebarFooter className="relative z-10 border-t border-sidebar-border px-5 py-4 text-xs text-sidebar-brand-light">
         Idego Pulse
       </SidebarFooter>
       <SidebarRail />
