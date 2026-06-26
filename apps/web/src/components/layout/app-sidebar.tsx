@@ -26,7 +26,7 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader className="relative z-10 h-14 border-b border-sidebar-border pl-6 pr-4 group-data-[collapsible=icon]:pl-3 group-data-[collapsible=icon]:pr-2">
+      <SidebarHeader className="relative z-10 h-14 min-h-14 shrink-0 border-b border-sidebar-border pl-6 pr-4 group-data-[collapsible=icon]:pl-3 group-data-[collapsible=icon]:pr-2">
         <Link
           href="/analyze"
           className="flex min-w-0 items-center gap-3 rounded-lg outline-none ring-sidebar-ring focus-visible:ring-2 group-data-[collapsible=icon]:justify-center"
