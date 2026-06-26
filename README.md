@@ -24,7 +24,7 @@ Run the full stack (web + private api):
 docker compose up --build
 ```
 
-The web app is available at `http://localhost:3000` by default.
+The web app is available at `http://localhost:3001` by default (container port `3000` mapped to host `3001`).
 
 - `web` is the only host-exposed service.
 - `api` is reachable only on the internal compose network (`http://api:8000`).
@@ -38,7 +38,7 @@ docker compose --profile test run --rm test
 
 Optional environment variables (via shell or `.env`):
 
-- `WEB_PORT` — host port for the web app (default `3000`)
+- `WEB_PORT` — host port for the web app (default `3001`; container always listens on `3000`)
 - `BASE_URL` / `BETTER_AUTH_URL` — external URL used by web auth callbacks
 - `BETTER_AUTH_SECRET` — random 32+ char secret for Better Auth
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth credentials
