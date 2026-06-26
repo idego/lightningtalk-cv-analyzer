@@ -13,13 +13,13 @@ export function AppHeader() {
   const title = titleFromPathname(pathname);
 
   return (
-    <header className="sticky top-0 z-30 flex w-full min-w-0 items-center gap-2 border-b bg-background/85 px-4 py-3 backdrop-blur sm:gap-3 sm:px-6">
+    <header className="sticky top-0 z-30 flex h-14 w-full min-w-0 items-center gap-2 border-b bg-background/85 px-4 py-0 backdrop-blur sm:gap-3 sm:px-6">
       <SidebarTrigger className="size-8 shrink-0" />
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-base font-medium">{title}</h1>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <SignOutButton />
+        <ThemeToggle />
         <Button
           type="button"
           variant="ghost"
@@ -33,7 +33,7 @@ export function AppHeader() {
         >
           <ClipboardList className="size-4" />
         </Button>
-        <ThemeToggle />
+        <SignOutButton />
       </div>
     </header>
   );
