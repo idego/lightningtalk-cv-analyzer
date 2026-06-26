@@ -1,7 +1,7 @@
 services:
   api:
     build:
-      context: .
+      context: ./apps/api
       target: runtime
     ports:
       - "${CV_VALIDATOR_PORT:-8000}:8000"
@@ -15,7 +15,7 @@ services:
 
   test:
     build:
-      context: .
+      context: ./apps/api
       target: dev
     environment:
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml

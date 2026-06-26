@@ -11,6 +11,11 @@ Decision-support tool that checks whether a candidate's **stated location** on t
 - **Enrichment:** offline only (`phonenumbers`, static TLD→country table)
 - **Output:** JSON report with score (0–100), band (`green` / `amber` / `red` / `gray`), itemized findings, and plain-language summary
 
+## Monorepo Layout
+
+- `apps/api` — FastAPI backend service (current implementation)
+- `apps/web` — frontend placeholder (implemented in a later issue)
+
 ## Docker (recommended)
 
 Run the API:
@@ -35,14 +40,15 @@ Optional environment variables (via shell or `.env`):
 Example request:
 
 ```bash
-curl -F "file=@fixtures/calibration/consistent_berlin.txt;filename=cv.docx" http://localhost:8000/analyze
+curl -F "file=@apps/api/fixtures/calibration/consistent_berlin.txt;filename=cv.docx" http://localhost:8000/analyze
 ```
 
 Note: use a `.docx` or `.pdf` filename for uploads; plain text fixtures are useful for library/tests but the API validates by file extension.
 
-## Install (local)
+## Install (local backend)
 
 ```bash
+cd apps/api
 pip install -e ".[dev]"
 ```
 
@@ -59,6 +65,7 @@ print(report.band, report.score, report.summary)
 ## API
 
 ```bash
+cd apps/api
 uvicorn cv_validator.api.app:app --reload
 ```
 
@@ -68,7 +75,7 @@ uvicorn cv_validator.api.app:app --reload
 
 ## Calibration fixtures
 
-Synthetic fixtures live in `fixtures/calibration/`:
+Synthetic fixtures live in `apps/api/fixtures/calibration/`:
 
 - `consistent_berlin.txt` — aligned signals
 - `mismatch_us_phone.txt` — strong conflict (US phone vs claimed Germany)
@@ -77,12 +84,13 @@ Synthetic fixtures live in `fixtures/calibration/`:
 Run tests:
 
 ```bash
-pytest
+cd apps/api
+PYTHONPATH=src pytest
 ```
 
 ## Weights
 
-Signal weights and band thresholds are in `weights.yaml`. Strong signals (phone, address) are calibrated to dominate the full weak-signal pool.
+Signal weights and band thresholds are in `apps/api/weights.yaml`. Strong signals (phone, address) are calibrated to dominate the full weak-signal pool.
 
 ## Disclaimer
 
