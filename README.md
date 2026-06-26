@@ -14,17 +14,21 @@ Decision-support tool that checks whether a candidate's **stated location** on t
 ## Monorepo Layout
 
 - `apps/api` — FastAPI backend service (current implementation)
-- `apps/web` — frontend placeholder (implemented in a later issue)
+- `apps/web` — Next.js frontend (Google auth, upload panel, analysis results)
 
 ## Docker (recommended)
 
-Run the API:
+Run the full stack (web + private api):
 
 ```bash
 docker compose up --build
 ```
 
-The API is available at `http://localhost:8000`. SQLite data persists in the `cv_validator_data` volume.
+The web app is available at `http://localhost:3000` by default.
+
+- `web` is the only host-exposed service.
+- `api` is reachable only on the internal compose network (`http://api:8000`).
+- SQLite data persists in named volumes: `web_auth_data` (auth) and `cv_validator_data` (backend audit DB).
 
 Run the test suite in a container:
 
@@ -34,16 +38,28 @@ docker compose --profile test run --rm test
 
 Optional environment variables (via shell or `.env`):
 
-- `CV_VALIDATOR_PORT` — host port for the API (default `8000`)
+- `WEB_PORT` — host port for the web app (default `3000`)
+- `BASE_URL` / `BETTER_AUTH_URL` — external URL used by web auth callbacks
+- `BETTER_AUTH_SECRET` — random 32+ char secret for Better Auth
+- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth credentials
+- `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 
-Example request:
+Start from the root `.env.example`:
 
 ```bash
-curl -F "file=@apps/api/fixtures/calibration/consistent_berlin.txt;filename=cv.docx" http://localhost:8000/analyze
+cp .env.example .env
 ```
 
-Note: use a `.docx` or `.pdf` filename for uploads; plain text fixtures are useful for library/tests but the API validates by file extension.
+## Deployment note (subdomain + TLS)
+
+Deploy this stack behind your host reverse proxy (nginx/Caddy/Cloudflare Tunnel):
+
+- terminate TLS at the host proxy for your `<name>.idego.*` subdomain,
+- forward public traffic to `web` only,
+- keep `api` unexposed from the host network.
+
+This project is intended for container-hosted deployment, not Vercel.
 
 ## Install (local backend)
 

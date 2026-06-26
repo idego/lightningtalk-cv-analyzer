@@ -37,6 +37,11 @@ Backend build, test, and container wiring SHALL reference the new `apps/api` pat
 - **WHEN** `docker compose --profile test run --rm test` is executed
 - **THEN** the backend tests run and pass from the relocated layout
 
+#### Scenario: Web service runs from apps/web in compose
+- **WHEN** root compose is started
+- **THEN** `apps/web` builds and runs as the public entrypoint
+- **AND** backend traffic from browser flows through `web` proxy routes rather than direct host-to-api access
+
 ### Requirement: Documentation and tooling reference the new paths
 Project docs and tooling SHALL be updated so no instructions point at the old root paths.
 

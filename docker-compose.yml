@@ -1,16 +1,43 @@
 services:
+  web:
+    build:
+      context: ./apps/web
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    environment:
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
+      BETTER_AUTH_DB_PATH: /app/data/auth.db
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-idego.io}
+      INTERNAL_API_URL: http://api:8000
+    volumes:
+      - web_auth_data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
   api:
     build:
       context: ./apps/api
       target: runtime
-    ports:
-      - "${CV_VALIDATOR_PORT:-8000}:8000"
+    expose:
+      - "8000"
     environment:
       CV_VALIDATOR_DB_PATH: /app/data/cv_validator.db
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
     volumes:
       - cv_validator_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     restart: unless-stopped
 
   test:
@@ -25,3 +52,4 @@ services:
 
 volumes:
   cv_validator_data:
+  web_auth_data:
