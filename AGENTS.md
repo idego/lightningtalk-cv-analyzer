@@ -76,6 +76,18 @@ hard-coded magic numbers.
   - `CV_VALIDATOR_DB_PATH`
   - `CV_VALIDATOR_RETENTION_DAYS`
   - `CV_VALIDATOR_WEIGHTS_PATH`
+- **Conventional Commits** — always use [Conventional Commits](https://www.conventionalcommits.org/)
+  for git commit messages in this repo:
+  - Format: `<type>[optional scope]: <description>` (imperative mood, lowercase
+    subject, no trailing period; keep subject ≤ 72 chars).
+  - Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+    `build`, `ci`, `chore`, `revert`.
+  - Use `feat` for user-facing capability, `fix` for bug fixes, `chore` for
+    tooling/config/docs-only housekeeping, `refactor` when behavior is unchanged.
+  - Breaking changes: append `!` after type/scope or add a `BREAKING CHANGE:`
+    footer.
+  - Examples: `feat: add batch CV upload panel`, `fix: align sidebar header
+    borders`, `chore: archive cv-location-consistency openspec change`.
 
 Only create commits when explicitly asked.
 
