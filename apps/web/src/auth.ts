@@ -26,7 +26,7 @@ const socialProviders =
 
 export const auth = betterAuth({
   database: new Database(dbPath),
-  secret: process.env.BETTER_AUTH_SECRET ?? "dev-only-secret-change-me",
+  secret: process.env.BETTER_AUTH_SECRET ?? "local-dev-secret-change-this-0123456789",
   baseURL: process.env.BETTER_AUTH_URL ?? process.env.BASE_URL ?? "http://localhost:3000",
   socialProviders,
   databaseHooks: {

@@ -3,9 +3,19 @@
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import {
+  AuthPageShell,
+  Login07GoogleIcon,
+} from "@/components/auth/login-07-shared";
 
-export function GoogleSignInCard() {
+export function GoogleSignInCard({
+  showGoogle,
+  callbackURL,
+}: {
+  showGoogle: boolean;
+  callbackURL: string;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,9 +24,11 @@ export function GoogleSignInCard() {
     setError(null);
 
     try {
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
       await authClient.signIn.social({
         provider: "google",
-        callbackURL: "/analyze",
+        callbackURL: `${origin}${callbackURL.startsWith("/") ? callbackURL : `/${callbackURL}`}`,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
@@ -25,19 +37,33 @@ export function GoogleSignInCard() {
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle>Sign in</CardTitle>
-        <CardDescription>
-          Use your verified Idego Google account to access the admin panel.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Button className="w-full" onClick={signInWithGoogle} disabled={pending}>
+    <AuthPageShell
+      title="Welcome back"
+      description="Sign in to CV Analyzer with your Idego Google account."
+    >
+      <div className="space-y-5">
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-center gap-2"
+          onClick={() => void signInWithGoogle()}
+          disabled={pending || !showGoogle}
+        >
+          <Login07GoogleIcon className="h-4 w-4" />
           {pending ? "Signing in..." : "Sign in with Google"}
         </Button>
+        <div className="flex items-center gap-2">
+          <Separator className="flex-1" />
+          <span className="text-muted-foreground text-sm">Google SSO only</span>
+          <Separator className="flex-1" />
+        </div>
+        {!showGoogle ? (
+          <p className="text-sm text-destructive">
+            Google OAuth is not configured.
+          </p>
+        ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      </CardContent>
-    </Card>
+      </div>
+    </AuthPageShell>
   );
 }
