@@ -37,6 +37,10 @@ The `(app)` route group SHALL require an authenticated user and redirect unauthe
 - **WHEN** an authenticated user requests `/analyze`
 - **THEN** the page renders inside the app shell
 
+#### Scenario: Unauthenticated access to analysis proxy API
+- **WHEN** an unauthenticated request targets `POST /api/analyze`
+- **THEN** the route returns HTTP 401 and does not call backend analysis endpoints
+
 ### Requirement: SQLite-backed auth persistence
 Authentication data SHALL persist in SQLite storage suitable for local and containerized runtime.
 
