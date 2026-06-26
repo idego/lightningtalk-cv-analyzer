@@ -19,7 +19,8 @@ add tool-specific notes.
   prove where a person sits. Never auto-reject or auto-advance candidates.
 - **Stack:** Python 3.11+, FastAPI, pdfplumber, python-docx, phonenumbers,
   SQLite (audit/persistence), Docker Compose.
-- **Package:** `src/cv_validator/` — library-first, FastAPI wrapper.
+- **Monorepo layout:** `apps/api` (backend), `apps/web` (frontend placeholder).
+- **Package:** `apps/api/src/cv_validator/` — library-first, FastAPI wrapper.
 
 See `README.md` for usage. Specs and active work live under `openspec/`.
 
@@ -31,8 +32,8 @@ See `README.md` for usage. Specs and active work live under `openspec/`.
 | --- | --- |
 | Run API (Docker) | `docker compose up --build` |
 | Run tests (Docker) | `docker compose --profile test run --rm test` |
-| Run tests (local) | `PYTHONPATH=src pytest` |
-| Run API (local) | `uvicorn cv_validator.api.app:app --reload` |
+| Run tests (local) | `cd apps/api && PYTHONPATH=src pytest` |
+| Run API (local) | `cd apps/api && uvicorn cv_validator.api.app:app --reload` |
 | OpenSpec status | `openspec status --change "<name>"` |
 | OpenSpec validate | `openspec validate "<name>"` |
 
@@ -58,7 +59,7 @@ These are product/legal boundaries, not implementation preferences:
 6. **Deterministic scoring** — pure rules + config weights; no LLM in the
    verdict path.
 
-Weights and band thresholds: `weights.yaml`. Tune via config, not
+Weights and band thresholds: `apps/api/weights.yaml`. Tune via config, not
 hard-coded magic numbers.
 
 ---
@@ -67,10 +68,10 @@ hard-coded magic numbers.
 
 - **Minimize scope** — focused diffs; don't refactor unrelated code.
 - **Match existing style** — read surrounding modules before adding code.
-- **Library-first** — core logic in `src/cv_validator/`; API is a thin
-  wrapper in `src/cv_validator/api/`.
-- **Tests** — `tests/` mirrors capabilities; fixtures in
-  `fixtures/calibration/`.
+- **Library-first** — core logic in `apps/api/src/cv_validator/`; API is a thin
+  wrapper in `apps/api/src/cv_validator/api/`.
+- **Tests** — `apps/api/tests/` mirrors capabilities; fixtures in
+  `apps/api/fixtures/calibration/`.
 - **Env vars** for container/runtime config:
   - `CV_VALIDATOR_DB_PATH`
   - `CV_VALIDATOR_RETENTION_DAYS`
@@ -118,14 +119,14 @@ to archive when accepted).
 | Topic | Location |
 | --- | --- |
 | Usage & Docker | `README.md` |
-| Signal weights | `weights.yaml` |
-| Domain types | `src/cv_validator/domain.py` |
-| Ingestion (PDF/DOCX) | `src/cv_validator/ingestion/` |
-| Signal extractors | `src/cv_validator/extraction/` |
-| Scoring engine | `src/cv_validator/scoring/engine.py` |
-| FastAPI app | `src/cv_validator/api/app.py` |
+| Signal weights | `apps/api/weights.yaml` |
+| Domain types | `apps/api/src/cv_validator/domain.py` |
+| Ingestion (PDF/DOCX) | `apps/api/src/cv_validator/ingestion/` |
+| Signal extractors | `apps/api/src/cv_validator/extraction/` |
+| Scoring engine | `apps/api/src/cv_validator/scoring/engine.py` |
+| FastAPI app | `apps/api/src/cv_validator/api/app.py` |
 | Change proposal | `openspec/changes/cv-location-consistency/` |
-| Calibration fixtures | `fixtures/calibration/` |
+| Calibration fixtures | `apps/api/fixtures/calibration/` |
 | Cursor skills | `.cursor/skills/openspec-*/SKILL.md` |
 | Claude skills | `.claude/skills/openspec-*/SKILL.md` |
 
