@@ -4,11 +4,11 @@ services:
       context: ./apps/web
     ports:
       # Host port -> container port 3000 (Next.js always listens on 3000 inside)
-      - "${WEB_PORT:-3001}:3000"
+      - "${WEB_PORT:-3000}:3000"
     environment:
       PORT: "3000"
-      BASE_URL: ${BASE_URL:-http://localhost:3001}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3001}
+      BASE_URL: ${BASE_URL:-http://localhost:3000}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
       BETTER_AUTH_DB_PATH: /app/data/auth.db
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
