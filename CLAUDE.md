@@ -23,6 +23,9 @@ In addition to the rules in `AGENTS.md`:
 - **Playground project** — lives in `code/_playground/cv-validator/`. No
   production deployment or external stakeholders; keep changes focused
   and proportionate.
+- **Conventional Commits** — when creating git commits in this repo, always
+  follow Conventional Commits (see `AGENTS.md` §4). Never use free-form or
+  sentence-case commit subjects.
 
 For everything else (project overview, commands, domain constraints,
 OpenSpec layout, file map), see `AGENTS.md`.
