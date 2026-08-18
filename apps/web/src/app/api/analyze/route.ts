@@ -1,14 +1,12 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getWebUser } from "@/lib/web-user";
 
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
 
 export async function POST(req: Request) {
-  const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
+  const user = await getWebUser();
 
-  if (!session?.user?.id) {
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

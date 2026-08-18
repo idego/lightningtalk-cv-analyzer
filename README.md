@@ -18,6 +18,19 @@ Decision-support tool that checks whether a candidate's **stated location** on t
 
 ## Docker (recommended)
 
+For local development without external sign-in, run:
+
+```bash
+make dev
+```
+
+The local dev stack is available at `http://localhost:3001` and binds only to
+`127.0.0.1`. This command enables an authentication bypass that only works with
+a loopback `BASE_URL`; regular `docker compose up --build` continues to require
+configured Google OAuth.
+
+Stop the local stack with `make dev-down`.
+
 Run the full stack (web + private api):
 
 ```bash
