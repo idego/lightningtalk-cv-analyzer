@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CV Analyzer — pipeline AI w obecnej architekturze</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+        background: #f5f7fb;
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; line-height: 1.45; }
+      main { width: min(1160px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 64px; }
+      header { max-width: 850px; }
+      .eyebrow { margin: 0 0 9px; color: #2563eb; font-size: .75rem; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+      h1 { margin: 0; font-size: clamp(2rem, 4vw, 3.25rem); line-height: 1.05; letter-spacing: -.04em; }
+      .lead { margin: 15px 0 0; color: #667085; font-size: 1.04rem; }
+      .decision { margin: 28px 0; padding: 14px 17px; border: 1px solid #a7f3d0; border-radius: 14px; background: #ecfdf5; }
+      .decision strong { display: block; }
+      .decision span { color: #475569; font-size: .88rem; }
+      section { margin-top: 24px; padding: 20px; border: 1px solid #cbd5e1; border-radius: 18px; background: #fff; box-shadow: 0 10px 28px rgba(30, 41, 59, .05); }
+      h2 { margin: 0 0 16px; font-size: 1.05rem; }
+      .flow { display: grid; grid-template-columns: repeat(11, auto); align-items: stretch; gap: 8px; }
+      .node { display: flex; min-width: 125px; min-height: 128px; flex-direction: column; justify-content: center; padding: 14px; border: 1px solid #bfdbfe; border-radius: 13px; background: #eff6ff; }
+      .node.ai { border-color: #c4b5fd; background: #f5f3ff; }
+      .node.output { border-color: #a7f3d0; background: #ecfdf5; }
+      .node small { color: #667085; font-size: .68rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+      .node strong { margin-top: 6px; font-size: .93rem; line-height: 1.2; }
+      .node p { margin: 7px 0 0; color: #475569; font-size: .76rem; }
+      .arrow { display: grid; place-items: center; color: #2563eb; font-size: 1.25rem; font-weight: 800; }
+      .research { display: grid; grid-template-columns: 1fr auto 1.3fr auto 1fr; align-items: stretch; gap: 10px; }
+      .choices { display: grid; gap: 7px; }
+      .choice { padding: 9px 11px; border: 1px solid #d8b4fe; border-radius: 10px; background: #faf5ff; font-size: .8rem; font-weight: 700; }
+      .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; }
+      .fact { padding: 15px; border: 1px solid #cbd5e1; border-radius: 13px; background: #fff; }
+      .fact strong { display: block; font-size: .88rem; }
+      .fact p { margin: 6px 0 0; color: #667085; font-size: .8rem; }
+      .later { border-color: #fed7aa; background: #fff7ed; }
+      footer { margin-top: 24px; color: #667085; font-size: .76rem; }
+
+      @media (max-width: 980px) {
+        .flow, .research { grid-template-columns: 1fr; }
+        .arrow { min-height: 24px; transform: rotate(90deg); }
+      }
+
+      @media (max-width: 680px) {
+        main { width: min(100% - 22px, 560px); padding-top: 28px; }
+        .facts { grid-template-columns: 1fr; }
+        section { padding: 14px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Propozycja V1 · po decyzji CTO</p>
+        <h1>AI dokładamy do pipeline'u, który już jest</h1>
+        <p class="lead">
+          Bez nowej kolejki, workerów i migracji bazy. Funkcje Magdy powstają jako moduły
+          obecnego FastAPI, a każdy wynik wraca w odpowiedzi na request.
+        </p>
+      </header>
+
+      <div class="decision">
+        <strong>Granica architektoniczna V1</strong>
+        <span>Zostają dwa serwisy: Next.js i FastAPI. Zostaje SQLite. OpenAI nie jest osobnym serwisem aplikacji.</span>
+      </div>
+
+      <section>
+        <h2>1. Raport podstawowy — synchronicznie</h2>
+        <div class="flow">
+          <article class="node">
+            <small>Wejście</small>
+            <strong>CV lub mały batch</strong>
+            <p>Obecny upload Next.js.</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="node">
+            <small>FastAPI</small>
+            <strong>Istniejący endpoint</strong>
+            <p>Jeden request do zakończenia analizy.</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="node">
+            <small>Ingestion</small>
+            <strong>PDF / DOCX</strong>
+            <p>Tekst, strony i minimalny Markdown.</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="node ai">
+            <small>Analiza</small>
+            <strong>Reguły + OpenAI</strong>
+            <p>Osobny kontekst dla każdego CV.</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="node output">
+            <small>Wynik</small>
+            <strong>Report + SQLite</strong>
+            <p>JSON, HTML, dowody i checklista flag.</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. Dodatkowe sprawdzanie — osobny request po kliknięciu</h2>
+        <div class="research">
+          <div class="choices">
+            <div class="choice">Sprawdź firmy</div>
+            <div class="choice">Sprawdź edukację</div>
+            <div class="choice">Sprawdź LinkedIn</div>
+          </div>
+          <div class="arrow">→</div>
+          <article class="node ai">
+            <small>To samo FastAPI</small>
+            <strong>Research endpoint</strong>
+            <p>Cache SQLite → OpenAI Web Search → walidacja → zapis.</p>
+          </article>
+          <div class="arrow">→</div>
+          <article class="node output">
+            <small>Odpowiedź</small>
+            <strong>Zaktualizowany raport</strong>
+            <p>Loading trwa do końca requestu. Błąd można ponowić.</p>
+          </article>
+        </div>
+      </section>
+
+      <div class="facts">
+        <div class="fact">
+          <strong>Wszystkie karty Magdy zostają</strong>
+          <p>Dane kontaktowe, lokalizacja, firmy, uczelnie, LinkedIn i zbiorcza checklista flag.</p>
+        </div>
+        <div class="fact">
+          <strong>Świadomy limit V1</strong>
+          <p>Batch działa po kolei. Limit plików i timeout ustalimy na podstawie pomiarów.</p>
+        </div>
+        <div class="fact later">
+          <strong>Dopiero później, jeśli potrzebne</strong>
+          <p>Kolejka, workery, wznawianie i nowa baza wymagają osobnej zgody oraz danych z V1.</p>
+        </div>
+      </div>
+
+      <footer>Diagram opisuje aktywny plan V1, nie wcześniejszą propozycję z kolejką i workerami.</footer>
+    </main>
+  </body>
+</html>
