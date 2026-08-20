@@ -1,8 +1,8 @@
 ## Context
 
-The application already has a clear top-level architecture: Next.js authenticates the user and proxies uploads to FastAPI; FastAPI calls a library-first Python pipeline; the pipeline parses PDF or DOCX, applies deterministic rules, builds a report, and stores audit data in SQLite. Docker Compose runs `web` and `api`.
+The application already has a clear top-level architecture: Next.js authenticates the user and proxies uploads to FastAPI; FastAPI calls a library-first Python pipeline; the pipeline parses PDF or DOCX, builds a report, and stores audit data in SQLite. Docker Compose runs `web` and `api`.
 
-The V1 extends this flow instead of replacing it. AI document analysis runs inside the existing analysis request. Optional company, education, and LinkedIn checks run through separate synchronous requests to the same API. We accept the latency and sequential batch behavior for the first version, then measure them.
+The V1 keeps these service boundaries and external requests, but it may replace prototype internals. In particular, the current flattened document model, contact/body heuristic, weak location proxies, and first-match extractors are not architectural constraints. AI document analysis runs inside the existing analysis request. Optional company, education, and LinkedIn checks run through separate synchronous requests to the same API. We accept the latency and sequential batch behavior for the first version, then measure them.
 
 The rules in `AGENTS.md` still apply. The product supports human review. It does not verify identity or location and does not make hiring decisions. The score and four bands remain deterministic. The system redacts national-ID values. The approved OpenAI account can process candidate data. The private `data/` corpus stays gitignored and is never a runtime input.
 
@@ -12,6 +12,8 @@ The rules in `AGENTS.md` still apply. The product supports human review. It does
 
 - Add every business check from Magdalena's HR backlog.
 - Return a useful AI-assisted report from the existing API flow.
+- Give code and AI non-overlapping authority: code owns deterministic facts and verdict inputs; AI owns semantic document interpretation and reviewer findings.
+- Remove or replace prototype rules that create unsupported location inferences.
 - Keep each candidate in a fresh model context.
 - Let recruiters choose which public-web checks use time and money.
 - Keep evidence, configuration, audit data, and deterministic scoring clear and testable.
@@ -27,38 +29,65 @@ The rules in `AGENTS.md` still apply. The product supports human review. It does
 - Use browser automation, authenticated LinkedIn access, or private data scraping.
 - Verify identity or automate a hiring decision.
 - Add Tinder-style CV review.
+- Preserve every current extractor, internal type, or weak scoring signal.
+- Let an AI-derived value become an input to the deterministic score or band.
 
 ## Decisions
 
-### D1: Extend the current pipeline
+### D1: Keep the architecture and replace inaccurate internals
 
-Keep the current path:
+Keep the deployable architecture and synchronous request path. Use one staged analysis pipeline:
 
 ```text
-Next.js -> FastAPI -> ingestion -> rules + OpenAI -> report -> SQLite
+Next.js -> FastAPI -> page-aware ingestion -> deterministic facts/observations
+                                                   |-> deterministic score
+                                                   |-> OpenAI Document Analyzer
+                                               validated merged report -> SQLite
 ```
 
-The OpenAI call is another application service used by `pipeline.py`. It is not a new deployable service. Report and persistence types grow to hold structured facts, AI findings, research candidates, and completed research results.
+The OpenAI call is another application service used by `pipeline.py`. It is not a new deployable service. Internal ingestion, extraction, report, and persistence types may be replaced. The existing single and batch endpoints remain synchronous.
 
 ### D2: Keep `pdfplumber` and use simple Markdown
 
-Keep faithful text and page numbers in addition to the current normalized lines. The formatter adds page separators. It does not guess headings, tables, columns, or relationships.
+Keep faithful per-page source text, stable page IDs, line order, and enough source mapping to validate exact excerpts. The formatter adds page separators. It does not guess headings, tables, columns, contact regions, or relationships. Code may detect explicit contact candidates, but ingestion does not need to preserve the current heuristic contact/body split.
+
+For PDF, each extracted PDF page remains one source page with its real boundary. For DOCX, ingestion starts a new logical page only at an explicit page-break construct authored in the document. A DOCX without explicit page breaks is one logical page. The backend does not infer Word's rendered pagination, use stale rendered-page markers, convert DOCX to PDF, or add a rendering service.
+
+The page model is the canonical ingestion source. During Slice 1, `lines`, `contact_region`, and `body_region` remain temporary compatibility views derived from that model so the existing deterministic pipeline and tests continue to run without behavior changes. New code must consume pages or explicit source-mapped candidates rather than depend on those views. Slice 2 migrates the remaining legacy consumers and removes the compatibility views.
+
+Text sufficiency uses a conservative, configurable document-level policy. The accepted default is `minimum_meaningful_tokens: 5`, counted across the whole document after Unicode and whitespace normalization. A meaningful token has at least two characters after surrounding punctuation is removed and contains at least one Unicode letter. Page separators, whitespace, punctuation-only fragments, and isolated one-character extraction artifacts do not count. Zero meaningful tokens remains an empty or scan-only extraction error. One to four meaningful tokens produces the distinct insufficient-text error. Five or more passes ingestion, including sparse CVs whose evidence may still produce a deterministic gray result or AI unknown states.
 
 We rejected PDF Inspector as the default. In the corpus test, it made cleaner Markdown but damaged more text, links, and column relationships. Direct PDF input can remain a future eval, but it is not the baseline.
 
-### D3: Make one bounded OpenAI call per CV
+### D3: Separate deterministic authority from semantic interpretation
 
-Use the OpenAI Responses API and GPT-5.6 Luna. Start with medium reasoning and strict structured output. Send one CV and versioned instructions. Do not enable web tools. Return structured facts, findings, evidence, uncertainty, and research candidates.
+Before the model call, code extracts mechanically recognizable candidates and validates what it can without semantic guessing. Examples include phone-shaped strings, email and URL syntax, date tokens, national-ID presence/type, and unambiguous offline location matches. Each observation keeps page evidence and an extractor version.
+
+Only code-owned facts may enter score and band calculation. An ambiguous claimed location, phone, postal pattern, or locality remains unknown for scoring. AI may explain the ambiguity for a reviewer but cannot fill a missing verdict input.
+
+The Document Analyzer receives both the complete page-aware CV after required national-ID redaction and the versioned deterministic observations. It owns semantic tasks such as associating organizations, roles, dates, locations, education entries, relationship types, internal conflicts, document artifacts, and research candidates. The full redacted CV remains present so an incomplete candidate extractor cannot hide content from the model. Raw national-ID values never enter the model request, report, logs, audit, or persistence.
+
+After the model call, code validates the schema, page IDs, exact excerpts, protected boundaries, and consistency between returned values and evidence. Deterministic date arithmetic or other checks over AI-extracted semantic facts remain AI-assisted findings and stay outside the score.
+
+### D4: Make one bounded OpenAI call per CV
+
+Use the OpenAI Responses API and GPT-5.6 Luna. Start with medium reasoning and strict structured output. Send one complete page-aware CV after required national-ID redaction, its versioned deterministic observations, and versioned instructions. Do not enable web tools. Return structured semantic facts, findings, evidence, uncertainty, and research candidates.
 
 Each call starts without a previous response or another candidate's context. The current batch endpoint can call this flow sequentially. V1 documents and enforces a practical batch limit based on measured request duration.
 
-### D4: Keep AI outside the verdict
+### D5: Keep AI outside the verdict
 
-Only fixed rules can change the score and band. AI findings have separate `importance` and `confidence` values. The UI can highlight an important finding, but the finding cannot change weights or bands.
+Only code-owned facts and fixed rules can change the score and band. Neither AI findings nor AI-selected facts may become verdict inputs. AI findings have separate `importance` and `confidence` values. The UI can highlight an important finding, but the finding cannot change weights or bands.
 
 Requested weak signals remain visible. For example, the report can flag that no LinkedIn profile was found, a profile has no visible photo or sufficient public connection count, or a company has little detectable online presence. It must also show the evidence and search limits.
 
-### D5: Run optional research through normal API requests
+### D6: Remove weak location proxies from the verdict
+
+The deterministic core keeps phone-country parsing, explicit claimed-location resolution, offline locality lookup, unambiguous postal compatibility, national-ID redaction, and other facts that can be reproduced from source evidence. It does not score spelling locale, currency, date-format locale, email TLD, education location, or employer location as evidence of the candidate's location. Right-to-work statements may remain informational but never prove physical location or eligibility.
+
+Phone numbers without an international prefix do not receive a guessed default country for scoring. Ambiguous postal formats and locations remain unknown. Employer, client, project, office, education, and candidate locations remain separate concepts.
+
+### D7: Run optional research through normal API requests
 
 Document analysis and fixed rules create the base report. Research does not start by default. The recruiter can start company, education/certification, or LinkedIn research separately.
 
@@ -66,29 +95,29 @@ Each button calls a dedicated FastAPI endpoint. The request validates stored res
 
 There is no background job state in V1. If a request fails or the page closes, the user can retry it. Completed writes are idempotent per analysis, category, and research version.
 
-### D6: Use hosted Web Search in read-only mode
+### D8: Use hosted Web Search in read-only mode
 
 Research uses OpenAI Web Search and keeps its source data. It does not use browser automation or logged-in sessions. Treat all page content as untrusted data. A page cannot change the request's instructions, tools, or scope.
 
 LinkedIn discovery returns possible profiles. The recruiter must confirm a possible profile before a later comparison treats its differences from the CV as relevant.
 
-### D7: Keep the existing runtime and persistence
+### D9: Keep the existing runtime and persistence
 
 Docker Compose continues to run `web` and `api`. Only `web` publishes a host port. The API stores reports, research results, prompt versions, usage, and audit records in SQLite.
 
 Cache company, institution, program, and certification results in SQLite by normalized entity, research version, and freshness window. Keep source and retrieval data on cache hits. Keep LinkedIn results scoped to one candidate.
 
-### D8: Treat the HR backlog as required product scope
+### D10: Treat the HR backlog as required product scope
 
 The system must extract contact, education, and employment data; produce the requested phone and location signals; check companies, education, and LinkedIn; and return a complete per-candidate checklist in JSON and HTML.
 
 The report names each observed signal precisely. It does not turn a missing profile, foreign location, low public footprint, name, photo, or other proxy into proof of fraud, nationality, identity, or physical location.
 
-### D9: Build prompts and evals from private corpus lessons
+### D11: Build prompts and evals from private corpus lessons
 
 Use the private corpus during development to create an anonymous finding taxonomy, completeness checklist, prompt, schema, and eval set. Never copy raw CVs or HR comments into tracked files or runtime images.
 
-Start with four CVs. Measure expected-finding recall, unsupported findings, evidence accuracy, latency, tokens, and cost. Use the full permitted corpus only for broader regression testing.
+Start with four CVs. Measure expected-finding recall, unsupported findings, evidence accuracy, latency, tokens, and cost. Re-run the baseline after the Document Analyzer input changes from document-only text to page-aware text plus deterministic observations. Use the full permitted corpus only for broader regression testing.
 
 ## Risks / Trade-offs
 
@@ -97,6 +126,8 @@ Start with four CVs. Measure expected-finding recall, unsupported findings, evid
 - [The API process restarts] -> Accept loss of in-flight work in V1; completed reports remain in SQLite.
 - [AI misses findings] -> Use corpus-based evals, a completeness checklist, explicit unknowns, and versioned prompts.
 - [AI invents a finding] -> Require a CV excerpt or web source and validate every structured result.
+- [A prototype rule creates false certainty] -> Remove weak proxy signals, keep ambiguous values unknown, and cover each code-owned fact with anonymous deterministic fixtures.
+- [An AI-selected fact changes the verdict] -> Tag fact authority and reject AI-derived score inputs at the scoring boundary.
 - [Research matches the wrong person] -> Show uncertainty and require recruiter confirmation for LinkedIn comparison.
 - [Research costs grow] -> Make it optional, limit searches, remove duplicate requests, and cache reusable public entities in SQLite.
 - [A web page injects instructions] -> Give research read-only tools and treat page text only as data.
@@ -106,16 +137,18 @@ Start with four CVs. Measure expected-finding recall, unsupported findings, evid
 
 ## Migration Plan
 
-1. Keep the current endpoints and deterministic behavior as the default.
-2. Add page-aware ingestion and AI types behind a disabled feature flag.
-3. Build the prompt, schema, four-CV eval, and synchronous OpenAI call.
-4. Add structured facts and AI findings to the existing report and SQLite audit.
-5. Update the frontend to show the completed AI-assisted report.
-6. Add company, education, and LinkedIn research as separate synchronous actions.
-7. Add SQLite cache, request limits, retention checks, metrics, and an operations guide.
-8. Measure realistic batches and get stakeholder acceptance before enabling the feature.
+1. Keep the current service boundaries and synchronous endpoints.
+2. Replace the flattened input model with page-aware source text and exact evidence mapping.
+3. Replace prototype location heuristics with versioned deterministic facts, observations, and anonymous fixtures.
+4. Update the prompt, schema, and four-CV eval for page-aware text plus deterministic observations.
+5. Add the bounded synchronous OpenAI call and validate all AI output.
+6. Merge deterministic facts, AI findings, and audit metadata into one report model and SQLite audit.
+7. Update the frontend to show the completed AI-assisted report.
+8. Add company, education, and LinkedIn research as separate synchronous actions.
+9. Add SQLite cache, request limits, retention checks, metrics, and an operations guide.
+10. Measure realistic batches and get stakeholder acceptance before enabling the feature.
 
-Disabling AI and research must preserve the current deterministic flow. A queue, workers, or database migration require a separate change proposal and stakeholder approval.
+Disabling AI and research must preserve a tested deterministic-only report based on the new code-owned facts. It does not need to preserve removed prototype heuristics. A queue, workers, or database migration require a separate change proposal and stakeholder approval.
 
 ## Open Questions
 
