@@ -1,12 +1,12 @@
 ## 1. Slice 0 - Prompt and Eval Baseline
 
-- [ ] 1.1 Get project-owner approval for the rescoped proposal, design, and roadmap
-- [ ] 1.2 Map every Magdalena backlog card to a prompt rule, fixed signal, research check, UI result, or explicit test
-- [ ] 1.3 Derive an anonymous finding taxonomy, boundaries, and completeness checklist from the private `data/` corpus
-- [ ] 1.4 Select four CVs for the first eval and record expected findings, accepted unknowns, and unsupported-output checks outside Git
-- [ ] 1.5 Define versioned Document Analyzer instructions and a strict schema for facts, findings, evidence, uncertainty, and research candidates
-- [ ] 1.6 Add a local eval command that records recall, unsupported findings, evidence accuracy, latency, tokens, and estimated cost
-- [ ] 1.7 Test GPT-5.6 Luna with medium reasoning and record the accepted baseline
+- [x] 1.1 Get project-owner approval for the rescoped proposal, design, and roadmap
+- [x] 1.2 Map every Magdalena backlog card to a prompt rule, fixed signal, research check, UI result, or explicit test
+- [x] 1.3 Derive an anonymous finding taxonomy, boundaries, and completeness checklist from the private `data/` corpus
+- [x] 1.4 Select four CVs for the first eval and record expected findings, accepted unknowns, and unsupported-output checks outside Git
+- [x] 1.5 Define versioned Document Analyzer instructions and a strict schema for facts, findings, evidence, uncertainty, and research candidates
+- [x] 1.6 Add a local eval command that records recall, unsupported findings, evidence accuracy, latency, tokens, and estimated cost
+- [x] 1.7 Test GPT-5.6 Luna with medium reasoning and record the accepted baseline
 
 ## 2. Slice 1 - Page-Aware Input
 

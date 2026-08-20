@@ -9,5 +9,6 @@ build/
 .ruff_cache/
 .env
 .env.*
+.codex/config.toml
 data/
 *.db
