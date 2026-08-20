@@ -1,106 +1,117 @@
-# Proponowany pipeline AI
+# Pipeline AI w obecnej architekturze
 
-> Szkic do rozmowy z szefem. To jeszcze nie jest plan wdrożenia.
+> Kierunek po decyzji CTO: dodajemy funkcje Magdy bez nowych usług, kolejki i workerów.
 
 ## Cel
 
-Rekruter ma szybko dostać użyteczny raport z CV. Dodatkowe sprawdzanie w
-internecie uruchamia tylko wtedy, gdy go potrzebuje.
+Rekruter przesyła CV i po zakończeniu requestu dostaje raport wspierany przez AI. Dodatkowe sprawdzanie w internecie uruchamia osobno, gdy go potrzebuje.
 
-AI pomaga znaleźć informacje i niespójności, ale nie podejmuje decyzji o
-kandydacie i nie potwierdza jego tożsamości ani miejsca pobytu.
+AI pomaga znaleźć informacje i niespójności, ale nie podejmuje decyzji o kandydacie i nie potwierdza jego tożsamości ani miejsca pobytu.
 
 ## Jak ma to działać
 
 ```text
-CV lub batch CV
-  -> pdfplumber wyciąga tekst
-  -> OpenAI analizuje jedno CV
-  -> powstaje podstawowy raport
-  -> rekruter może uruchomić dodatkowe sprawdzanie
-  -> nowe wyniki pojawiają się później w tym samym raporcie
+Next.js
+  -> istniejące FastAPI
+  -> pdfplumber lub python-docx
+  -> reguły deterministyczne + OpenAI Document Analyzer
+  -> jeden wspólny Report
+  -> SQLite
+  -> odpowiedź JSON i widok HTML
 ```
 
-### Analiza CV
+Nie dodajemy nowego kontenera ani usługi. OpenAI Document Analyzer jest modułem wywoływanym przez obecny `pipeline.py`.
+
+## Analiza CV
 
 - Zostajemy przy `pdfplumber` i obecnej obsłudze DOCX.
 - Zachowujemy podział na strony i tekst bez zbędnych zmian.
-- OpenAI dostaje prosty Markdown z granicami stron, bez zgadywania nagłówków,
-  tabel i kolumn.
-- Jedno CV oznacza jedno niezależne wywołanie OpenAI, bez dostępu do internetu.
+- OpenAI dostaje prosty Markdown z granicami stron.
+- Jedno CV oznacza jedno niezależne wywołanie OpenAI bez dostępu do internetu.
+- Model zwraca ustrukturyzowane dane kontaktowe, edukację i historię zatrudnienia.
 - Model szuka faktów, niespójności, braków i rzeczy, które warto sprawdzić.
 - Każdy finding wskazuje stronę, fragment CV, wagę i poziom pewności.
-- Gdy danych brakuje, model zwraca `unknown` zamiast zgadywać.
+- Kod dodaje wymagane flagi numeru telefonu, miasta i zbiorczej lokalizacji poza UE.
+- Gdy danych brakuje, wynik pokazuje brak lub niepewność zamiast zgadywać.
 - Końcowy band nadal wylicza kod.
 
-Jeśli plik nie ma wystarczającej ilości tekstu, pokazujemy prosty komunikat i
-kończymy analizę.
+Jeśli plik nie ma wystarczającej ilości tekstu, pokazujemy prosty komunikat i kończymy analizę.
 
-Folder `data/` służy tylko do pracy nad promptem i testami. Nie trafia do repo
-ani do działającej aplikacji.
+Folder `data/` służy tylko do pracy nad promptem i testami. Nie trafia do repo ani do działającej aplikacji.
 
-### Raport podstawowy
+## Raport podstawowy
 
-Raport pojawia się po analizie CV. Wyniki dzielimy na:
+API zwraca raport dopiero po zakończeniu reguł i analizy AI. Wyniki dzielimy na:
 
-- Wymaga uwagi
-- Warto wiedzieć
-- Pozostałe sygnały, domyślnie zwinięte
+- Wymaga uwagi;
+- Warto wiedzieć;
+- Pozostałe sygnały, domyślnie zwinięte.
 
-Waga findingu i pewność modelu są osobnymi wartościami. Finding bez dowodu nie
-może być pokazany jako fakt.
+Raport zawiera pełną checklistę flag z kart Magdy. Ten sam model danych jest dostępny jako JSON i czytelny widok HTML. Finding bez dowodu nie może być pokazany jako pewny fakt.
 
-### Dodatkowe sprawdzanie
+## Dodatkowe sprawdzanie
 
-Rekruter może osobno uruchomić:
+Po zapisaniu raportu rekruter może osobno uruchomić:
 
 - sprawdzenie firm;
 - sprawdzenie wykształcenia i certyfikatów;
 - wyszukanie potencjalnego profilu LinkedIn.
 
-`ResearchJobScheduler` jest zwykłą warstwą kodu. Sprawdza wybór użytkownika,
-cache i dane z CV, po czym dodaje potrzebne joby do kolejki.
+Każdy przycisk wykonuje zwykły request do istniejącego FastAPI:
 
-Do researchu używamy tylko OpenAI Web Search. Każdy wynik ma źródło i poziom
-pewności. Brak znalezionej firmy, uczelni lub profilu nie jest problemem.
-Potencjalny profil LinkedIn musi potwierdzić rekruter. Research nie zmienia
-automatycznie bandu.
+```text
+przycisk w raporcie
+  -> endpoint researchu
+  -> sprawdzenie danych i cache w SQLite
+  -> OpenAI Web Search
+  -> walidacja odpowiedzi
+  -> zapis wyniku w SQLite
+  -> odpowiedź i aktualizacja raportu
+```
 
-### Kolejka i workery
+Frontend pokazuje loading do końca requestu. Jeśli request się nie uda, raport pozostaje dostępny, a użytkownik może spróbować ponownie.
 
-- Kolejka może przyjąć dowolną liczbę CV.
-- Docker uruchamia ustaloną liczbę workerów. Na początek planujemy trzy.
-- Analiza CV ma wyższy priorytet niż research.
-- Każdy job zaczyna z pustym kontekstem.
-- Jeden job może być wykonywany tylko przez jednego workera.
-- Jeśli worker padnie, job wraca do kolejki.
-- Ponowne wykonanie joba nie może dodać tych samych wyników drugi raz.
-- Frontend sam odświeża raport i pokazuje stan każdego joba.
+Pokazujemy wszystkie wymagane przez Magdę sygnały: ograniczoną obecność firmy online, nietypową lokalizację uczelni, brak znalezionego LinkedIna oraz widoczność zdjęcia i liczby kontaktów na możliwym profilu. Każdy wynik zawiera źródła, poziom pewności i ograniczenia wyszukiwania.
 
-Możemy ponownie wykorzystywać aktualne wyniki dotyczące tej samej firmy,
-uczelni lub certyfikatu. Dane LinkedIna pozostają przypisane do konkretnego
-kandydata.
+Potencjalny profil LinkedIn musi potwierdzić rekruter. Research nie zmienia automatycznie bandu.
+
+## Batch w V1
+
+Obecny endpoint batch analizuje CV po kolei w jednym requeście. Dodanie AI wydłuży czas proporcjonalnie do liczby plików.
+
+Dlatego przed włączeniem funkcji:
+
+- mierzymy czas jednego CV i kilku realistycznych batchy;
+- ustawiamy maksymalną liczbę plików i rozmiar requestu;
+- pokazujemy użytkownikowi, że analiza może potrwać;
+- nie obiecujemy batchy dowolnej wielkości.
+
+Jeśli pomiary pokażą, że wymagany wolumen nie mieści się w requestach HTTP, przygotujemy osobny plan kolejki i workerów do zatwierdzenia.
 
 ## Ustalone na teraz
 
 - Korzystamy tylko z OpenAI.
-- Podstawowa analiza używa AI, ale nie internetu.
-- Research jest opcjonalny i działa w tle.
-- Użytkownik wybiera, co chce sprawdzić.
-- Jobami zarządza kod, a nie kolejny agent AI.
-- Workery mają wspólną kolejkę i limit ustawiany w konfiguracji.
-- Każdy job ma osobny kontekst.
+- Zostajemy przy obecnych usługach `web` i `api`.
+- Zostajemy przy SQLite.
+- Podstawowa analiza działa synchronicznie i nie używa internetu.
+- Research jest opcjonalny, synchroniczny i uruchamiany przez użytkownika.
+- Każde wywołanie modelu ma osobny kontekst.
+- Wszystkie karty Magdy należą do wymaganego zakresu produktu.
 - Oryginalny plik CV usuwamy po analizie.
 - Na razie raport i dowody przechowujemy przez 90 dni.
 - Oficjalnie wspieramy CV po polsku i angielsku.
 
 ## Do ustalenia podczas wdrożenia
 
-- Jakiej kolejki i biblioteki do workerów użyjemy.
-- Czy i kiedy zmienimy SQLite na inną bazę.
-- Ile jobów może działać równocześnie.
-- Jak długo job może działać i ile razy go ponawiamy.
-- Jak długo trzymamy cache.
 - Ostateczny prompt, format odpowiedzi i ustawienia modelu.
+- Timeout analizy dokumentu i każdego researchu.
+- Maksymalna liczba CV w synchronicznym batchu.
 - Limity kosztów i liczby wyszukiwań.
+- Czas ważności cache w SQLite.
+- Próg kompletności profilu LinkedIn.
+- Definicja małej lub nietypowej miejscowości poza UE.
 - Monitoring i docelowy czas przechowywania danych.
+
+## Poza tym planem
+
+Kolejka, workery, lease'y, polling, automatyczne wznawianie i migracja bazy nie są częścią V1. Wrócimy do nich tylko z pomiarami pokazującymi konkretny problem.

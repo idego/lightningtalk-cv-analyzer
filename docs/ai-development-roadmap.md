@@ -1,129 +1,158 @@
 # Roadmapa rozwoju CV Analyzera
 
-> Status: propozycja do konsultacji z szefem. Implementacja zaczyna się dopiero po akceptacji kierunku.
+> Status: propozycja po decyzji CTO. Dodajemy funkcje do architektury istniejącej w repo. Kolejka, osobne workery i migracja bazy nie należą do V1.
 
 Pełne wymagania i zadania znajdują się w OpenSpec `add-ai-assisted-cv-analysis`.
+
+## Zakres biznesowy z kart Magdy
+
+Wszystkie poniższe elementy należą do zakresu produktu:
+
+- ekstrakcja danych kontaktowych: numeru telefonu oraz miasta lub adresu;
+- ekstrakcja uczelni, kierunku i lat nauki;
+- ekstrakcja firm, stanowisk i okresów zatrudnienia;
+- flaga numeru telefonu z kraju spoza UE;
+- sprawdzenie istnienia, kraju i nietypowości podanej miejscowości;
+- zbiorcza flaga lokalizacji poza UE;
+- wyszukiwanie możliwego profilu LinkedIn;
+- ocena widoczności zdjęcia i sensownej liczby kontaktów na profilu;
+- flaga braku znalezionego profilu LinkedIn;
+- sprawdzenie istnienia uczelni;
+- sprawdzenie miasta i kraju uczelni względem reszty CV;
+- sprawdzenie istnienia firm;
+- flaga firmy bez wykrywalnej obecności online;
+- zbiorcza checklista flag z uzasadnieniami;
+- czytelny wynik per kandydat w JSON i HTML.
+
+GitHub Issues rozbiją te wymagania na szczegóły techniczne. OpenSpec opisuje ich wspólne zasady i kolejność wdrożenia.
+
+## Ograniczenia V1
+
+- Zostajemy przy Next.js, FastAPI, Pythonie, SQLite i obecnym Docker Compose.
+- Analiza AI działa w tym samym requeście co obecna analiza CV.
+- Research działa w osobnym, synchronicznym requeście po kliknięciu użytkownika.
+- Obecny batch analizuje pliki po kolei i dostanie zmierzony limit wielkości.
+- Jeśli request zostanie przerwany, niezakończona praca nie jest wznawiana automatycznie.
+- Nie obiecujemy dowolnie dużych batchy ani pracy w tle.
 
 ## Kolejność prac
 
 ### Etap 0: prompt i test jakości
 
-**Cel:** sprawdzić, czy GPT-5.6 Luna potrafi znaleźć użyteczne informacje na małej próbce CV.
+**Cel:** sprawdzić, czy GPT-5.6 Luna znajduje użyteczne informacje na małej próbce CV.
 
 Zakres:
 
-- opracowanie wniosków z prywatnego folderu `data/`;
-- taksonomia findingsów i lista rzeczy, których AI nie może oceniać;
+- opracowanie anonimowych wniosków z prywatnego folderu `data/`;
+- mapowanie wszystkich kart Magdy na prompt, regułę, research, UI albo test;
 - prompt i format odpowiedzi;
 - cztery reprezentatywne CV;
 - pomiar jakości, czasu i kosztu.
 
 **Wynik:** powtarzalny test oraz zaakceptowany prompt. Bez zmian widocznych dla użytkownika.
 
-### Vertical slice 1: użyteczny raport z jednego CV
+### Vertical slice 1: synchroniczny raport AI z jednego CV
 
-**Cel:** przejść całą drogę od pliku do pierwszego raportu wspieranego przez AI.
+**Cel:** dodać AI do istniejącego pipeline'u bez zmiany usług i sposobu wdrożenia.
 
 Zakres:
 
-- tekst z podziałem na strony;
-- minimalny Markdown;
+- tekst z podziałem na strony i minimalny Markdown;
 - jeden Document Analyzer bez internetu;
-- evidence, importance i confidence;
+- ustrukturyzowane dane kontaktowe, edukacja i historia zatrudnienia;
+- flagi numeru telefonu, miasta i zbiorczej lokalizacji poza UE;
+- dowody, importance i confidence;
+- pełna checklista flag oraz wynik JSON/HTML;
 - trzy grupy findingsów w UI;
-- band nadal liczony przez kod.
+- band nadal liczony przez kod;
+- pomiar czasu jednego CV i obecnego batcha.
 
-**Wynik:** rekruter wrzuca jedno CV i dostaje użyteczny raport AI.
+**Wynik:** rekruter czeka na jeden request i dostaje kompletny raport AI. Ustalamy praktyczny limit batcha.
 
-### Vertical slice 2: kolejka, workery i batch
+### Vertical slice 2: synchroniczne sprawdzanie firm
 
-**Cel:** obsłużyć wiele CV bez gubienia jobów i bez mieszania kontekstu kandydatów.
-
-Zakres:
-
-- trwała kolejka;
-- worker skalowany przez Dockera;
-- początkowo trzy równoległe joby;
-- priorytet analizy CV nad researchem;
-- bezpieczne przejmowanie i ponawianie jobów;
-- osobne statusy plików;
-- automatyczne odświeżanie raportów.
-
-**Wynik:** batch może mieć dowolną liczbę CV, a gotowe raporty pojawiają się po kolei.
-
-### Vertical slice 3: sprawdzanie firm
-
-**Cel:** pozwolić rekruterowi sprawdzić firmy wskazane w CV.
+**Cel:** pozwolić rekruterowi sprawdzić firmy wskazane w zapisanym raporcie.
 
 Zakres:
 
-- osobny przycisk w raporcie;
+- osobny przycisk i endpoint w istniejącym API;
 - OpenAI Web Search;
 - daty, działalność, lokalizacja i relacja pracodawca-klient-projekt;
-- źródła i neutralny brak danych;
+- sprawdzenie strony, publicznych profili firmy i dostępnych rejestrów;
+- widoczna flaga ograniczonej obecności firmy online;
+- źródła, ograniczenia i retry po błędzie;
 - wynik bez wpływu na band.
 
-**Wynik:** raport może zostać uzupełniony o sprawdzenie firm.
+**Wynik:** po zakończeniu requestu raport pokazuje sprawdzenie firm.
 
-### Vertical slice 4: sprawdzanie edukacji i certyfikatów
+### Vertical slice 3: synchroniczne sprawdzanie edukacji i certyfikatów
 
 **Cel:** sprawdzić uczelnie, programy, stopnie i certyfikaty.
 
 Zakres:
 
-- osobny przycisk i job;
+- osobny przycisk i endpoint;
 - źródła, daty i informacje o programach;
-- zagraniczna edukacja i brak danych pozostają neutralne.
+- miasto i kraj uczelni oraz różnice względem reszty CV;
+- retry po błędzie;
+- wynik bez wpływu na band.
 
-**Wynik:** raport może zostać uzupełniony o sprawdzenie edukacji.
+**Wynik:** po zakończeniu requestu raport pokazuje sprawdzenie edukacji.
 
-### Vertical slice 5: LinkedIn
+### Vertical slice 4: synchroniczne sprawdzanie LinkedIna
 
 **Cel:** znaleźć możliwy profil i porównać go z CV bez przypisywania złej osoby.
 
 Zakres:
 
+- osobny przycisk i endpoint;
 - wyszukiwanie możliwych profili;
-- pokazanie powodów dopasowania;
+- powody dopasowania;
+- informacja o widoczności zdjęcia i liczby kontaktów;
+- widoczna flaga braku znalezionego profilu wraz z ograniczeniami wyszukiwania;
 - wybór profilu przez rekrutera;
 - dopiero potem porównanie firm, ról, dat, lokalizacji i edukacji.
 
-**Wynik:** rekruter może bezpiecznie potwierdzić profil i zobaczyć różnice względem CV.
+**Wynik:** po zakończeniu requestu rekruter widzi kandydatów na profil i może potwierdzić właściwy.
 
-### Vertical slice 6: cache i przygotowanie produkcyjne
+### Vertical slice 5: utwardzenie V1 w obecnej architekturze
 
-**Cel:** ograniczyć koszty i sprawdzić zachowanie systemu przy dużych batchach.
+**Cel:** ograniczyć koszty i ustalić realne granice obecnego rozwiązania.
 
 Zakres:
 
-- cache firm, uczelni i certyfikatów;
-- testy dużych batchy;
-- limity kosztów, wyszukiwań i czasu;
-- monitoring i obsługa błędów;
+- cache firm, uczelni i certyfikatów w SQLite;
+- testy realistycznych batchy;
+- limity liczby plików, czasu, kosztów i wyszukiwań;
+- monitoring requestów i obsługa błędów;
 - retencja i kontrola danych;
 - pełniejszy test na korpusie Magdy;
 - plan włączenia i wycofania funkcji.
 
-**Wynik:** system jest gotowy do kontrolowanego uruchomienia produkcyjnego.
+**Wynik:** znamy użyteczny zakres V1. Jeśli pomiary pokażą potrzebę pracy w tle, przygotowujemy osobną propozycję architektoniczną.
 
 ## Proponowane GitHub Issues
 
 Po akceptacji roadmapy można utworzyć następujące issues:
 
 1. `feat(ai): establish document analysis prompt and eval baseline`
-2. `feat(ai): deliver AI-assisted single CV report`
-3. `feat(jobs): add durable analysis queue and scalable workers`
-4. `feat(research): add optional company research`
-5. `feat(research): add education and certification research`
-6. `feat(research): add LinkedIn discovery and consistency review`
-7. `feat(ops): add research cache and production safeguards`
+2. `feat(ai): add synchronous AI-assisted CV report`
+3. `feat(research): add synchronous company research`
+4. `feat(research): add synchronous education research`
+5. `feat(research): add synchronous LinkedIn review`
+6. `feat(ops): measure and harden synchronous AI workflow`
 
 Każde issue odpowiada jednemu etapowi i może dostać osobny feature branch oraz osobną sesję implementacyjną.
 
-## Rzeczy odłożone na później
+## Poza V1
 
+- trwała kolejka i background jobs;
+- osobne workery i skalowanie przez Docker;
+- automatyczne wznawianie przerwanych analiz;
+- automatyczne pojawianie się wyników po zakończeniu requestu;
+- migracja z SQLite wymuszona skalą;
+- dowolnie duże batche;
 - OCR dla skanowanych CV;
 - obsługa Anthropic API;
 - automatyczne uruchamianie wszystkich researchy;
-- Tinderowe przeglądanie CV;
-- rozbudowane funkcje batch review poza podstawową kolejką i raportami.
+- Tinderowe przeglądanie CV.

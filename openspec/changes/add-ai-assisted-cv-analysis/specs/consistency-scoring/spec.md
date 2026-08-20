@@ -24,3 +24,22 @@ AI document and research findings MUST NOT change score weights or the four-band
 - **WHEN** AI marks a finding as high importance
 - **THEN** the system shows it for human review
 - **AND** calculates score and band only from fixed rule signals
+
+### Requirement: Requested location signals
+The report SHALL extract the phone country and stated city or address. It SHALL check whether the locality exists and identify its country when reference data allows it. It SHALL show flags for a phone country outside the EU, an atypical or small stated locality outside the EU, and a combined `location_outside_eu` signal based on phone and stated-location evidence.
+
+#### Scenario: Phone prefix points outside the EU
+- **WHEN** a parsed phone number maps to a non-EU country
+- **THEN** the report shows the requested phone-country flag and the parsed country evidence
+
+#### Scenario: Stated locality can be resolved
+- **WHEN** the system resolves the stated city or address to a country
+- **THEN** the report shows the resolved location and whether the requested non-EU or atypical-locality flag applies
+
+#### Scenario: Stated locality cannot be resolved
+- **WHEN** the system cannot confirm that the stated locality exists
+- **THEN** the report shows a location-validation flag with the attempted value and does not guess its country
+
+#### Scenario: Location signals are combined
+- **WHEN** phone and stated-location signals are available
+- **THEN** the report includes a combined location flag with both observations and a disclaimer that they do not prove physical location

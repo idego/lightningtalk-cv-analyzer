@@ -27,6 +27,17 @@ The AI analysis SHALL find relevant facts, conflicts, missing data, suspicious p
 - **WHEN** the source does not support a confident result
 - **THEN** the model returns an explicit unknown or uncertainty state
 
+### Requirement: Structured CV facts requested by HR
+The document analysis SHALL return structured contact, education, and employment data when present. Contact data SHALL include phone number and stated city or address. Education data SHALL include institution, field or program, and study dates. Employment data SHALL include company, role, and employment dates.
+
+#### Scenario: Requested facts are present
+- **WHEN** the CV contains contact, education, or employment information
+- **THEN** the result returns the requested fields with page and source excerpts
+
+#### Scenario: Requested fact is missing
+- **WHEN** one of the requested fields is absent or unclear
+- **THEN** the field is explicitly marked as unknown instead of being guessed
+
 ### Requirement: Evidence required for document findings
 The system MUST NOT present an AI finding as fact unless the finding cites a location in the submitted CV.
 
