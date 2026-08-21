@@ -18,6 +18,15 @@ class SignalWeightConfig:
 
 
 @dataclass(frozen=True)
+class IngestionConfig:
+    minimum_meaningful_tokens: int = 5
+
+    def __post_init__(self) -> None:
+        if self.minimum_meaningful_tokens < 1:
+            raise ValueError("minimum_meaningful_tokens must be a positive integer")
+
+
+@dataclass(frozen=True)
 class WeightsConfig:
     version: str
     signals: dict[str, SignalWeightConfig]
@@ -29,6 +38,21 @@ class WeightsConfig:
     base_score: int
     disclaimer: str
     source_path: str
+
+
+def load_ingestion_config() -> IngestionConfig:
+    raw_threshold = os.environ.get("CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS", "5")
+    try:
+        threshold = int(raw_threshold)
+    except ValueError as exc:
+        raise ValueError(
+            "CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS must be a positive integer"
+        ) from exc
+    if threshold < 1:
+        raise ValueError(
+            "CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS must be a positive integer"
+        )
+    return IngestionConfig(minimum_meaningful_tokens=threshold)
 
 
 def _default_weights_path() -> Path:

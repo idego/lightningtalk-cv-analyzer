@@ -32,6 +32,7 @@ services:
     environment:
       CV_VALIDATOR_DB_PATH: /app/data/cv_validator.db
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
+      CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS: ${CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS:-5}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
     volumes:
       - cv_validator_data:/app/data
@@ -48,6 +49,7 @@ services:
       context: ./apps/api
       target: dev
     environment:
+      CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS: ${CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS:-5}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
     command: ["pytest", "-q"]
     profiles:

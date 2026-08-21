@@ -74,7 +74,7 @@ def test_audit_entry_written(client):
 
 
 def test_national_id_not_retained_raw(client):
-    text = "Jane\nBerlin, Germany\n123-45-6789\n\nExperience\n"
+    text = "Jane\nBerlin, Germany\n123-45-6789\n\nExperience\nEngineer\n"
     content = _docx_bytes(text)
     client.post(
         "/analyze",

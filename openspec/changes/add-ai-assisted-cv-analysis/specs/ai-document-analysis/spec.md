@@ -5,7 +5,7 @@ Defines AI review of one CV. The review interprets document semantics and gives 
 ## ADDED Requirements
 
 ### Requirement: Bounded document analysis
-The system SHALL send each supported CV to one bounded AI analysis. The request SHALL contain the complete page-aware document text after required national-ID redaction, stable page IDs, versioned deterministic observations for that CV, and no web access. Raw national-ID values MUST NOT enter the request. The result SHALL match a defined schema.
+The system SHALL send each supported CV to one bounded AI analysis only after Slice 3 is explicitly enabled. The request SHALL accept the redacted document type and SHALL contain its complete page-aware text, stable page IDs, versioned deterministic observations for that CV, and no web access. It MUST NOT accept the raw document type. Raw national-ID values MUST NOT enter the request. The result SHALL match a defined schema.
 
 #### Scenario: Successful AI document analysis
 - **WHEN** a supported CV has enough extractable text
