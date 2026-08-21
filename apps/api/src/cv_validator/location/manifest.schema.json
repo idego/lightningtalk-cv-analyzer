@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cv-validator.local/schemas/geonames-manifest-v1.json",
+  "title": "CV Validator GeoNames index manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_schema_version",
+    "reference_data_version",
+    "snapshot_date",
+    "artifact",
+    "builder",
+    "sources",
+    "filters",
+    "counts",
+    "license"
+  ],
+  "properties": {
+    "manifest_schema_version": {"const": 1},
+    "reference_data_version": {
+      "type": "string",
+      "pattern": "^geonames-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]{12}$"
+    },
+    "snapshot_date": {"type": "string", "format": "date"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "size_bytes",
+        "sha256",
+        "sqlite_schema_version",
+        "sqlite_application_id",
+        "sqlite_user_version"
+      ],
+      "properties": {
+        "filename": {"type": "string", "minLength": 1},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "sqlite_schema_version": {"const": 1},
+        "sqlite_application_id": {"type": "integer"},
+        "sqlite_user_version": {"const": 1}
+      }
+    },
+    "builder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "python_version",
+        "sqlite_version",
+        "normalization_version",
+        "filter_policy_version"
+      ],
+      "properties": {
+        "name": {"const": "cv-validator-geonames-index"},
+        "version": {"type": "string", "minLength": 1},
+        "python_version": {"type": "string", "minLength": 1},
+        "sqlite_version": {"type": "string", "minLength": 1},
+        "normalization_version": {"const": "nfkc-casefold-whitespace-v1"},
+        "filter_policy_version": {"const": "geonames-v1"}
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locality_source",
+        "normalization",
+        "included_aliases",
+        "excluded_aliases",
+        "country_code_aliases",
+        "ignored_geoname_fields"
+      ],
+      "properties": {
+        "locality_source": {"const": "cities500"},
+        "normalization": {"type": "string", "minLength": 1},
+        "included_aliases": {"type": "array", "items": {"type": "string"}},
+        "excluded_aliases": {"type": "array", "items": {"type": "string"}},
+        "country_code_aliases": {"type": "array", "items": {"type": "string"}},
+        "ignored_geoname_fields": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "country_rows_total",
+        "city_rows_total",
+        "records_total",
+        "records_country",
+        "records_locality",
+        "names_total",
+        "names_canonical",
+        "names_alias",
+        "names_duplicate_normalized_record",
+        "normalized_keys_distinct",
+        "normalized_keys_ambiguous",
+        "normalized_keys_ambiguous_same_country",
+        "normalized_keys_ambiguous_cross_country",
+        "alternate_rows_total",
+        "alternate_retained",
+        "alternate_filtered_unknown_record",
+        "alternate_filtered_historic",
+        "alternate_filtered_colloquial",
+        "alternate_filtered_temporal",
+        "alternate_filtered_empty_name",
+        "alternate_filtered_unsupported_namespace",
+        "alternate_filtered_namespace_abbr",
+        "alternate_filtered_namespace_faac",
+        "alternate_filtered_namespace_iata",
+        "alternate_filtered_namespace_icao",
+        "alternate_filtered_namespace_link",
+        "alternate_filtered_namespace_post",
+        "alternate_filtered_namespace_wkdt"
+      ],
+      "properties": {
+        "country_rows_total": {"$ref": "#/$defs/count"},
+        "city_rows_total": {"$ref": "#/$defs/count"},
+        "records_total": {"$ref": "#/$defs/count"},
+        "records_country": {"$ref": "#/$defs/count"},
+        "records_locality": {"$ref": "#/$defs/count"},
+        "names_total": {"$ref": "#/$defs/count"},
+        "names_canonical": {"$ref": "#/$defs/count"},
+        "names_alias": {"$ref": "#/$defs/count"},
+        "names_duplicate_normalized_record": {"$ref": "#/$defs/count"},
+        "normalized_keys_distinct": {"$ref": "#/$defs/count"},
+        "normalized_keys_ambiguous": {"$ref": "#/$defs/count"},
+        "normalized_keys_ambiguous_same_country": {"$ref": "#/$defs/count"},
+        "normalized_keys_ambiguous_cross_country": {"$ref": "#/$defs/count"},
+        "alternate_rows_total": {"$ref": "#/$defs/count"},
+        "alternate_retained": {"$ref": "#/$defs/count"},
+        "alternate_filtered_unknown_record": {"$ref": "#/$defs/count"},
+        "alternate_filtered_historic": {"$ref": "#/$defs/count"},
+        "alternate_filtered_colloquial": {"$ref": "#/$defs/count"},
+        "alternate_filtered_temporal": {"$ref": "#/$defs/count"},
+        "alternate_filtered_empty_name": {"$ref": "#/$defs/count"},
+        "alternate_filtered_unsupported_namespace": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_abbr": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_faac": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_iata": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_icao": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_link": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_post": {"$ref": "#/$defs/count"},
+        "alternate_filtered_namespace_wkdt": {"$ref": "#/$defs/count"}
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset",
+        "license_name",
+        "license_url",
+        "source_url",
+        "attribution",
+        "modifications",
+        "warranty_notice"
+      ],
+      "properties": {
+        "dataset": {"const": "GeoNames"},
+        "license_name": {"const": "CC BY 4.0"},
+        "license_url": {"const": "https://creativecommons.org/licenses/by/4.0/"},
+        "source_url": {"const": "https://www.geonames.org/"},
+        "attribution": {"type": "string", "minLength": 1},
+        "modifications": {"type": "string", "minLength": 1},
+        "warranty_notice": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "filename",
+        "source_url",
+        "size_bytes",
+        "sha256",
+        "archive_member",
+        "member_sha256"
+      ],
+      "properties": {
+        "role": {"enum": ["cities500", "country_info", "alternate_names_v2"]},
+        "filename": {"type": "string", "minLength": 1},
+        "source_url": {"type": "string", "format": "uri"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "archive_member": {"type": ["string", "null"]},
+        "member_sha256": {
+          "anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+        }
+      }
+    }
+  }
+}

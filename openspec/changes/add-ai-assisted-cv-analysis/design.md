@@ -91,6 +91,10 @@ Phone-shaped values that libphonenumber considers only possible remain observati
 
 Only an explicitly described person location may become the code-owned claimed location used by scoring. An unlabeled place name in the document header remains an observation. Candidate, employer, client, project, office, and education locations are separate concepts and are never collapsed into one location relation. Ambiguous postal formats and locations remain unknown. Postal compatibility stays unweighted until anonymous fixtures, calibration, and project-owner approval support a scoring change.
 
+V1 uses a versioned EU-27 ISO-2 member-state set sourced from the official European Union country list. Phone-country and stated-location outside-EU observations remain separate. A combined observation requires both distinct code-owned categories and both must be non-EU; mixed EU/non-EU categories are reported separately. These observations do not establish nationality, identity, physical presence, work eligibility, or fraud. There is no approved anonymous calibration for locality size or atypicality, so V1 does not classify either. A resolved non-EU locality receives only a `small_locality_not_evaluated` informational checklist result.
+
+The weights-file version and scoring-policy version are separate immutable identities. A report records both, and persistence records their canonical composition, so an algorithm change cannot silently reuse the same weights-only audit identity.
+
 ### D7: Run optional research through normal API requests
 
 Document analysis and fixed rules create the base report. Research does not start by default. The recruiter can start company, education/certification, or LinkedIn research separately.
@@ -191,4 +195,3 @@ Disabling AI and research must preserve a tested deterministic-only report based
 - How long should SQLite research cache entries remain valid?
 - Which retention period should replace the 90-day development value?
 - What configured threshold should the LinkedIn profile-completeness signal use?
-- Which calibrated rule, using only the bounded GeoNames V1 index, should define a small or atypical non-EU locality?

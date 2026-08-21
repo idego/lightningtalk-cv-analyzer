@@ -63,7 +63,10 @@ export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
             <CardContent className="space-y-3">
               <div className="grid gap-2 text-sm sm:grid-cols-3">
                 <div>
-                  <span className="text-muted-foreground">Score:</span> {report.score}
+                  <span className="text-muted-foreground">Score:</span>{" "}
+                  {report.band === "gray"
+                    ? "Nie oceniono — za mało niezależnych danych"
+                    : report.score}
                 </div>
                 <div>
                   <span className="text-muted-foreground">Claimed:</span> {claimed}

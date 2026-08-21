@@ -13,7 +13,7 @@ from cv_validator.ingestion import (
     EmptyTextError,
     IngestionError,
     InsufficientTextError,
-    ParsedCV,
+    RawDocument,
     SourcePage,
 )
 from cv_validator.ingestion.docx import extract_docx
@@ -88,9 +88,8 @@ Engineer — Acme, Berlin
 def test_pdf_text_extraction():
     content = _make_text_pdf(SAMPLE)
     parsed = extract_pdf(content)
-    assert "Berlin, Germany" in parsed.text
-    assert parsed.contact_region
-    assert parsed.body_region
+    assert "Berlin, Germany" in parsed.pages[0].text
+    assert parsed.source_lines
 
 
 def test_pdf_preserves_two_real_pages_and_stable_ids():
@@ -111,7 +110,7 @@ def test_pdf_preserves_two_real_pages_and_stable_ids():
 
 def test_docx_extraction():
     parsed = extract_docx(_make_docx(SAMPLE))
-    assert "Berlin, Germany" in parsed.text
+    assert "Berlin, Germany" in parsed.pages[0].text
 
 
 def test_docx_without_explicit_page_break_is_one_page():
@@ -225,7 +224,7 @@ def test_docx_preserves_source_text_without_layout_reconstruction():
 
 
 def test_source_lines_have_page_local_numbers_and_exact_offsets():
-    parsed = ParsedCV(
+    parsed = RawDocument(
         pages=(
             SourcePage("page-0001", 1, "Alpha\nBravo Charlie"),
             SourcePage("page-0002", 2, "Delta\nEcho Foxtrot"),
@@ -244,7 +243,7 @@ def test_source_lines_have_page_local_numbers_and_exact_offsets():
 
 
 def test_page_separated_markdown_preserves_exact_source_text():
-    raw = ParsedCV(
+    raw = RawDocument(
         pages=(
             SourcePage("page-0001", 1, "Alpha\nBravo"),
             SourcePage("page-0002", 2, "Charlie\nDelta"),
@@ -260,7 +259,7 @@ def test_page_separated_markdown_preserves_exact_source_text():
 
 
 def test_zero_meaningful_tokens_is_empty_text():
-    parsed = ParsedCV(
+    parsed = RawDocument(
         pages=(SourcePage("page-0001", 1, "... — x 7"),),
         source_format="text",
     )
@@ -272,7 +271,7 @@ def test_zero_meaningful_tokens_is_empty_text():
 @pytest.mark.parametrize("token_count", range(1, 5))
 def test_one_to_four_meaningful_tokens_are_insufficient(token_count):
     text = " ".join(["alpha", "bravo", "charlie", "delta"][:token_count])
-    parsed = ParsedCV(
+    parsed = RawDocument(
         pages=(SourcePage("page-0001", 1, text),),
         source_format="text",
     )
@@ -282,7 +281,7 @@ def test_one_to_four_meaningful_tokens_are_insufficient(token_count):
 
 
 def test_five_meaningful_tokens_are_accepted():
-    parsed = ParsedCV(
+    parsed = RawDocument(
         pages=(SourcePage("page-0001", 1, "alpha bravo charlie delta echo"),),
         source_format="text",
     )
@@ -300,25 +299,6 @@ def test_existing_sparse_cv_is_accepted_and_remains_gray():
     assert report.band is Band.GRAY
 
 
-def test_compatibility_views_are_derived_from_canonical_pages():
-    parsed = ParsedCV(
-        pages=(
-            SourcePage("page-0001", 1, "Jane Doe\nBerlin, Germany"),
-            SourcePage("page-0002", 2, "Experience\nSoftware Engineer"),
-        ),
-        source_format="text",
-    )
-
-    assert parsed.lines == (
-        "Jane Doe",
-        "Berlin, Germany",
-        "Experience",
-        "Software Engineer",
-    )
-    assert parsed.contact_region == ("Jane Doe", "Berlin, Germany")
-    assert parsed.body_region == ("Experience", "Software Engineer")
-
-
 def test_reject_scanned_pdf():
     with pytest.raises(IngestionError, match="no extractable text"):
         extract_pdf(_make_scanned_pdf())
@@ -332,9 +312,3 @@ def test_reject_unsupported_format():
 def test_reject_empty_docx():
     with pytest.raises(IngestionError, match="no extractable text"):
         extract_docx(_make_docx(""))
-
-
-def test_contact_region_distinct_from_body():
-    parsed = extract_docx(_make_docx(SAMPLE))
-    assert any("Berlin" in line for line in parsed.contact_region)
-    assert any("Experience" in line or "Engineer" in line for line in parsed.body_region)

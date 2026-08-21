@@ -1,0 +1,5 @@
+2950159	Berlin	Berlin	Berlin	52.52437	13.41053	P	PPLC	DE		16				3426354	34	35	Europe/Berlin	2026-01-01
+2988507	Paris	Paris	Paris	48.85341	2.3488	P	PPLC	FR		11	75			2138551	42	42	Europe/Paris	2026-01-01
+4717560	Paris	Paris	Paris	33.66094	-95.55551	P	PPL	US		TX	277			24782	183	179	America/Chicago	2026-01-01
+4250542	Springfield	Springfield	Springfield	39.80172	-89.64371	P	PPLA	US		IL	167			114394	182	182	America/Chicago	2026-01-01
+4951788	Springfield	Springfield	Springfield	42.10148	-72.58981	P	PPLA2	US		MA	013			155929	21	20	America/New_York	2026-01-01

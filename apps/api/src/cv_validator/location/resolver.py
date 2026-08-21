@@ -254,42 +254,12 @@ class InMemoryLocationResolver:
                 key=_match_sort_key,
             )
         )
-        if len(matches) == 1:
-            match = matches[0]
-            resolution = ScopeResolution(
-                level=match.level,
-                canonical_name=match.canonical_name,
-                country_code=match.country_code,
-                region_code=match.region_code,
-                supporting_record_ids=(match.record_id,),
-            )
-            return Resolved(
-                input_value=value,
-                normalized_value=normalized_value,
-                matches=matches,
-                reference_data_version=self._reference_data_version,
-                resolution=resolution,
-                selected_record_id=match.record_id,
-            )
-
-        country_codes = {match.country_code for match in matches}
-        common_resolution = None
-        if "" not in country_codes and len(country_codes) == 1:
-            common_resolution = ScopeResolution(
-                level=ResolutionLevel.COUNTRY,
-                canonical_name=matches[0].country_name,
-                country_code=matches[0].country_code,
-                supporting_record_ids=tuple(
-                    sorted(match.record_id for match in matches)
-                ),
-            )
-        return Ambiguous(
+        return _resolution_from_matches(
             input_value=value,
             normalized_value=normalized_value,
             matches=matches,
             reference_data_version=self._reference_data_version,
-            ambiguous_at=level,
-            common_resolution=common_resolution,
+            level=level,
         )
 
     def _unresolved(
@@ -305,6 +275,59 @@ class InMemoryLocationResolver:
             reference_data_version=self._reference_data_version,
             attempted_at=level,
         )
+
+
+def _resolution_from_matches(
+    *,
+    input_value: str,
+    normalized_value: str,
+    matches: tuple[LocationMatch, ...],
+    reference_data_version: ComponentVersion,
+    level: ResolutionLevel,
+) -> LocationResolution:
+    if not matches:
+        return Unresolved(
+            input_value=input_value,
+            normalized_value=normalized_value,
+            matches=(),
+            reference_data_version=reference_data_version,
+            attempted_at=level,
+        )
+    if len(matches) == 1:
+        match = matches[0]
+        resolution = ScopeResolution(
+            level=match.level,
+            canonical_name=match.canonical_name,
+            country_code=match.country_code,
+            region_code=match.region_code,
+            supporting_record_ids=(match.record_id,),
+        )
+        return Resolved(
+            input_value=input_value,
+            normalized_value=normalized_value,
+            matches=matches,
+            reference_data_version=reference_data_version,
+            resolution=resolution,
+            selected_record_id=match.record_id,
+        )
+
+    country_codes = {match.country_code for match in matches}
+    common_resolution = None
+    if "" not in country_codes and len(country_codes) == 1:
+        common_resolution = ScopeResolution(
+            level=ResolutionLevel.COUNTRY,
+            canonical_name=matches[0].country_name,
+            country_code=matches[0].country_code,
+            supporting_record_ids=tuple(sorted(match.record_id for match in matches)),
+        )
+    return Ambiguous(
+        input_value=input_value,
+        normalized_value=normalized_value,
+        matches=matches,
+        reference_data_version=reference_data_version,
+        ambiguous_at=level,
+        common_resolution=common_resolution,
+    )
 
 
 def normalize_location(value: str) -> str:

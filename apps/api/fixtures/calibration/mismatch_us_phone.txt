@@ -1,6 +1,6 @@
 John Smith
-Berlin, Germany
-+1 (415) 555-0100
+Current location: Berlin, Germany
+Phone: +1 (415) 555-0100
 john@example.com
 94105
 
