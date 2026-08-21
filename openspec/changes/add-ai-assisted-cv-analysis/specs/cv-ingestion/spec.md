@@ -28,7 +28,7 @@ The system SHALL reject inputs it cannot reliably process and MUST NOT treat ext
 - **THEN** those fragments do not satisfy the text-sufficiency threshold
 
 ### Requirement: Preserve positional structure for downstream extraction
-The system SHALL use a page model as the canonical ingestion source and SHALL keep stable page IDs, per-page source text, line order, and enough source mapping to validate exact evidence excerpts. During Slice 1 only, it SHALL derive `lines`, `contact_region`, and `body_region` as compatibility views so the existing deterministic pipeline remains behaviorally unchanged. New code MUST NOT depend on those views, and Slice 2 SHALL remove them after migrating legacy consumers. Deterministic extraction and AI analysis SHALL use the canonical source data without inventing headings, tables, columns, regions, or relationships.
+The system SHALL use a page model as the canonical ingestion source and SHALL keep stable page IDs, per-page source text, line order, and enough source mapping to validate exact evidence excerpts. During Slice 1 only, it SHALL derive `lines`, `contact_region`, and `body_region` as compatibility views so the existing deterministic pipeline remains behaviorally unchanged. New code MUST NOT depend on those views. Slice 2B SHALL remove them after migrating legacy consumers. Deterministic extraction and AI analysis SHALL use the canonical source data without inventing headings, tables, columns, regions, or relationships.
 
 #### Scenario: Source order retained
 - **WHEN** the system extracts text from a CV
@@ -69,3 +69,25 @@ The system SHALL use a page model as the canonical ingestion source and SHALL ke
 #### Scenario: Minimal Markdown prepared
 - **WHEN** the system prepares text for AI analysis
 - **THEN** it adds stable page separators without guessing headings, tables, columns, regions, or relationships
+
+## ADDED Requirements
+
+### Requirement: Redact national IDs before downstream output
+The ingestion and deterministic boundaries SHALL distinguish a raw document from a redacted document. The system SHALL replace every detected national-ID span with a same-length mask before producing Markdown, an AI request, a report, a persistence input, or loggable data. The mask SHALL preserve page boundaries and source offsets. The system MUST NOT retain or emit the raw national-ID value, a hash of that value, or a partially revealed value.
+
+#### Scenario: National ID detected
+- **WHEN** deterministic redaction detects a national-ID span in a raw canonical page
+- **THEN** it creates a redacted document whose corresponding span has the same length and contains no source characters from the identifier
+- **AND** records only allowed presence, type, authority, evidence, and extractor-version metadata
+
+#### Scenario: Markdown prepared
+- **WHEN** the formatter receives a document after national-ID detection
+- **THEN** it accepts the redacted document type and cannot serialize the raw document type
+
+#### Scenario: Downstream output created
+- **WHEN** the system creates an AI input, report, persistence value, audit record, or log event
+- **THEN** no raw national-ID value is present
+
+#### Scenario: Persistent input fingerprint created
+- **WHEN** the system fingerprints an analyzed document for persistence
+- **THEN** it hashes the redacted canonical text rather than the raw file bytes or raw national-ID value

@@ -61,11 +61,13 @@ We rejected PDF Inspector as the default. In the corpus test, it made cleaner Ma
 
 ### D3: Separate deterministic authority from semantic interpretation
 
-Before the model call, code extracts mechanically recognizable candidates and validates what it can without semantic guessing. Examples include phone-shaped strings, email and URL syntax, date tokens, national-ID presence/type, and unambiguous offline location matches. Each observation keeps page evidence and an extractor version.
+Before the model call, code extracts mechanically recognizable candidates and validates what it can without semantic guessing. The deterministic core uses separate `Candidate`, `Fact`, `Observation`, and `ScoringSignal` types and returns them through one `DeterministicAnalysisResult`. Examples include phone-shaped strings, email and URL syntax, date tokens, national-ID presence/type, and unambiguous offline location matches.
+
+Every deterministic result records its authority, exact page evidence, and extractor version. A result that depends on reference data also records the applicable reference-data version. `Candidate` records recognizable source content without asserting that it is true or scoreable. `Fact` records only a mechanically validated, code-owned value. `Observation` records unresolved, ambiguous, invalid, possible, or informational outcomes. `ScoringSignal` is created from validated facts by a fixed scoring rule; candidate extractors do not assign weights.
 
 Only code-owned facts may enter score and band calculation. An ambiguous claimed location, phone, postal pattern, or locality remains unknown for scoring. AI may explain the ambiguity for a reviewer but cannot fill a missing verdict input.
 
-The Document Analyzer receives both the complete page-aware CV after required national-ID redaction and the versioned deterministic observations. It owns semantic tasks such as associating organizations, roles, dates, locations, education entries, relationship types, internal conflicts, document artifacts, and research candidates. The full redacted CV remains present so an incomplete candidate extractor cannot hide content from the model. Raw national-ID values never enter the model request, report, logs, audit, or persistence.
+The Document Analyzer receives both the complete page-aware CV after required national-ID redaction and the versioned deterministic observations. It owns semantic tasks such as associating organizations, roles, dates, locations, education entries, relationship types, internal conflicts, document artifacts, and research candidates. The full redacted CV remains present so an incomplete candidate extractor cannot hide content from the model. Raw national-ID values never enter the model request, report, logs, audit, or persistence. The ingestion boundary distinguishes a raw document from a redacted document. National-ID spans are replaced with same-length masks before Markdown or any downstream output, which preserves page offsets without retaining the source value. Persistence receives a hash of redacted canonical text rather than raw file bytes.
 
 After the model call, code validates the schema, page IDs, exact excerpts, protected boundaries, and consistency between returned values and evidence. Deterministic date arithmetic or other checks over AI-extracted semantic facts remain AI-assisted findings and stay outside the score.
 
@@ -83,9 +85,11 @@ Requested weak signals remain visible. For example, the report can flag that no 
 
 ### D6: Remove weak location proxies from the verdict
 
-The deterministic core keeps phone-country parsing, explicit claimed-location resolution, offline locality lookup, unambiguous postal compatibility, national-ID redaction, and other facts that can be reproduced from source evidence. It does not score spelling locale, currency, date-format locale, email TLD, education location, or employer location as evidence of the candidate's location. Right-to-work statements may remain informational but never prove physical location or eligibility.
+The deterministic core keeps valid international phone-country parsing, explicitly person-owned claimed-location resolution, offline locality lookup, national-ID redaction, and other facts that can be reproduced from source evidence. It does not score spelling locale, currency, date-format locale, email TLD, education location, employer location, or postal compatibility as evidence of the candidate's location. Right-to-work statements may remain informational but never prove physical location or eligibility.
 
-Phone numbers without an international prefix do not receive a guessed default country for scoring. Ambiguous postal formats and locations remain unknown. Employer, client, project, office, education, and candidate locations remain separate concepts.
+Phone-shaped values that libphonenumber considers only possible remain observations. Only a valid international number that maps to one region can create a phone-country fact. The system preserves all detected phone candidates and facts. It creates one phone scoring signal only when all deterministically person-owned, country-resolved phone facts agree. Conflicting resolved countries create an ambiguous observation and no phone scoring signal. Numbers without an international prefix do not receive a guessed default country.
+
+Only an explicitly described person location may become the code-owned claimed location used by scoring. An unlabeled place name in the document header remains an observation. Candidate, employer, client, project, office, and education locations are separate concepts and are never collapsed into one location relation. Ambiguous postal formats and locations remain unknown. Postal compatibility stays unweighted until anonymous fixtures, calibration, and project-owner approval support a scoring change.
 
 ### D7: Run optional research through normal API requests
 
@@ -107,6 +111,8 @@ Docker Compose continues to run `web` and `api`. Only `web` publishes a host por
 
 Cache company, institution, program, and certification results in SQLite by normalized entity, research version, and freshness window. Keep source and retrieval data on cache hits. Keep LinkedIn results scoped to one candidate.
 
+The deterministic persistence boundary receives the completed report and the hash of redacted canonical text. It does not receive raw file bytes for fingerprinting. Existing JSON fields remain compatible, and the API adds one nested `deterministic` object containing facts, observations, authority, evidence, extractor versions, and applicable reference-data versions.
+
 ### D10: Treat the HR backlog as required product scope
 
 The system must extract contact, education, and employment data; produce the requested phone and location signals; check companies, education, and LinkedIn; and return a complete per-candidate checklist in JSON and HTML.
@@ -118,6 +124,31 @@ The report names each observed signal precisely. It does not turn a missing prof
 Use the private corpus during development to create an anonymous finding taxonomy, completeness checklist, prompt, schema, and eval set. Never copy raw CVs or HR comments into tracked files or runtime images.
 
 Start with four CVs. Measure expected-finding recall, unsupported findings, evidence accuracy, latency, tokens, and cost. Re-run the baseline after the Document Analyzer input changes from document-only text to page-aware text plus deterministic observations. Use the full permitted corpus only for broader regression testing.
+
+### D12: Use a replaceable offline location resolver
+
+Deterministic location resolution uses a `LocationResolver` interface. The V1 implementation reads a project-built offline index derived from the official GeoNames `cities500`, `countryInfo`, and `alternateNamesV2` downloads. The build keeps only alternate-name records whose GeoNames identifiers are present in the selected city and country index.
+
+`cities500` is a bounded worldwide city dataset, not a complete register of every locality. Absence from the index always produces `unresolved`; it never produces `nonexistent`, `invalid`, or an equivalent verification claim. One matching country interpretation may produce a resolved fact. Multiple matching country interpretations produce an ambiguous observation and no scoring country.
+
+Each built index has a manifest containing at least:
+
+- source file names and URLs;
+- snapshot date;
+- SHA-256 values for every input file and the built index;
+- index schema version;
+- filtering rules;
+- record counts.
+
+Reference data is refreshed quarterly through a manually started, reviewed, and approved build. The application loads the approved versioned artifact locally and never downloads or updates GeoNames data during CV analysis.
+
+### D13: Deliver Slice 2 as two vertical stages
+
+Slice 2A adds the deterministic types, raw/redacted document boundary, national-ID masking, phone handling, `LocationResolver`, the versioned GeoNames index and manifest, claimed-location rules, and the additive nested deterministic report. It connects these results through the existing synchronous report path and has its own deterministic, privacy, API-compatibility, and reference-data tests.
+
+Slice 2B removes weak scored signals, keeps postal compatibility unweighted, restricts scoring to validated code-owned facts through `ScoringSignal`, replaces prototype fixtures, migrates the remaining canonical-page consumers, and removes the Slice 1 `lines`, `contact_region`, and `body_region` adapter. It has its own scoring, report, persistence, API, and regression tests.
+
+Neither stage changes signal weights, minimum evidence requirements, or band thresholds without separate anonymous calibration and explicit project-owner approval. Slice 3, OpenAI integration, prompt changes, and model calls remain outside both Slice 2 stages.
 
 ## Risks / Trade-offs
 
@@ -139,14 +170,16 @@ Start with four CVs. Measure expected-finding recall, unsupported findings, evid
 
 1. Keep the current service boundaries and synchronous endpoints.
 2. Replace the flattened input model with page-aware source text and exact evidence mapping.
-3. Replace prototype location heuristics with versioned deterministic facts, observations, and anonymous fixtures.
-4. Update the prompt, schema, and four-CV eval for page-aware text plus deterministic observations.
-5. Add the bounded synchronous OpenAI call and validate all AI output.
-6. Merge deterministic facts, AI findings, and audit metadata into one report model and SQLite audit.
-7. Update the frontend to show the completed AI-assisted report.
-8. Add company, education, and LinkedIn research as separate synchronous actions.
-9. Add SQLite cache, request limits, retention checks, metrics, and an operations guide.
-10. Measure realistic batches and get stakeholder acceptance before enabling the feature.
+3. Complete Slice 2A: add the typed deterministic result, redaction boundary, phone and location resolution, approved GeoNames index, and additive `deterministic` report object without changing existing JSON fields.
+4. Complete Slice 2B: remove weak verdict proxies, keep postal compatibility unweighted, enforce the scoring boundary, replace fixtures, migrate legacy consumers, and remove the Slice 1 compatibility adapter.
+5. Do not change weights or thresholds during Slice 2 without separate calibration and project-owner approval.
+6. Update the prompt, schema, and four-CV eval for page-aware redacted text plus versioned deterministic observations only after Slice 2 is complete and Slice 3 is explicitly started.
+7. Add the bounded synchronous OpenAI call and validate all AI output.
+8. Merge deterministic facts, AI findings, and audit metadata into one report model and SQLite audit.
+9. Update the frontend to show the completed AI-assisted report.
+10. Add company, education, and LinkedIn research as separate synchronous actions.
+11. Add SQLite cache, request limits, retention checks, metrics, and an operations guide.
+12. Measure realistic batches and get stakeholder acceptance before enabling the feature.
 
 Disabling AI and research must preserve a tested deterministic-only report based on the new code-owned facts. It does not need to preserve removed prototype heuristics. A queue, workers, or database migration require a separate change proposal and stakeholder approval.
 
@@ -158,4 +191,4 @@ Disabling AI and research must preserve a tested deterministic-only report based
 - How long should SQLite research cache entries remain valid?
 - Which retention period should replace the 90-day development value?
 - What configured threshold should the LinkedIn profile-completeness signal use?
-- Which reference data and rule should define a small or atypical non-EU locality?
+- Which calibrated rule, using only the bounded GeoNames V1 index, should define a small or atypical non-EU locality?

@@ -18,19 +18,31 @@
 - [x] 2.6 Test PDF and DOCX boundaries, source fidelity, evidence mapping, zero-token extraction, the one-to-four-token insufficient boundary, the five-token acceptance boundary, the existing sparse CV, and compatibility-view derivation
 - [x] 2.7 Require the existing deterministic unit, API, and report behavior tests to pass unchanged as the Slice 1 completion gate
 
-## 3. Slice 2 - Deterministic Facts and Prototype Cleanup
+## 3A. Slice 2A - Deterministic Facts Foundation
 
-- [ ] 3.1 Define code-owned fact, candidate, evidence, authority, extractor-version, and reference-data-version types
-- [ ] 3.2 Extract phone, email, URL, date, national-ID, and explicit location candidates with exact page evidence and without semantic guessing
-- [ ] 3.3 Replace the default-DE phone behavior with explicit international parsing and an unknown result when country assignment needs an assumption
-- [ ] 3.4 Replace the prototype gazetteer with versioned offline locality resolution that preserves unresolved and ambiguous outcomes
-- [ ] 3.5 Identify the code-owned claimed location without using AI and keep it undetermined when person, employer, office, client, project, or education locations cannot be distinguished deterministically
-- [ ] 3.6 Remove spelling locale, currency, date-format locale, email TLD, employer location, and education location as evidence of the candidate's physical location
-- [ ] 3.7 Keep right-to-work informational, redact national-ID values before AI formatting or any durable output, and separate organization locations from candidate location
-- [ ] 3.8 Restrict scoring inputs to validated code-owned facts and preserve deterministic gray handling when evidence is insufficient
-- [ ] 3.9 Replace prototype extractor and scoring fixtures with anonymous cases for ambiguity, international phones, shared postal formats, locality coverage, weak proxies, and deterministic reproducibility
-- [ ] 3.10 Return a tested limited deterministic-only report without depending on removed prototype heuristics
-- [ ] 3.11 Migrate the remaining legacy consumers to the canonical page/fact model and remove the Slice 1 `lines`, `contact_region`, and `body_region` compatibility views
+- [ ] 3A.1 Define separate `Candidate`, `Fact`, `Observation`, and `ScoringSignal` types behind one `DeterministicAnalysisResult`, with authority, evidence, extractor version, and any applicable reference-data version on every result
+- [ ] 3A.2 Introduce separate raw-document and redacted-document types; mask national-ID values with same-length replacements before Markdown, AI, persistence, logs, or reports, and derive persistence identity from the redacted canonical-text hash
+- [ ] 3A.3 Extract phone, email, URL, date, national-ID, postal, and explicit-location candidates with exact page evidence and without semantic guessing
+- [ ] 3A.4 Implement phone classification and aggregation: keep every phone, retain `possible` as an observation, create a fact only for a `valid` number resolving to one region without a default-region assumption, create one scoring signal only when all resolved countries agree, and otherwise emit an ambiguous non-scoring observation
+- [ ] 3A.5 Introduce the replaceable `LocationResolver` interface with explicit resolved, unresolved, and ambiguous outcomes
+- [ ] 3A.6 Build the V1 offline location index from GeoNames `cities500`, `countryInfo`, and `alternateNamesV2` records filtered to identifiers present in the index; treat an absent entry as `unresolved`, never as nonexistent or invalid
+- [ ] 3A.7 Emit and validate a reference-data manifest containing source names and URLs, snapshot date, SHA-256 values for every input and the built index, index schema version, filtering rules, and record counts; document a quarterly, manually started, reviewed, and approved refresh with no analysis-time download
+- [ ] 3A.8 Resolve a scoring claim only from an explicit person-location description; retain an unlabeled header place as an observation and keep person, employer, client, project, office, and education locations as separate concepts
+- [ ] 3A.9 Preserve all existing JSON fields and add one nested `deterministic` field carrying candidates, facts, observations, scoring signals, authority, evidence, and versions through the report and persistence boundaries
+- [ ] 3A.10 Add anonymous unit, API, privacy, and reference-data tests covering result types, exact evidence, phone validity and conflicts, location ownership and ambiguity, aliases, bounded-index misses, masking, manifest integrity, offline analysis, persistence hashing, and additive JSON compatibility
+- [ ] 3A.11 Complete Slice 2A only when its new tests and all existing ingestion, deterministic, API, and report tests pass, strict OpenSpec validation and diff checks pass, no scoring weight or threshold changed, and no OpenAI or Slice 3 code or configuration was added
+
+## 3B. Slice 2B - Scoring Cleanup and Legacy Removal
+
+- [ ] 3B.1 Remove spelling locale, currency, date-format locale, email TLD, employer location, education location, client location, project location, and office location as evidence of the candidate's physical location
+- [ ] 3B.2 Keep right-to-work informational and postal compatibility as a zero-weight observation until separate anonymous calibration and project-owner approval authorize a scoring change
+- [ ] 3B.3 Restrict score and band calculation to `ScoringSignal` values derived by fixed rules from validated code-owned facts, preserving deterministic gray handling for insufficient evidence and excluding AI from the verdict path
+- [ ] 3B.4 Preserve the configured weights, minimum-evidence rule, and band thresholds; require separate anonymous calibration and explicit project-owner approval before changing any of them
+- [ ] 3B.5 Replace prototype extractor and scoring fixtures with anonymous cases for ambiguity, multiple international phones, shared postal formats, GeoNames coverage and aliases, unresolved locations, weak proxies, and deterministic reproducibility
+- [ ] 3B.6 Return and persist a tested deterministic-only report without removed prototype heuristics, using the redacted canonical-text hash as its document identity
+- [ ] 3B.7 Migrate every remaining consumer to the canonical page-aware fact model, then remove the Slice 1 `lines`, `contact_region`, and `body_region` adapter and the legacy region-splitting path
+- [ ] 3B.8 Add scoring, report, persistence, API, and regression tests proving that weak or ambiguous observations cannot affect score or band, AI cannot enter scoring, and supported legacy API fields remain compatible
+- [ ] 3B.9 Complete Slice 2B only when its new tests and the full existing suite pass, strict OpenSpec validation and diff checks pass, legacy-adapter references are absent, weights and thresholds remain unchanged, and Slice 3 remains unstarted
 
 ## 4. Slice 3 - Synchronous AI Base Report
 
