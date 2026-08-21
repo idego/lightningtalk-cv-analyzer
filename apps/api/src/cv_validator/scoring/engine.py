@@ -1,77 +1,310 @@
 from __future__ import annotations
 
+from collections import Counter
+from dataclasses import dataclass
+
 from cv_validator.config import WeightsConfig
 from cv_validator.domain import (
     AgreementDirection,
+    Authority,
     Band,
     ClaimedLocation,
+    DeterministicAnalysisResult,
+    FactKind,
     Finding,
+    LocationRelation,
+    Observation,
+    ObservationKind,
     Report,
     RulesetVersion,
-    Signal,
+    ScoringSignal,
+    ScoringSignalKind,
+    SignalStrength,
+    Subject,
 )
+from cv_validator.phone_policy import PHONE_RULE_ID, phone_signal_graph_is_valid
+from cv_validator.location_policy import claimed_location_graph_is_valid
 
 
-def score_signals(
-    claim: ClaimedLocation,
-    signals: list[Signal],
+SCORING_POLICY_VERSION = "deterministic-phone-comparison-v1"
+
+
+@dataclass(frozen=True)
+class _WeightedComparison:
+    direction: AgreementDirection
+    weight: float
+    strength: SignalStrength
+
+
+def score_deterministic(
+    deterministic: DeterministicAnalysisResult,
     weights: WeightsConfig,
 ) -> Report:
-    scorable = [s for s in signals if s.direction not in {AgreementDirection.INFORMATIONAL, AgreementDirection.AMBIGUOUS}]
-    informational = [s for s in signals if s.direction in {AgreementDirection.INFORMATIONAL, AgreementDirection.AMBIGUOUS}]
+    claim = _project_claim(deterministic)
+    weighted_findings: list[Finding] = []
+    comparisons: list[_WeightedComparison] = []
+    category_counts = Counter(
+        (signal.kind, signal.rule_id) for signal in deterministic.scoring_signals
+    )
+    used_supporting_facts: set[object] = set()
+    if claim.confidence != "undetermined":
+        for signal in deterministic.scoring_signals:
+            category = (signal.kind, signal.rule_id)
+            supporting_facts = set(signal.supporting_fact_ids)
+            if (
+                category_counts[category] != 1
+                or supporting_facts & used_supporting_facts
+            ):
+                continue
+            finding = _phone_comparison_finding(
+                signal,
+                deterministic,
+                claim,
+                weights,
+            )
+            if finding is None:
+                continue
+            used_supporting_facts.update(supporting_facts)
+            weighted_findings.append(finding)
+            comparisons.append(
+                _WeightedComparison(
+                    direction=finding.direction,
+                    weight=finding.weight,
+                    strength=finding.strength,
+                )
+            )
 
+    informational_findings = _informational_findings(
+        deterministic.observations,
+        claim,
+    )
+    findings = tuple((*weighted_findings, *informational_findings))
     if claim.confidence == "undetermined":
-        band = Band.GRAY
-        score = 0
-        summary = "Claimed location could not be identified; insufficient evidence for assessment."
-        findings = _build_findings(claim, signals)
-        return _report(claim, score, band, findings, summary, weights, scorable)
-
-    if len(scorable) < weights.min_signals_for_assessment:
-        band = Band.GRAY
-        score = weights.base_score
-        summary = (
-            f"Only {len(scorable)} assessable signal(s) found; insufficient evidence "
-            f"(minimum {weights.min_signals_for_assessment}). Routed for human review."
+        return _deterministic_report(
+            claim=claim,
+            score=0,
+            band=Band.GRAY,
+            findings=findings,
+            summary=(
+                "Claimed location could not be identified; insufficient "
+                "independent deterministic evidence. Gray is not a negative "
+                "result and requires human review."
+            ),
+            weights=weights,
+            comparisons=comparisons,
+            deterministic=deterministic,
         )
-        findings = _build_findings(claim, signals)
-        return _report(claim, score, band, findings, summary, weights, scorable)
+    if len(comparisons) < weights.min_signals_for_assessment:
+        score = weights.base_score
+        return _deterministic_report(
+            claim=claim,
+            score=score,
+            band=Band.GRAY,
+            findings=findings,
+            summary=(
+                f"Only {len(comparisons)} independent deterministic evidence "
+                f"category/categories are assessable; minimum "
+                f"{weights.min_signals_for_assessment}. Gray means insufficient "
+                "independent deterministic evidence, not a negative result, and "
+                "requires human review. The compatible numeric score remains "
+                "at the neutral configured base value and is not a verdict."
+            ),
+            weights=weights,
+            comparisons=comparisons,
+            deterministic=deterministic,
+        )
 
-    score = _weighted_score(scorable, weights)
-    band = _classify_band(score, scorable, weights)
-    summary = _build_summary(claim, score, band, scorable)
-    findings = _build_findings(claim, signals + informational)
-    return _report(claim, score, band, findings, summary, weights, scorable)
+    score = _weighted_comparison_score(comparisons, weights)
+    band = _classify_comparison_band(score, comparisons, weights)
+    return _deterministic_report(
+        claim=claim,
+        score=score,
+        band=band,
+        findings=findings,
+        summary=_deterministic_summary(claim, score, band, comparisons),
+        weights=weights,
+        comparisons=comparisons,
+        deterministic=deterministic,
+    )
 
 
-def _weighted_score(signals: list[Signal], weights: WeightsConfig) -> int:
-    if not signals:
-        return weights.base_score
+def _phone_comparison_finding(
+    signal: ScoringSignal,
+    deterministic: DeterministicAnalysisResult,
+    claim: ClaimedLocation,
+    weights: WeightsConfig,
+) -> Finding | None:
+    if (
+        signal.kind is not ScoringSignalKind.PHONE_COUNTRY
+        or signal.rule_id != PHONE_RULE_ID
+        or signal.ruleset_version != weights.version
+        or signal.provenance.authority is not Authority.CODE
+        or not phone_signal_graph_is_valid(
+            deterministic.candidates,
+            deterministic.facts,
+            signal,
+            expected_ruleset_version=weights.version,
+        )
+    ):
+        return None
+    facts_by_id = {fact.id: fact for fact in deterministic.facts}
+    supporting_facts = tuple(
+        facts_by_id.get(fact_id) for fact_id in signal.supporting_fact_ids
+    )
+    if (
+        not supporting_facts
+        or any(fact is None for fact in supporting_facts)
+        or any(
+            fact.kind is not FactKind.PHONE_COUNTRY
+            or fact.subject is not Subject.PERSON
+            or fact.provenance.authority is not Authority.CODE
+            or fact.value != signal.value
+            for fact in supporting_facts
+            if fact is not None
+        )
+    ):
+        return None
+    cfg = weights.signals["phone_country"]
+    direction = (
+        AgreementDirection.SUPPORTS
+        if signal.value == claim.country_code
+        else AgreementDirection.CONFLICTS
+    )
+    return Finding(
+        signal="phone_country",
+        strength=cfg.strength,
+        observed=signal.value,
+        claimed=claim.raw or claim.country_code,
+        direction=direction,
+        weight=cfg.weight,
+        rationale=(
+            "Aggregate explicitly person-owned phone country is compared with "
+            "the code-owned claimed-location country"
+        ),
+        authority=Authority.CODE,
+        evidence=signal.provenance.evidence,
+        extractor_version=signal.provenance.extractor,
+        reference_data_version=signal.provenance.reference_data,
+        rule_id=signal.rule_id,
+        score_impact="weighted",
+        supporting_fact_ids=tuple(str(value) for value in signal.supporting_fact_ids),
+    )
 
-    total_weight = sum(s.weight for s in signals if s.weight > 0)
+
+def _informational_findings(
+    observations: tuple[Observation, ...],
+    claim: ClaimedLocation,
+) -> tuple[Finding, ...]:
+    supported = {
+        ObservationKind.POSTAL_COMPATIBILITY: "postal_compatibility",
+        ObservationKind.RIGHT_TO_WORK: "right_to_work",
+        ObservationKind.NATIONAL_ID: "national_id",
+        ObservationKind.PHONE_OUTSIDE_EU: "phone_outside_eu",
+        ObservationKind.STATED_LOCATION_OUTSIDE_EU: "stated_location_outside_eu",
+        ObservationKind.COMBINED_LOCATION_OUTSIDE_EU: "combined_location_outside_eu",
+        ObservationKind.MIXED_EU_LOCATION_EVIDENCE: "mixed_eu_location_evidence",
+        ObservationKind.SMALL_LOCALITY_NOT_EVALUATED: "small_locality_not_evaluated",
+    }
+    findings: list[Finding] = []
+    for observation in observations:
+        if observation.provenance.authority is not Authority.CODE:
+            continue
+        signal_name = supported.get(observation.kind)
+        if signal_name is None:
+            continue
+        findings.append(
+            Finding(
+                signal=signal_name,
+                strength=SignalStrength.WEAK,
+                observed=", ".join(observation.values),
+                claimed=claim.raw or claim.country_code,
+                direction=AgreementDirection.INFORMATIONAL,
+                weight=0,
+                rationale=observation.reason,
+                authority=Authority.CODE,
+                evidence=observation.provenance.evidence,
+                extractor_version=observation.provenance.extractor,
+                reference_data_version=observation.provenance.reference_data,
+                score_impact="none",
+                supporting_fact_ids=tuple(
+                    value
+                    for value in observation.subject_ids
+                    if value.startswith("fact:")
+                ),
+            )
+        )
+    return tuple(findings)
+
+
+def _project_claim(result: DeterministicAnalysisResult) -> ClaimedLocation:
+    claims = tuple(
+        fact
+        for fact in result.facts
+        if fact.kind is FactKind.CLAIMED_LOCATION
+        and fact.relation is LocationRelation.PERSON
+        and fact.subject is Subject.PERSON
+        and fact.provenance.authority is Authority.CODE
+        and claimed_location_graph_is_valid(result.candidates, fact)
+    )
+    if len(claims) != 1:
+        return ClaimedLocation(None, None, None, "undetermined")
+    fact = claims[0]
+    candidates = {candidate.id: candidate for candidate in result.candidates}
+    source = candidates.get(fact.source_candidate_ids[0])
+    if source is None or source.provenance.authority is not Authority.CODE:
+        return ClaimedLocation(None, None, None, "undetermined")
+    return ClaimedLocation(
+        raw=source.value,
+        country_code=fact.value,
+        region=(fact.resolved_name if fact.resolved_level == "locality" else None),
+        confidence="high",
+    )
+
+
+def _weighted_comparison_score(
+    comparisons: list[_WeightedComparison],
+    weights: WeightsConfig,
+) -> int:
+    total_weight = sum(value.weight for value in comparisons if value.weight > 0)
     if total_weight == 0:
         return weights.base_score
+    support = sum(
+        value.weight
+        for value in comparisons
+        if value.direction is AgreementDirection.SUPPORTS
+    )
+    conflict = sum(
+        value.weight
+        for value in comparisons
+        if value.direction is AgreementDirection.CONFLICTS
+    )
+    return max(
+        0,
+        min(100, round(weights.base_score + ((support - conflict) / total_weight) * 50)),
+    )
 
-    support = sum(s.weight for s in signals if s.direction == AgreementDirection.SUPPORTS)
-    conflict = sum(s.weight for s in signals if s.direction == AgreementDirection.CONFLICTS)
-    net = support - conflict
-    normalized = weights.base_score + (net / total_weight) * 50
-    return max(0, min(100, round(normalized)))
 
-
-def _classify_band(score: int, signals: list[Signal], weights: WeightsConfig) -> Band:
-    conflicts = [s for s in signals if s.direction == AgreementDirection.CONFLICTS]
-    strong_conflicts = [s for s in conflicts if s.strength.value == "strong"]
-
-    if len(strong_conflicts) >= 2 or (len(conflicts) >= 3 and score < weights.amber_min):
+def _classify_comparison_band(
+    score: int,
+    comparisons: list[_WeightedComparison],
+    weights: WeightsConfig,
+) -> Band:
+    conflicts = [
+        value
+        for value in comparisons
+        if value.direction is AgreementDirection.CONFLICTS
+    ]
+    strong_conflicts = [
+        value for value in conflicts if value.strength is SignalStrength.STRONG
+    ]
+    if len(strong_conflicts) >= 2 or (
+        len(conflicts) >= 3 and score < weights.amber_min
+    ):
         return Band.RED
     if score >= weights.green_min and not conflicts:
         return Band.GREEN
     if score >= weights.green_min and conflicts:
-        # Borderline: bias toward review
-        if weights.borderline_bias_toward_review:
-            return Band.AMBER
-        return Band.GREEN
+        return Band.AMBER if weights.borderline_bias_toward_review else Band.GREEN
     if score >= weights.amber_min:
         return Band.AMBER
     if score >= weights.red_min:
@@ -79,44 +312,36 @@ def _classify_band(score: int, signals: list[Signal], weights: WeightsConfig) ->
     return Band.RED
 
 
-def _build_findings(claim: ClaimedLocation, signals: list[Signal]) -> tuple[Finding, ...]:
-    claimed = claim.raw or claim.country_code or "undetermined"
-    findings = [
-        Finding(
-            signal=s.name,
-            strength=s.strength,
-            observed=s.observed,
-            claimed=claimed,
-            direction=s.direction,
-            weight=s.weight,
-            rationale=s.rationale,
-        )
-        for s in signals
-    ]
-    return tuple(findings)
-
-
-def _build_summary(claim: ClaimedLocation, score: int, band: Band, signals: list[Signal]) -> str:
-    claim_text = claim.raw or "unknown location"
-    supports = sum(1 for s in signals if s.direction == AgreementDirection.SUPPORTS)
-    conflicts = sum(1 for s in signals if s.direction == AgreementDirection.CONFLICTS)
+def _deterministic_summary(
+    claim: ClaimedLocation,
+    score: int,
+    band: Band,
+    comparisons: list[_WeightedComparison],
+) -> str:
+    supports = sum(
+        1 for value in comparisons if value.direction is AgreementDirection.SUPPORTS
+    )
+    conflicts = sum(
+        1 for value in comparisons if value.direction is AgreementDirection.CONFLICTS
+    )
     return (
-        f"Claimed location '{claim_text}' scored {score}/100 ({band.value}). "
-        f"{supports} supporting and {conflicts} conflicting assessable signal(s)."
+        f"Claimed location '{claim.raw or 'unknown location'}' scored "
+        f"{score}/100 ({band.value}) from {supports} supporting and "
+        f"{conflicts} conflicting independent deterministic categories."
     )
 
 
-def _report(
+def _deterministic_report(
+    *,
     claim: ClaimedLocation,
     score: int,
     band: Band,
     findings: tuple[Finding, ...],
     summary: str,
     weights: WeightsConfig,
-    scorable: list[Signal],
+    comparisons: list[_WeightedComparison],
+    deterministic: DeterministicAnalysisResult,
 ) -> Report:
-    supporting = sum(1 for s in scorable if s.direction == AgreementDirection.SUPPORTS)
-    conflicting = sum(1 for s in scorable if s.direction == AgreementDirection.CONFLICTS)
     return Report(
         score=score,
         band=band,
@@ -124,8 +349,21 @@ def _report(
         findings=findings,
         summary=summary,
         disclaimer=weights.disclaimer,
-        ruleset_version=RulesetVersion(version=weights.version, weights_path=weights.source_path),
-        signal_count=len(scorable),
-        supporting_count=supporting,
-        conflicting_count=conflicting,
+        ruleset_version=RulesetVersion(
+            version=weights.version,
+            weights_path=weights.source_path,
+            scoring_policy_version=SCORING_POLICY_VERSION,
+        ),
+        signal_count=len(comparisons),
+        supporting_count=sum(
+            1
+            for value in comparisons
+            if value.direction is AgreementDirection.SUPPORTS
+        ),
+        conflicting_count=sum(
+            1
+            for value in comparisons
+            if value.direction is AgreementDirection.CONFLICTS
+        ),
+        deterministic=deterministic,
     )

@@ -59,6 +59,10 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
 
+GeoNames runtime data is optional and is never baked into the image. See
+[`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for the
+approved-pair layout and explicit Compose overlay command.
+
 Start from the root `.env.example`:
 
 ```bash
@@ -126,9 +130,10 @@ offsets. PDF pages retain their real boundaries. DOCX files are split only at
 explicit hard page breaks or `pageBreakBefore`; rendered pagination markers are
 ignored and a document without explicit breaks is one logical page.
 
-`ParsedCV.lines`, `contact_region`, and `body_region` are compatibility-only
-views for the Slice 1 deterministic report. They are derived from canonical
-pages and must not be used by new code.
+All consumers use canonical `RawDocument.pages`, `RedactedDocument.pages`, or
+their `source_lines`. The former Slice 1 document-level `lines`,
+`contact_region`, and `body_region` compatibility views have been removed.
+`SourcePage.lines` remains the canonical page-local line/offset mapping.
 
 The ingestion threshold is evaluated once for the whole document. A meaningful
 token has at least two characters after surrounding Unicode punctuation is
@@ -138,7 +143,37 @@ threshold returns the distinct insufficient-text error.
 
 ## Weights
 
-Signal weights and band thresholds are in `apps/api/weights.yaml`. Strong signals (phone, address) are calibrated to dominate the full weak-signal pool.
+Signal weights and band thresholds are in `apps/api/weights.yaml`. Slice 2B
+does not modify this approved file. Only the aggregate person-owned phone
+comparison is active; the remaining prototype keys are dormant legacy
+configuration and are not read by the deterministic scorer.
+
+Slice 2B deliberately preserves the configured minimum of two independent
+deterministic evidence categories. The current deterministic core has only one
+scoreable category (aggregate person-owned phone country), so reports remain
+gray until separate anonymous calibration and project-owner approval add
+enough defensible evidence. Gray means insufficient independent deterministic
+evidence; it is not a problem flag, negative result, or hiring recommendation.
+Legacy weight keys that are no longer scoring inputs remain dormant so this
+slice does not silently change the approved configuration.
+
+When fewer than two independent categories are available, the compatible
+numeric API field remains at the neutral configured base score even if the
+itemized phone finding supports or conflicts. The UI shows that the report was
+not assessed instead of presenting that number as a verdict. A missing unique
+claim remains 0/gray.
+
+## EU informational observations
+
+Outside-EU observations use the ISO-2 membership set `eu27-2026-08-21`, based
+on the official [EU countries list](https://european-union.europa.eu/principles-countries-history/eu-countries_en).
+The set is EU-27, not EEA, Switzerland, or the United Kingdom. Phone and stated
+location are separate informational categories. A combined observation needs
+both categories and both must be non-EU; mixed EU/non-EU evidence is reported
+separately. V1 has no calibrated locality-size rule, so a resolved non-EU
+locality is explicitly `small_locality_not_evaluated` rather than classified.
+None of these observations establishes nationality, identity, physical
+presence, work eligibility, or fraud, and all have zero score impact.
 
 ## Disclaimer
 

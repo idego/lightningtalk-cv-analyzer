@@ -1,6 +1,6 @@
 Jane Doe
-Berlin, Germany
-+49 30 12345678
+Current location: Berlin, Germany
+Phone: +49 30 12345678
 jane.doe@example.de
 10115
 

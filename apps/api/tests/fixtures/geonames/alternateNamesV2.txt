@@ -1,0 +1,19 @@
+1001	2950159	de	Berlin	1	0	0	0		
+1002	2950159	en	Berlin City	0	0	0	0		
+1003	2988507	fr	Ville de Paris	1	0	0	0		
+1004	4717560	en	Paris TX	0	1	0	0		
+1005	2950159	en	Berlyn	0	0	0	0		
+1006	2950159	en	Berlin Preferred	1	0	0	0		
+1007	2950159	en	Berlin Short	0	1	0	0		
+1008	2950159	en	Old Berlin	0	0	0	1		
+1009	2950159	en	Big Berlin	0	0	1	0		
+1010	2950159	en	Past Berlin	0	0	0	0	1900	1950
+1011	2950159	abbr	BER	0	0	0	0		
+1012	2950159	post	10115	0	0	0	0		
+1013	2950159	iata	BER	0	0	0	0		
+1014	2950159	icao	EDDB	0	0	0	0		
+1015	2950159	faac	BML	0	0	0	0		
+1016	2950159	link	https://example.test/berlin	0	0	0	0		
+1017	2950159	wkdt	Q64	0	0	0	0		
+1018	2950159	fr_1793	Berlín révolutionnaire	0	0	0	0		
+1019	9999999	en	Orphan Alias	0	0	0	0		

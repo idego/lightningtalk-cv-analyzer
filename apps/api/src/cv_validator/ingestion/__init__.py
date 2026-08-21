@@ -76,46 +76,18 @@ class RedactedDocumentIdentity:
 
 @dataclass(frozen=True, init=False)
 class _PageDocument:
-    """Shared canonical page storage for raw and redacted documents.
-
-    ``lines``, ``contact_region``, and ``body_region`` are temporary Slice 1
-    compatibility views. New code must consume ``pages`` or ``source_lines``.
-
-    The legacy four-argument constructor remains available during Slice 1 so
-    existing deterministic consumers and tests can migrate separately.
-    """
+    """Shared canonical page storage for raw and redacted documents."""
 
     pages: tuple[SourcePage, ...]
     source_format: str
 
     def __init__(
         self,
-        lines: tuple[str, ...] | None = None,
-        contact_region: tuple[str, ...] | None = None,
-        body_region: tuple[str, ...] | None = None,
-        source_format: str | None = None,
         *,
-        pages: tuple[SourcePage, ...] | None = None,
+        pages: tuple[SourcePage, ...],
+        source_format: str,
     ) -> None:
-        if source_format is None:
-            raise TypeError("source_format is required")
-        if pages is not None:
-            if lines is not None or contact_region is not None or body_region is not None:
-                raise TypeError("pages cannot be combined with legacy compatibility inputs")
-            canonical_pages = tuple(pages)
-        else:
-            if lines is None:
-                raise TypeError("pages or legacy lines are required")
-            # contact_region and body_region are accepted only for constructor
-            # compatibility. The views below are always derived from pages.
-            canonical_pages = (
-                SourcePage(
-                    page_id="page-0001",
-                    page_number=1,
-                    text="\n".join(lines),
-                ),
-            )
-
+        canonical_pages = tuple(pages)
         page_ids = [page.page_id for page in canonical_pages]
         if len(page_ids) != len(set(page_ids)):
             raise ValueError("page IDs must be unique within a document")
@@ -125,41 +97,6 @@ class _PageDocument:
     @property
     def source_lines(self) -> tuple[SourceLine, ...]:
         return tuple(line for page in self.pages for line in page.lines)
-
-    @property
-    def lines(self) -> tuple[str, ...]:
-        """Temporary normalized view for the Slice 1 deterministic adapter."""
-        return tuple(
-            line.text.strip() for line in self.source_lines if line.text.strip()
-        )
-
-    def _compatibility_regions(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        from cv_validator.ingestion.regions import split_contact_and_body
-
-        contact, body = split_contact_and_body(list(self.lines))
-        return tuple(contact), tuple(body)
-
-    @property
-    def contact_region(self) -> tuple[str, ...]:
-        """Temporary Slice 1 compatibility view; do not use in new code."""
-        return self._compatibility_regions()[0]
-
-    @property
-    def body_region(self) -> tuple[str, ...]:
-        """Temporary Slice 1 compatibility view; do not use in new code."""
-        return self._compatibility_regions()[1]
-
-    @property
-    def text(self) -> str:
-        return "\n".join(self.lines)
-
-    @property
-    def contact_text(self) -> str:
-        return "\n".join(self.contact_region)
-
-    @property
-    def body_text(self) -> str:
-        return "\n".join(self.body_region)
 
 
 class RawDocument(_PageDocument):
@@ -199,8 +136,3 @@ class RedactedDocument(_PageDocument):
         from cv_validator.ingestion.text import redacted_document_identity
 
         return redacted_document_identity(self)
-
-
-# Temporary constructor/import compatibility for Slice 1 tests and consumers.
-# The ingestion boundary itself now returns RawDocument explicitly.
-ParsedCV = RawDocument

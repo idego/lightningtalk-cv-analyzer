@@ -1,0 +1,12 @@
+services:
+  api:
+    environment:
+      CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3
+      CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json
+    volumes:
+      - type: bind
+        source: ${CV_VALIDATOR_REFERENCE_DATA_DIR:?set CV_VALIDATOR_REFERENCE_DATA_DIR to an approved versioned directory}
+        target: /app/reference-data
+        read_only: true
+        bind:
+          create_host_path: false

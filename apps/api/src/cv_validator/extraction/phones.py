@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 import phonenumbers
 
 from cv_validator.domain import (
@@ -23,20 +21,14 @@ from cv_validator.domain import (
     Subject,
 )
 from cv_validator.ingestion import RedactedDocument
-
-PHONE_CLASSIFIER_VERSION = "1"
-PHONE_AGGREGATION_RULE = "phone-country-all-person-owned-agree:v1"
-
-_PERSON_PHONE_LABEL = re.compile(
-    r"\b(?:phone|mobile|telephone|tel|contact[ \t]+number|telefon|"
-    r"telefon[ \t]+komórkowy|handy|mobil)\b[ \t]*[:#-]?[ \t]*$",
-    re.IGNORECASE,
-)
-_NON_PERSON_PHONE_LABEL = re.compile(
-    r"\b(?:fax|referee|reference|company|office)\b",
-    re.IGNORECASE,
+from cv_validator.phone_policy import (
+    PHONE_CLASSIFIER,
+    PHONE_REFERENCE_DATA,
+    PHONE_RULE_ID,
 )
 
+PHONE_CLASSIFIER_VERSION = PHONE_CLASSIFIER.version
+PHONE_AGGREGATION_RULE = PHONE_RULE_ID
 
 def classify_and_aggregate_phones(
     document: RedactedDocument,
@@ -49,16 +41,14 @@ def classify_and_aggregate_phones(
     if not phone_candidates:
         return (), (), ()
 
-    pages = {page.page_id: page for page in document.pages}
+    del document
     facts: list[Fact] = []
     observations: list[Observation] = []
     person_candidates: list[Candidate] = []
     person_fact_by_candidate: dict[str, Fact] = {}
 
     for candidate in phone_candidates:
-        evidence = candidate.provenance.evidence[0]
-        page = pages[evidence.page_id]
-        subject = _phone_subject(page.text, evidence.start_offset)
+        subject = candidate.subject
         if subject is Subject.PERSON:
             person_candidates.append(candidate)
 
@@ -223,21 +213,11 @@ def _phone_observation(
             reference_data=_reference_data_version(),
         ),
     )
-
-
-def _phone_subject(page_text: str, start_offset: int) -> Subject:
-    line_start = page_text.rfind("\n", 0, start_offset) + 1
-    prefix = page_text[line_start:start_offset]
-    if _NON_PERSON_PHONE_LABEL.search(prefix):
-        return Subject.UNKNOWN
-    if _PERSON_PHONE_LABEL.search(prefix):
-        return Subject.PERSON
-    return Subject.UNKNOWN
-
-
 def _extractor_version() -> ComponentVersion:
-    return ComponentVersion("phone-classification", PHONE_CLASSIFIER_VERSION)
+    return PHONE_CLASSIFIER
 
 
 def _reference_data_version() -> ComponentVersion:
-    return ComponentVersion("libphonenumber", phonenumbers.__version__)
+    if phonenumbers.__version__ != PHONE_REFERENCE_DATA.version:
+        raise RuntimeError("unsupported libphonenumber version for phone policy V1")
+    return PHONE_REFERENCE_DATA
