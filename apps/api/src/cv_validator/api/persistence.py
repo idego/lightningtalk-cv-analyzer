@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -9,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from cv_validator.domain import Report
+from cv_validator.ingestion import RedactedDocumentIdentity
 
 
 @dataclass
@@ -51,9 +51,13 @@ class PersistenceStore:
                 """
             )
 
-    def persist_report(self, content: bytes, report: Report) -> None:
+    def persist_report(
+        self,
+        identity: RedactedDocumentIdentity,
+        report: Report,
+    ) -> None:
         self._purge_expired()
-        input_hash = _hash_content(content)
+        input_hash = identity.digest
         findings = _sanitize_findings(report.to_dict())
         now = _utc_now()
 
@@ -91,10 +95,6 @@ class PersistenceStore:
         with self._connect() as conn:
             conn.execute("DELETE FROM reports WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff_iso,))
-
-
-def _hash_content(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
 
 
 def _utc_now() -> str:

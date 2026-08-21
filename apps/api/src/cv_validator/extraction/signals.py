@@ -9,13 +9,14 @@ from cv_validator.config import WeightsConfig
 from cv_validator.domain import AgreementDirection, ClaimedLocation, Signal, SignalStrength
 from cv_validator.gazetteer.data import POSTAL_PATTERNS, TLD_TO_COUNTRY
 from cv_validator.gazetteer.resolver import resolve_location
-from cv_validator.ingestion import ParsedCV
+from cv_validator.ingestion import RawDocument, RedactedDocument
 
-Extractor = Callable[[ParsedCV, ClaimedLocation, WeightsConfig], list[Signal]]
+PageDocument = RawDocument | RedactedDocument
+Extractor = Callable[[PageDocument, ClaimedLocation, WeightsConfig], list[Signal]]
 
 
 def extract_all_signals(
-    parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig
+    parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig
 ) -> list[Signal]:
     signals: list[Signal] = []
     for extractor in _EXTRACTORS:
@@ -33,7 +34,7 @@ def _direction_for_country(
     return AgreementDirection.CONFLICTS
 
 
-def _extract_phone(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_phone(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["phone_country"]
     text = parsed.text
     ssn_pattern = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
@@ -67,7 +68,7 @@ def _extract_phone(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsCon
     return []
 
 
-def _extract_address(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_address(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["address_postal"]
     contact = parsed.contact_text
     for country_code, pattern in POSTAL_PATTERNS.items():
@@ -87,7 +88,7 @@ def _extract_address(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsC
     return []
 
 
-def _extract_employer(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_employer(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["employer_location"]
     body = parsed.body_text
     exp_match = re.search(
@@ -115,7 +116,7 @@ def _extract_employer(parsed: ParsedCV, claim: ClaimedLocation, weights: Weights
     return []
 
 
-def _extract_dates(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_dates(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["date_format"]
     text = parsed.text
     us_dates = len(re.findall(r"\b(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/\d{2,4}\b", text))
@@ -152,7 +153,7 @@ def _extract_dates(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsCon
     ]
 
 
-def _extract_spelling(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_spelling(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["spelling_locale"]
     text = parsed.text.lower()
     us_markers = ["organize", "color", "center", "analyze"]
@@ -177,7 +178,7 @@ def _extract_spelling(parsed: ParsedCV, claim: ClaimedLocation, weights: Weights
 
 
 def _extract_education_currency_email(
-    parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig
+    parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig
 ) -> list[Signal]:
     signals: list[Signal] = []
     body = parsed.body_text.lower()
@@ -240,7 +241,7 @@ def _extract_education_currency_email(
     return signals
 
 
-def _extract_right_to_work(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_right_to_work(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["right_to_work"]
     patterns = [
         r"right to work",
@@ -267,28 +268,23 @@ def _extract_right_to_work(parsed: ParsedCV, claim: ClaimedLocation, weights: We
     return []
 
 
-def _extract_national_id(parsed: ParsedCV, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
+def _extract_national_id(parsed: PageDocument, claim: ClaimedLocation, weights: WeightsConfig) -> list[Signal]:
     cfg = weights.signals["national_id"]
-    patterns = [
-        (r"\b\d{3}-\d{2}-\d{4}\b", "US_SSN"),
-        (r"\b\d{11}\b", "GENERIC_NATIONAL_ID"),
-        (r"\b[A-Z]{2}\d{6}[A-Z0-9]?\b", "UK_NINO"),
+    if not isinstance(parsed, RedactedDocument) or not parsed.redactions:
+        return []
+    id_type = "+".join(parsed.redactions[0].type_hints)
+    return [
+        Signal(
+            name="national_id",
+            strength=cfg.strength,
+            observed=f"present:{id_type}",
+            inferred_country=None,
+            direction=AgreementDirection.INFORMATIONAL,
+            weight=cfg.weight,
+            rationale="National ID pattern detected; raw value not retained",
+            metadata={"present": True, "type": id_type},
+        )
     ]
-    for pattern, id_type in patterns:
-        if re.search(pattern, parsed.text):
-            return [
-                Signal(
-                    name="national_id",
-                    strength=cfg.strength,
-                    observed=f"present:{id_type}",
-                    inferred_country=None,
-                    direction=AgreementDirection.INFORMATIONAL,
-                    weight=cfg.weight,
-                    rationale="National ID pattern detected; raw value not retained",
-                    metadata={"present": True, "type": id_type},
-                )
-            ]
-    return []
 
 
 _EXTRACTORS: list[Extractor] = [

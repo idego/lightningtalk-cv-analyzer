@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.config import load_ingestion_config
 from cv_validator.ingestion import IngestionError
-from cv_validator.pipeline import analyze_cv_bytes
+from cv_validator.pipeline import analyze_cv_bytes_result
 
 DEFAULT_DB = Path("data/cv_validator.db")
 
@@ -44,14 +44,14 @@ def create_app(
         content = await file.read()
         filename = file.filename or "upload.pdf"
         try:
-            report = analyze_cv_bytes(
+            result = analyze_cv_bytes_result(
                 content, filename=filename, ingestion_config=ingestion_config
             )
         except IngestionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        store.persist_report(content, report)
-        return JSONResponse(report.to_dict())
+        store.persist_report(result.document_identity, result.report)
+        return JSONResponse(result.report.to_dict())
 
     @app.post("/analyze/batch")
     async def analyze_batch(files: list[UploadFile] = File(...)) -> JSONResponse:
@@ -60,11 +60,17 @@ def create_app(
             content = await upload.read()
             filename = upload.filename or "upload.pdf"
             try:
-                report = analyze_cv_bytes(
+                result = analyze_cv_bytes_result(
                     content, filename=filename, ingestion_config=ingestion_config
                 )
-                store.persist_report(content, report)
-                results.append({"filename": filename, "status": "ok", "report": report.to_dict()})
+                store.persist_report(result.document_identity, result.report)
+                results.append(
+                    {
+                        "filename": filename,
+                        "status": "ok",
+                        "report": result.report.to_dict(),
+                    }
+                )
             except IngestionError as exc:
                 results.append({"filename": filename, "status": "error", "error": str(exc)})
         return JSONResponse({"results": results})

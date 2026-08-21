@@ -21,7 +21,7 @@ class SourceLine:
 
     page_id: str
     line_number: int
-    text: str
+    text: str = field(repr=False)
     start_offset: int
     end_offset: int
 
@@ -32,7 +32,7 @@ class SourcePage:
 
     page_id: str
     page_number: int
-    text: str
+    text: str = field(repr=False)
     lines: tuple[SourceLine, ...] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -58,9 +58,25 @@ class SourcePage:
         object.__setattr__(self, "lines", tuple(source_lines))
 
 
+@dataclass(frozen=True)
+class NationalIdRedaction:
+    page_id: str
+    page_number: int
+    start_offset: int
+    end_offset: int
+    type_hints: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RedactedDocumentIdentity:
+    algorithm: str
+    format_version: str
+    digest: str
+
+
 @dataclass(frozen=True, init=False)
-class ParsedCV:
-    """Canonical page-aware CV input.
+class _PageDocument:
+    """Shared canonical page storage for raw and redacted documents.
 
     ``lines``, ``contact_region``, and ``body_region`` are temporary Slice 1
     compatibility views. New code must consume ``pages`` or ``source_lines``.
@@ -138,15 +154,53 @@ class ParsedCV:
         return "\n".join(self.lines)
 
     @property
-    def markdown(self) -> str:
-        from cv_validator.ingestion.text import to_page_markdown
-
-        return to_page_markdown(self)
-
-    @property
     def contact_text(self) -> str:
         return "\n".join(self.contact_region)
 
     @property
     def body_text(self) -> str:
         return "\n".join(self.body_region)
+
+
+class RawDocument(_PageDocument):
+    """Canonical extracted source that may contain sensitive national IDs."""
+
+
+@dataclass(frozen=True, init=False)
+class RedactedDocument(_PageDocument):
+    """Canonical source after mandatory national-ID masking."""
+
+    redactions: tuple[NationalIdRedaction, ...]
+
+    def __init__(
+        self,
+        *,
+        pages: tuple[SourcePage, ...],
+        source_format: str,
+        redactions: tuple[NationalIdRedaction, ...] = (),
+    ) -> None:
+        super().__init__(pages=pages, source_format=source_format)
+        object.__setattr__(self, "redactions", tuple(redactions))
+
+    @property
+    def markdown(self) -> str:
+        from cv_validator.ingestion.text import to_page_markdown
+
+        return to_page_markdown(self)
+
+    @property
+    def canonical_text(self) -> str:
+        from cv_validator.ingestion.text import redacted_canonical_text
+
+        return redacted_canonical_text(self)
+
+    @property
+    def identity(self) -> RedactedDocumentIdentity:
+        from cv_validator.ingestion.text import redacted_document_identity
+
+        return redacted_document_identity(self)
+
+
+# Temporary constructor/import compatibility for Slice 1 tests and consumers.
+# The ingestion boundary itself now returns RawDocument explicitly.
+ParsedCV = RawDocument

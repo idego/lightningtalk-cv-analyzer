@@ -20,10 +20,10 @@
 
 ## 3A. Slice 2A - Deterministic Facts Foundation
 
-- [ ] 3A.1 Define separate `Candidate`, `Fact`, `Observation`, and `ScoringSignal` types behind one `DeterministicAnalysisResult`, with authority, evidence, extractor version, and any applicable reference-data version on every result
-- [ ] 3A.2 Introduce separate raw-document and redacted-document types; mask national-ID values with same-length replacements before Markdown, AI, persistence, logs, or reports, and derive persistence identity from the redacted canonical-text hash
-- [ ] 3A.3 Extract phone, email, URL, date, national-ID, postal, and explicit-location candidates with exact page evidence and without semantic guessing
-- [ ] 3A.4 Implement phone classification and aggregation: keep every phone, retain `possible` as an observation, create a fact only for a `valid` number resolving to one region without a default-region assumption, create one scoring signal only when all resolved countries agree, and otherwise emit an ambiguous non-scoring observation
+- [x] 3A.1 Define separate `Candidate`, `Fact`, `Observation`, and `ScoringSignal` types behind one `DeterministicAnalysisResult`, with authority, evidence, extractor version, and any applicable reference-data version on every result
+- [x] 3A.2 Introduce separate raw-document and redacted-document types; mask national-ID values with same-length replacements before Markdown, AI, persistence, logs, or reports, and derive persistence identity from the redacted canonical-text hash
+- [x] 3A.3 Extract phone, email, URL, date, national-ID, postal, and explicit-location candidates with exact page evidence and without semantic guessing
+- [x] 3A.4 Implement phone classification and aggregation: keep every phone, retain `possible` as an observation, create a fact only for a `valid` number resolving to one region without a default-region assumption, create one scoring signal only when all resolved countries agree, and otherwise emit an ambiguous non-scoring observation
 - [ ] 3A.5 Introduce the replaceable `LocationResolver` interface with explicit resolved, unresolved, and ambiguous outcomes
 - [ ] 3A.6 Build the V1 offline location index from GeoNames `cities500`, `countryInfo`, and `alternateNamesV2` records filtered to identifiers present in the index; treat an absent entry as `unresolved`, never as nonexistent or invalid
 - [ ] 3A.7 Emit and validate a reference-data manifest containing source names and URLs, snapshot date, SHA-256 values for every input and the built index, index schema version, filtering rules, and record counts; document a quarterly, manually started, reviewed, and approved refresh with no analysis-time download
