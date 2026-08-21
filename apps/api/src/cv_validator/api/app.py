@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.config import load_ingestion_config
 from cv_validator.ingestion import IngestionError
 from cv_validator.pipeline import analyze_cv_bytes
 
@@ -25,6 +26,7 @@ def create_app(
     db_path: Path | None = None,
     retention_days: int | None = None,
 ) -> FastAPI:
+    ingestion_config = load_ingestion_config()
     store = PersistenceStore(
         PersistenceConfig(
             db_path=db_path or _db_path_from_env(),
@@ -42,7 +44,9 @@ def create_app(
         content = await file.read()
         filename = file.filename or "upload.pdf"
         try:
-            report = analyze_cv_bytes(content, filename=filename)
+            report = analyze_cv_bytes(
+                content, filename=filename, ingestion_config=ingestion_config
+            )
         except IngestionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -56,7 +60,9 @@ def create_app(
             content = await upload.read()
             filename = upload.filename or "upload.pdf"
             try:
-                report = analyze_cv_bytes(content, filename=filename)
+                report = analyze_cv_bytes(
+                    content, filename=filename, ingestion_config=ingestion_config
+                )
                 store.persist_report(content, report)
                 results.append({"filename": filename, "status": "ok", "report": report.to_dict()})
             except IngestionError as exc:

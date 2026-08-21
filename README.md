@@ -57,6 +57,7 @@ Optional environment variables (via shell or `.env`):
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth credentials
 - `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
+- `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
 
 Start from the root `.env.example`:
 
@@ -116,6 +117,24 @@ Run tests:
 cd apps/api
 PYTHONPATH=src pytest
 ```
+
+## Ingestion model
+
+Ingestion keeps canonical per-page source text with stable positional page IDs
+(`page-0001`, `page-0002`, ...), ordered source lines, and page-local character
+offsets. PDF pages retain their real boundaries. DOCX files are split only at
+explicit hard page breaks or `pageBreakBefore`; rendered pagination markers are
+ignored and a document without explicit breaks is one logical page.
+
+`ParsedCV.lines`, `contact_region`, and `body_region` are compatibility-only
+views for the Slice 1 deterministic report. They are derived from canonical
+pages and must not be used by new code.
+
+The ingestion threshold is evaluated once for the whole document. A meaningful
+token has at least two characters after surrounding Unicode punctuation is
+removed and contains at least one Unicode letter. Zero meaningful tokens return
+the empty or scan-only extraction error; a positive count below the configured
+threshold returns the distinct insufficient-text error.
 
 ## Weights
 

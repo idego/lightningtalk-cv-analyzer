@@ -10,13 +10,13 @@
 
 ## 2. Slice 1 - Page-Aware Backend Input
 
-- [ ] 2.1 Make the page model the canonical ingestion source with per-page text, stable page IDs, line order, and exact evidence mapping; derive temporary `lines`, `contact_region`, and `body_region` compatibility views from it
-- [ ] 2.2 Generate simple page-separated Markdown without guessed headings, tables, columns, contact regions, or relationships
-- [ ] 2.3 Add the approved configurable `minimum_meaningful_tokens` policy with a default of 5 across the whole document, then return distinct empty or scan-only and insufficient-text errors
-- [ ] 2.4 Preserve real PDF page boundaries; split DOCX only at explicit author-defined page breaks, treat a DOCX without them as one logical page, and do not infer Word layout or add a rendering service
-- [ ] 2.5 Prevent new code from depending on `lines`, `contact_region`, or `body_region`, and document their Slice 1 compatibility-only status
-- [ ] 2.6 Test PDF and DOCX boundaries, source fidelity, evidence mapping, zero-token extraction, the one-to-four-token insufficient boundary, the five-token acceptance boundary, the existing sparse CV, and compatibility-view derivation
-- [ ] 2.7 Require the existing deterministic unit, API, and report behavior tests to pass unchanged as the Slice 1 completion gate
+- [x] 2.1 Make the page model the canonical ingestion source with per-page text, stable page IDs, line order, and exact evidence mapping; derive temporary `lines`, `contact_region`, and `body_region` compatibility views from it
+- [x] 2.2 Generate simple page-separated Markdown without guessed headings, tables, columns, contact regions, or relationships
+- [x] 2.3 Add the approved configurable `minimum_meaningful_tokens` policy with a default of 5 across the whole document, then return distinct empty or scan-only and insufficient-text errors
+- [x] 2.4 Preserve real PDF page boundaries; split DOCX only at explicit author-defined page breaks, treat a DOCX without them as one logical page, and do not infer Word layout or add a rendering service
+- [x] 2.5 Prevent new code from depending on `lines`, `contact_region`, or `body_region`, and document their Slice 1 compatibility-only status
+- [x] 2.6 Test PDF and DOCX boundaries, source fidelity, evidence mapping, zero-token extraction, the one-to-four-token insufficient boundary, the five-token acceptance boundary, the existing sparse CV, and compatibility-view derivation
+- [x] 2.7 Require the existing deterministic unit, API, and report behavior tests to pass unchanged as the Slice 1 completion gate
 
 ## 3. Slice 2 - Deterministic Facts and Prototype Cleanup
 

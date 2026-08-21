@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cv_validator.config import IngestionConfig
 from cv_validator.ingestion import IngestionError, ParsedCV
 from cv_validator.ingestion.docx import extract_docx
 from cv_validator.ingestion.pdf import extract_pdf
@@ -9,12 +10,16 @@ from cv_validator.ingestion.pdf import extract_pdf
 SUPPORTED_EXTENSIONS = {".pdf", ".docx"}
 
 
-def ingest_cv(content: bytes, filename: str | None = None) -> ParsedCV:
+def ingest_cv(
+    content: bytes,
+    filename: str | None = None,
+    config: IngestionConfig | None = None,
+) -> ParsedCV:
     ext = _resolve_extension(filename)
     if ext == ".pdf":
-        return extract_pdf(content)
+        return extract_pdf(content, config=config)
     if ext == ".docx":
-        return extract_docx(content)
+        return extract_docx(content, config=config)
     raise IngestionError(f"Unsupported file format: {ext or 'unknown'}")
 
 

@@ -1,39 +1,30 @@
 from __future__ import annotations
 
 import io
-from typing import Iterable
 
 import pdfplumber
 
-from cv_validator.ingestion import IngestionError, ParsedCV
-from cv_validator.ingestion.regions import split_contact_and_body
+from cv_validator.config import IngestionConfig, load_ingestion_config
+from cv_validator.ingestion import IngestionError, ParsedCV, SourcePage
+from cv_validator.ingestion.text import validate_text_sufficiency
 
 
-def extract_pdf(content: bytes) -> ParsedCV:
+def extract_pdf(
+    content: bytes, config: IngestionConfig | None = None
+) -> ParsedCV:
     try:
         with pdfplumber.open(io.BytesIO(content)) as pdf:
-            page_texts: list[str] = []
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                page_texts.append(text)
+            pages = tuple(
+                SourcePage(
+                    page_id=f"page-{page_number:04d}",
+                    page_number=page_number,
+                    text=page.extract_text() or "",
+                )
+                for page_number, page in enumerate(pdf.pages, start=1)
+            )
     except Exception as exc:  # noqa: BLE001
         raise IngestionError(f"Failed to read PDF: {exc}") from exc
 
-    combined = "\n".join(page_texts).strip()
-    if not combined:
-        raise IngestionError(
-            "PDF has no extractable text layer (scanned/image-only PDFs are not supported)"
-        )
-
-    lines = _normalize_lines(combined.splitlines())
-    contact, body = split_contact_and_body(lines)
-    return ParsedCV(
-        lines=tuple(lines),
-        contact_region=tuple(contact),
-        body_region=tuple(body),
-        source_format="pdf",
-    )
-
-
-def _normalize_lines(lines: Iterable[str]) -> list[str]:
-    return [line.strip() for line in lines if line.strip()]
+    parsed = ParsedCV(pages=pages, source_format="pdf")
+    validate_text_sufficiency(parsed, config or load_ingestion_config())
+    return parsed
