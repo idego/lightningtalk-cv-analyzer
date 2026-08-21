@@ -18,6 +18,7 @@ from cv_validator.ingestion import (
 )
 from cv_validator.ingestion.docx import extract_docx
 from cv_validator.ingestion.pdf import extract_pdf
+from cv_validator.ingestion.redaction import redact_national_ids
 from cv_validator.ingestion.router import ingest_cv
 from cv_validator.ingestion.text import (
     meaningful_token_count,
@@ -243,13 +244,14 @@ def test_source_lines_have_page_local_numbers_and_exact_offsets():
 
 
 def test_page_separated_markdown_preserves_exact_source_text():
-    parsed = ParsedCV(
+    raw = ParsedCV(
         pages=(
             SourcePage("page-0001", 1, "Alpha\nBravo"),
             SourcePage("page-0002", 2, "Charlie\nDelta"),
         ),
         source_format="text",
     )
+    parsed = redact_national_ids(raw)
 
     assert parsed.markdown == (
         "<!-- page: page-0001 -->\nAlpha\nBravo\n\n"

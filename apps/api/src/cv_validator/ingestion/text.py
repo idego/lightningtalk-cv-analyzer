@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 
 from cv_validator.config import IngestionConfig
-from cv_validator.ingestion import EmptyTextError, InsufficientTextError, ParsedCV
+from cv_validator.ingestion import (
+    EmptyTextError,
+    InsufficientTextError,
+    RawDocument,
+    RedactedDocument,
+    RedactedDocumentIdentity,
+)
+
+_CANONICAL_TEXT_VERSION = "v1"
 
 
-def meaningful_token_count(parsed: ParsedCV) -> int:
+def meaningful_token_count(parsed: RawDocument | RedactedDocument) -> int:
     text = unicodedata.normalize("NFKC", "\n".join(page.text for page in parsed.pages))
     count = 0
     for raw_token in re.split(r"\s+", text):
@@ -17,7 +26,10 @@ def meaningful_token_count(parsed: ParsedCV) -> int:
     return count
 
 
-def validate_text_sufficiency(parsed: ParsedCV, config: IngestionConfig) -> None:
+def validate_text_sufficiency(
+    parsed: RawDocument | RedactedDocument,
+    config: IngestionConfig,
+) -> None:
     token_count = meaningful_token_count(parsed)
     if token_count == 0:
         if parsed.source_format == "pdf":
@@ -35,9 +47,41 @@ def validate_text_sufficiency(parsed: ParsedCV, config: IngestionConfig) -> None
         )
 
 
-def to_page_markdown(parsed: ParsedCV) -> str:
+def to_page_markdown(parsed: RedactedDocument) -> str:
+    if not isinstance(parsed, RedactedDocument):
+        raise TypeError("Markdown formatting requires a redacted document")
     return "\n\n".join(
         f"<!-- page: {page.page_id} -->\n{page.text}" for page in parsed.pages
+    )
+
+
+def redacted_canonical_text(document: RedactedDocument) -> str:
+    if not isinstance(document, RedactedDocument):
+        raise TypeError("canonical persistence text requires a redacted document")
+
+    parts = [
+        f"cv-validator:redacted-canonical-text:{_CANONICAL_TEXT_VERSION}",
+        str(len(document.pages)),
+    ]
+    for page in document.pages:
+        parts.extend(
+            (
+                f"{len(page.page_id)}:{page.page_id}",
+                str(page.page_number),
+                f"{len(page.text)}:{page.text}",
+            )
+        )
+    return "\n".join(parts)
+
+
+def redacted_document_identity(
+    document: RedactedDocument,
+) -> RedactedDocumentIdentity:
+    canonical_text = redacted_canonical_text(document)
+    return RedactedDocumentIdentity(
+        algorithm="sha256",
+        format_version=_CANONICAL_TEXT_VERSION,
+        digest=hashlib.sha256(canonical_text.encode("utf-8")).hexdigest(),
     )
 
 

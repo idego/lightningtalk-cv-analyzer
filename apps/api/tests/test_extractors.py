@@ -2,6 +2,7 @@ from cv_validator.config import load_weights
 from cv_validator.extraction.claim import identify_claim
 from cv_validator.extraction.signals import extract_all_signals
 from cv_validator.ingestion import ParsedCV
+from cv_validator.ingestion.redaction import redact_national_ids
 from cv_validator.ingestion.regions import split_contact_and_body
 
 
@@ -25,7 +26,8 @@ def test_phone_extractor_strong():
 
 def test_national_id_redaction_in_metadata():
     weights = load_weights()
-    parsed = _parsed("Jane\nBerlin\n123-45-6789\n\nExperience\n")
+    raw_id = "123" + "-45-" + "6789"
+    parsed = redact_national_ids(_parsed(f"Jane\nBerlin\n{raw_id}\n\nExperience\n"))
     claim = identify_claim(parsed)
     signals = extract_all_signals(parsed, claim, weights)
     nid = next(s for s in signals if s.name == "national_id")

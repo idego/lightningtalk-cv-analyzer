@@ -9,13 +9,13 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from cv_validator.config import IngestionConfig, load_ingestion_config
-from cv_validator.ingestion import IngestionError, ParsedCV, SourcePage
+from cv_validator.ingestion import IngestionError, RawDocument, SourcePage
 from cv_validator.ingestion.text import validate_text_sufficiency
 
 
 def extract_docx(
     content: bytes, config: IngestionConfig | None = None
-) -> ParsedCV:
+) -> RawDocument:
     try:
         document = Document(io.BytesIO(content))
         page_texts = _extract_logical_pages(document.iter_inner_content())
@@ -30,7 +30,7 @@ def extract_docx(
         )
         for page_number, text in enumerate(page_texts, start=1)
     )
-    parsed = ParsedCV(pages=pages, source_format="docx")
+    parsed = RawDocument(pages=pages, source_format="docx")
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed
 

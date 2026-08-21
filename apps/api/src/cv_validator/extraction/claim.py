@@ -4,7 +4,7 @@ import re
 
 from cv_validator.domain import ClaimedLocation
 from cv_validator.gazetteer.resolver import resolve_location
-from cv_validator.ingestion import ParsedCV
+from cv_validator.ingestion import RawDocument, RedactedDocument
 
 _LOCATION_LINE = re.compile(
     r"^[A-Za-zÀ-ÿ\s\-'.]+,\s*[A-Za-zÀ-ÿ\s\-'.]+$|"
@@ -13,7 +13,7 @@ _LOCATION_LINE = re.compile(
 )
 
 
-def identify_claim(parsed: ParsedCV) -> ClaimedLocation:
+def identify_claim(parsed: RawDocument | RedactedDocument) -> ClaimedLocation:
     candidates: list[tuple[str, str]] = []
 
     for line in parsed.contact_region:
