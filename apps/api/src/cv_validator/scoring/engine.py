@@ -204,6 +204,7 @@ def _informational_findings(
         ObservationKind.COMBINED_LOCATION_OUTSIDE_EU: "combined_location_outside_eu",
         ObservationKind.MIXED_EU_LOCATION_EVIDENCE: "mixed_eu_location_evidence",
         ObservationKind.SMALL_LOCALITY_NOT_EVALUATED: "small_locality_not_evaluated",
+        ObservationKind.POSSIBLE_EMAIL_DOMAIN_TYPO: "possible_email_domain_typo",
     }
     findings: list[Finding] = []
     for observation in observations:

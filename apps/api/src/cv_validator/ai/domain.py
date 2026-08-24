@@ -30,9 +30,9 @@ class ValidatedDocumentAnalysis:
 
 @dataclass(frozen=True)
 class DocumentAnalyzerResponse:
-    payload: dict[str, Any] | None
+    payload: Any | None
     response_model: str
-    usage: dict[str, int]
+    usage: dict[str, Any]
     refused: bool = False
 
 
@@ -42,7 +42,7 @@ class AIDocumentAnalysisOutcome:
     analysis: ValidatedDocumentAnalysis | None = None
     failure_reason: AIFailureReason | None = None
     response_model: str | None = None
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status is AIAnalysisStatus.SUCCEEDED and self.analysis is None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from cv_validator.ai.config import AISettings
 from cv_validator.ai.domain import (
@@ -104,7 +104,7 @@ def _failed(
     reason: AIFailureReason,
     *,
     response_model: str | None = None,
-    usage: dict[str, int] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> AIDocumentAnalysisOutcome:
     return AIDocumentAnalysisOutcome(
         status=AIAnalysisStatus.FAILED,

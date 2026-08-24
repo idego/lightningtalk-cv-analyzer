@@ -46,6 +46,7 @@ class ObservationKind(str, Enum):
     COMBINED_LOCATION_OUTSIDE_EU = "combined_location_outside_eu"
     MIXED_EU_LOCATION_EVIDENCE = "mixed_eu_location_evidence"
     SMALL_LOCALITY_NOT_EVALUATED = "small_locality_not_evaluated"
+    POSSIBLE_EMAIL_DOMAIN_TYPO = "possible_email_domain_typo"
 
 
 class ObservationStatus(str, Enum):
