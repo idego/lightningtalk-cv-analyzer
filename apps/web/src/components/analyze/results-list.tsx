@@ -9,6 +9,7 @@ import type {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { aiStatusMessage, partitionReviewFlags } from "@/lib/review-findings";
+import { CompanyResearchPanel } from "@/components/analyze/company-research";
 
 function bandBadgeClass(band: string) {
   switch (band) {
@@ -168,6 +169,8 @@ export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
               </section>
 
               <StructuredFacts analysis={report.ai_analysis} />
+
+              <CompanyResearchPanel report={report} />
 
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-medium">

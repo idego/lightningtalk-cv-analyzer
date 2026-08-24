@@ -102,9 +102,42 @@ export type AIAnalysis = {
   };
   findings: unknown[];
   unknowns: unknown[];
-  research_candidates: unknown[];
+  research_candidates: Array<{
+    category: "company" | "education_or_certification" | "linkedin";
+    query_subject: string;
+  }>;
   checklist: Record<ChecklistId, { checked: boolean; issue_count: number }>;
   analysis_limitations: string[];
+};
+
+export type CompanyResearch = {
+  status: "completed";
+  outcome: "completed" | "insufficient_evidence";
+  accessed_at: string;
+  searches_performed: string[];
+  search_limitations: string[];
+  organizations: Array<{
+    query_subject: string;
+    existence: "supported" | "conflicting" | "insufficient_evidence";
+    activity: string | null;
+    operating_dates: string | null;
+    location: string | null;
+    relationship: string | null;
+    official_website: string | null;
+    company_pages: string[];
+    registries: string[];
+    confidence: "low" | "medium" | "high";
+    uncertainty: string;
+    findings: Array<{
+      kind: string;
+      summary: string;
+      source_urls: string[];
+      confidence: string;
+      uncertainty: string;
+    }>;
+    limited_online_presence: boolean;
+    limited_online_presence_reason: string | null;
+  }>;
 };
 
 type ProvenanceFields = {
@@ -210,6 +243,7 @@ export type AnalysisReport = {
     checks: Record<ChecklistId, { checked: boolean; issue_count: number }>;
     flags: ReviewFlag[];
   };
+  company_research?: CompanyResearch;
 };
 
 export type AnalyzeItemResult =
