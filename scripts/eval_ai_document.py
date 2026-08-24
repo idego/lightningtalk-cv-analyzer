@@ -10,19 +10,36 @@ import re
 import subprocess
 import sys
 import time
-import urllib.request
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable
-
-from jsonschema import Draft202012Validator
+from typing import Any, NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "apps/api/src"))
+
+from cv_validator.ai.request import (  # noqa: E402
+    DETERMINISTIC_OBSERVATIONS_VERSION,
+    format_document_analysis_input,
+)
+from cv_validator.ai.validation import (  # noqa: E402
+    DocumentAnalysisValidationError,
+    REQUIRED_CHECK_IDS,
+    validate_document_analysis_payload,
+)
+
 PRIVATE_EVAL_ROOT = (ROOT / "data/ai-eval").resolve()
-PROMPT_PATH = ROOT / "docs/ai-eval/prompt.md"
-SCHEMA_PATH = ROOT / "docs/ai-eval/document-analysis.schema.json"
-CHECK_IDS = {"contact", "education", "employment", "timeline", "duration_claims", "relationships", "document_quality", "protected_boundaries"}
+CONTRACT_ROOT = ROOT / "apps/api/src/cv_validator/ai/contracts"
+PROMPT_PATH = CONTRACT_ROOT / "prompt.md"
+SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.json"
+CHECK_IDS = set(REQUIRED_CHECK_IDS)
 MANUAL_LABELS = {"true positive", "przydatne „warto wiedzieć”", "duplikat", "nadinterpretacja", "artefakt parsowania/flatteningu"}
+MAX_EVAL_CASES = 4
+
+
+class EvalCaseInput(NamedTuple):
+    pages: dict[str, str]
+    deterministic_observations: dict[str, Any]
+    request_text: str
 
 
 def load_json(path: Path) -> Any:
@@ -46,63 +63,115 @@ def write_private_json(path: Path, value: Any) -> None:
     temporary.replace(destination)
 
 
-def iter_evidence(result: dict[str, Any]) -> Iterable[tuple[str, dict[str, Any]]]:
-    facts = result.get("facts")
-    if isinstance(facts, dict):
-        for group, items in facts.items():
-            if isinstance(items, list):
-                for index, item in enumerate(items):
-                    if isinstance(item, dict) and isinstance(item.get("evidence"), list):
-                        for evidence_index, evidence in enumerate(item["evidence"]):
-                            if isinstance(evidence, dict):
-                                yield f"facts.{group}[{index}].evidence[{evidence_index}]", evidence
-    findings = result.get("findings")
-    if isinstance(findings, list):
-        for index, finding in enumerate(findings):
-            if isinstance(finding, dict) and isinstance(finding.get("evidence"), list):
-                for evidence_index, evidence in enumerate(finding["evidence"]):
-                    if isinstance(evidence, dict):
-                        yield f"findings[{index}].evidence[{evidence_index}]", evidence
-    candidates = result.get("research_candidates")
-    if isinstance(candidates, list):
-        for index, candidate in enumerate(candidates):
-            if isinstance(candidate, dict) and isinstance(candidate.get("evidence"), dict):
-                yield f"research_candidates[{index}].evidence", candidate["evidence"]
+def validate_manifest_limits(manifest: dict[str, Any]) -> None:
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("eval manifest must contain at least one case")
+    if len(cases) > MAX_EVAL_CASES:
+        raise ValueError(f"eval manifest may contain at most {MAX_EVAL_CASES} cases")
 
 
-def validate_result(result: dict[str, Any], source: str, schema: dict[str, Any] | None = None) -> list[str]:
-    errors: list[str] = []
-    selected_schema = schema or load_json(SCHEMA_PATH)
-    validator = Draft202012Validator(selected_schema)
-    for validation_error in sorted(validator.iter_errors(result), key=lambda item: list(item.absolute_path)):
-        location = ".".join(str(part) for part in validation_error.absolute_path) or "<root>"
-        errors.append(f"schema {location}: {validation_error.message}")
-
-    for location, evidence in iter_evidence(result):
-        if evidence.get("page_id") != "p1" or evidence.get("excerpt", "") not in source:
-            errors.append(f"{location}: evidence is not an exact excerpt from flattened input")
-
-    checks = result.get("checklist")
-    if isinstance(checks, list):
-        check_ids = [item.get("id") for item in checks if isinstance(item, dict)]
-        if set(check_ids) != CHECK_IDS or len(check_ids) != len(CHECK_IDS):
-            errors.append("checklist must contain every required id exactly once")
-    return errors
-
-
-def response_text(response: dict[str, Any]) -> str:
-    for item in response.get("output", []):
-        if item.get("type") == "message":
-            for content in item.get("content", []):
-                if content.get("type") in {"output_text", "text"} and content.get("text"):
-                    return content["text"]
-    raise ValueError("Responses API returned no output text")
+def backend_output_limit_metadata(
+    backend: str,
+    requested_limit: int | None,
+) -> dict[str, Any]:
+    if backend == "responses":
+        if requested_limit is None or requested_limit < 1:
+            raise ValueError(
+                "--max-output-tokens is required and must be positive for Responses"
+            )
+        return {
+            "max_output_tokens": requested_limit,
+            "output_limit_enforcement": "enforced",
+        }
+    if backend == "codex":
+        return {
+            "max_output_tokens": None,
+            "output_limit_enforcement": "not_enforced",
+        }
+    raise ValueError("unsupported eval backend")
 
 
-def call_responses(model: str, reasoning: str, instructions: str, document: str, schema: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def load_case_input(case: dict[str, Any], manifest_path: Path) -> EvalCaseInput:
+    raw_pages = case.get("pages")
+    if not isinstance(raw_pages, list) or not raw_pages:
+        raise ValueError("each eval case requires one or more pages")
+    pages: dict[str, str] = {}
+    for page in raw_pages:
+        if not isinstance(page, dict):
+            raise ValueError("eval pages must be objects")
+        page_id = page.get("page_id")
+        input_path = page.get("input")
+        if not isinstance(page_id, str) or not page_id or not isinstance(input_path, str):
+            raise ValueError("each eval page requires page_id and input")
+        if page_id in pages:
+            raise ValueError("eval page IDs must be unique within a case")
+        source_path = require_private_path(
+            manifest_path.parent / input_path,
+            "eval page input",
+        )
+        pages[page_id] = source_path.read_text(encoding="utf-8")
+
+    observations_path_value = case.get("deterministic_observations")
+    if not isinstance(observations_path_value, str):
+        raise ValueError("each eval case requires deterministic_observations")
+    observations_path = require_private_path(
+        manifest_path.parent / observations_path_value,
+        "deterministic observations",
+    )
+    observations = load_json(observations_path)
+    if (
+        not isinstance(observations, dict)
+        or observations.get("contract_version")
+        != DETERMINISTIC_OBSERVATIONS_VERSION
+        or not isinstance(observations.get("deterministic_ruleset_version"), str)
+        or not isinstance(observations.get("observations"), list)
+    ):
+        raise ValueError("deterministic observations do not match the versioned contract")
+
+    markdown = "\n\n".join(
+        f"<!-- page: {page_id} -->\n{text}" for page_id, text in pages.items()
+    )
+    return EvalCaseInput(
+        pages=pages,
+        deterministic_observations=observations,
+        request_text=format_document_analysis_input(markdown, observations),
+    )
+
+
+def validate_result(
+    result: Any,
+    pages: dict[str, str],
+) -> list[str]:
+    try:
+        validate_document_analysis_payload(
+            result,
+            pages=pages,
+            deterministic_observations_version=DETERMINISTIC_OBSERVATIONS_VERSION,
+        )
+    except DocumentAnalysisValidationError as error:
+        return [str(error)]
+    return []
+
+
+def evidence_is_exact(evidence: dict[str, Any], pages: dict[str, str]) -> bool:
+    page_id = evidence.get("page_id")
+    excerpt = evidence.get("excerpt")
+    return (
+        isinstance(page_id, str)
+        and isinstance(excerpt, str)
+        and bool(excerpt)
+        and page_id in pages
+        and excerpt in pages[page_id]
+    )
+
+
+def call_responses(model: str, reasoning: str, instructions: str, document: str, schema: dict[str, Any], max_output_tokens: int) -> tuple[dict[str, Any], dict[str, Any], str]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for --backend responses")
+    from openai import OpenAI
+
     payload = {
         "model": model,
         "reasoning": {"effort": reasoning},
@@ -111,15 +180,17 @@ def call_responses(model: str, reasoning: str, instructions: str, document: str,
         "text": {"format": {"type": "json_schema", "name": "document_analysis", "strict": True, "schema": schema}},
         "tools": [],
         "store": False,
+        "max_output_tokens": max_output_tokens,
     }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=180) as raw:
-        response = json.load(raw)
-    return json.loads(response_text(response)), response.get("usage", {})
+    client = OpenAI(api_key=api_key, timeout=120.0, max_retries=0)
+    try:
+        response = client.responses.create(**payload)
+    except Exception:
+        raise RuntimeError("Responses API request failed") from None
+    if not response.output_text:
+        raise RuntimeError("Responses API returned no output text")
+    usage = response.usage.model_dump() if response.usage is not None else {}
+    return json.loads(response.output_text), usage, response.model
 
 
 def call_codex(model: str, reasoning: str, prompt: str, schema_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -149,16 +220,16 @@ def matches(expected: dict[str, Any], finding: dict[str, Any]) -> bool:
     return not needle or needle in excerpts
 
 
-def score(case: dict[str, Any], result: dict[str, Any], source: str) -> dict[str, Any]:
+def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -> dict[str, Any]:
     expected = case["expected_findings"]
     findings = result.get("findings", [])
     matched_expected = {index for index, item in enumerate(expected) if any(matches(item, finding) for finding in findings)}
     matched_findings = {index for index, finding in enumerate(findings) if any(matches(item, finding) for item in expected)}
     evidence_items = [evidence for finding in findings for evidence in finding.get("evidence", [])]
-    accurate = sum(evidence.get("page_id") == "p1" and evidence.get("excerpt", "") in source for evidence in evidence_items)
+    accurate = sum(evidence_is_exact(evidence, pages) for evidence in evidence_items)
     unsupported_findings = sum(
         not finding.get("evidence")
-        or any(evidence.get("page_id") != "p1" or evidence.get("excerpt", "") not in source for evidence in finding.get("evidence", []))
+        or any(not evidence_is_exact(evidence, pages) for evidence in finding.get("evidence", []))
         for finding in findings
     )
     serialized = json.dumps(result, ensure_ascii=False).casefold()
@@ -171,7 +242,7 @@ def score(case: dict[str, Any], result: dict[str, Any], source: str) -> dict[str
         "unsupported_finding_count": unsupported_findings,
         "unexpected_finding_count": len(findings) - len(matched_findings),
         "finding_evidence_item_count": len(evidence_items),
-        "finding_evidence_exact_match_accuracy_flattened_input": accurate / len(evidence_items) if evidence_items else 1.0,
+        "finding_evidence_exact_match_accuracy_page_aware": accurate / len(evidence_items) if evidence_items else 1.0,
         "forbidden_output_hits": forbidden_hits,
     }
 
@@ -239,7 +310,7 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "recall_is_not_precision": True,
         "unsupported_finding_count": sum(report["metrics"]["unsupported_finding_count"] for report in reports),
         "unexpected_finding_count": sum(report["metrics"]["unexpected_finding_count"] for report in reports),
-        "finding_evidence_exact_match_accuracy_flattened_input": sum(report["metrics"]["finding_evidence_exact_match_accuracy_flattened_input"] for report in reports) / len(reports),
+        "finding_evidence_exact_match_accuracy_page_aware": sum(report["metrics"]["finding_evidence_exact_match_accuracy_page_aware"] for report in reports) / len(reports),
         "total_latency_seconds": sum(report["latency_seconds"] for report in reports),
         "estimated_cost_usd": None if any(report["estimated_cost_usd"] is None for report in reports) else sum(report["estimated_cost_usd"] for report in reports),
     }
@@ -254,9 +325,9 @@ def rescore_report(report: dict[str, Any], manifest: dict[str, Any], manifest_pa
     cases_by_id = {case["id"]: case for case in manifest["cases"]}
     for case_report in report["cases"]:
         case = cases_by_id[case_report["case_id"]]
-        source = (manifest_path.parent / case["input"]).read_text(encoding="utf-8")
-        case_report["validation_errors"] = validate_result(case_report["result"], source)
-        case_report["metrics"] = score(case, case_report["result"], source)
+        case_input = load_case_input(case, manifest_path)
+        case_report["validation_errors"] = validate_result(case_report["result"], case_input.pages)
+        case_report["metrics"] = score(case, case_report["result"], case_input.pages)
     if reviews is not None:
         attach_manual_review(report, reviews)
     report["summary"] = summarize(report["cases"])
@@ -271,6 +342,8 @@ def main() -> int:
     run.add_argument("--backend", choices=["codex", "responses"], required=True)
     run.add_argument("--model", default="gpt-5.6-luna")
     run.add_argument("--reasoning", choices=["low", "medium", "high"], default="medium")
+    run.add_argument("--max-output-tokens", type=int)
+    run.add_argument("--confirm-live-model-run", action="store_true")
     run.add_argument("--output", type=Path, required=True)
     run.add_argument("--input-usd-per-million", type=float)
     run.add_argument("--output-usd-per-million", type=float)
@@ -283,6 +356,7 @@ def main() -> int:
 
     manifest_path = require_private_path(args.manifest, "manifest")
     manifest = load_json(manifest_path)
+    validate_manifest_limits(manifest)
     if args.command == "rescore":
         input_path = require_private_path(args.input, "rescore input")
         reviews = parse_manual_review(args.manual_review) if args.manual_review else None
@@ -293,29 +367,43 @@ def main() -> int:
 
     schema = load_json(SCHEMA_PATH)
     instructions = PROMPT_PATH.read_text(encoding="utf-8")
+    output_limit_metadata = backend_output_limit_metadata(
+        args.backend,
+        args.max_output_tokens,
+    )
+    if not args.confirm_live_model_run:
+        raise ValueError(
+            "live eval requires --confirm-live-model-run after coordinator approval"
+        )
     reports = []
     for case in manifest["cases"]:
-        source_path = manifest_path.parent / case["input"]
-        source = source_path.read_text(encoding="utf-8")
-        document = f"<document page_id=\"p1\">\n{source}\n</document>"
-        request_prompt = f"{instructions}\n\n{document}"
+        case_input = load_case_input(case, manifest_path)
+        request_prompt = f"{instructions}\n\n{case_input.request_text}"
         started = time.perf_counter()
         if args.backend == "responses":
-            result, usage = call_responses(args.model, args.reasoning, instructions, document, schema)
+            result, usage, response_model = call_responses(
+                args.model,
+                args.reasoning,
+                instructions,
+                case_input.request_text,
+                schema,
+                output_limit_metadata["max_output_tokens"],
+            )
         else:
             result, usage = call_codex(args.model, args.reasoning, request_prompt, SCHEMA_PATH)
+            response_model = args.model
         latency = time.perf_counter() - started
-        validation_errors = validate_result(result, source, schema)
-        metrics = score(case, result, source)
+        validation_errors = validate_result(result, case_input.pages)
+        metrics = score(case, result, case_input.pages)
         input_tokens = token_value(usage, "input_tokens", "input_token_count")
         output_tokens = token_value(usage, "output_tokens", "output_token_count")
         estimated_cost = None
         if input_tokens is not None and output_tokens is not None and args.input_usd_per_million is not None and args.output_usd_per_million is not None:
             estimated_cost = input_tokens * args.input_usd_per_million / 1_000_000 + output_tokens * args.output_usd_per_million / 1_000_000
-        reports.append({"case_id": case["id"], "latency_seconds": latency, "usage": usage, "estimated_cost_usd": estimated_cost, "validation_errors": validation_errors, "metrics": metrics, "result": result})
+        reports.append({"case_id": case["id"], "response_model": response_model, "latency_seconds": latency, "usage": usage, "estimated_cost_usd": estimated_cost, "validation_errors": validation_errors, "metrics": metrics, "result": result})
 
     summary = summarize(reports)
-    output = {"eval_version": "document-eval-2008", "prompt_version": "2008", "schema_version": "document-analysis-schema-v2", "model": args.model, "reasoning": args.reasoning, "backend": args.backend, "summary": summary, "cases": reports}
+    output = {"eval_version": "document-eval-2108", "prompt_version": "2108", "schema_version": "document-analysis-schema-v3", "input_contract_version": "document-analysis-input-v1", "deterministic_observations_version": DETERMINISTIC_OBSERVATIONS_VERSION, "model": args.model, "reasoning": args.reasoning, **output_limit_metadata, "backend": args.backend, "summary": summary, "cases": reports}
     write_private_json(args.output, output)
     print(json.dumps(summary, indent=2))
     return 0 if summary["valid_case_count"] == summary["case_count"] and not any(report["metrics"]["forbidden_output_hits"] for report in reports) else 1

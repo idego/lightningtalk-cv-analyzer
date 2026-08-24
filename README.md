@@ -58,6 +58,19 @@ Optional environment variables (via shell or `.env`):
 - `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
+- `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis; defaults to `false`
+- `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
+
+The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
+request timeout, zero automatic retries, `store=false`, no tools, and a 4,096
+output-token ceiling. The feature is disabled by default. Enabling it without
+`OPENAI_API_KEY` fails during application startup. The current stage provides
+only the tested local request/validation seam; it does not yet call OpenAI from
+the production pipeline or change API responses.
+
+The tracked Document Analyzer prompt and strict output schema live in
+`apps/api/src/cv_validator/ai/contracts/`. Runtime request construction and the
+private eval harness read those same bundled files.
 
 GeoNames runtime data is optional and is never baked into the image. See
 [`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for the
