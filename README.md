@@ -58,7 +58,7 @@ Optional environment variables (via shell or `.env`):
 - `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
-- `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis; defaults to `false`
+- `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis and recruiter-triggered company research; defaults to `false`
 - `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
@@ -123,6 +123,7 @@ uvicorn cv_validator.api.app:app --reload
 
 - `POST /analyze` — single CV upload
 - `POST /analyze/batch` — multiple CVs; per-file errors isolated
+- `POST /analyses/{analysis_id}/research/company` — bounded, synchronous company research for a stored analysis
 - `GET /health` — health check
 
 The V1 batch endpoint remains deliberately sequential. Its default cap is four
@@ -205,3 +206,11 @@ presence, work eligibility, or fraud, and all have zero score impact.
 ## Disclaimer
 
 Every report is stamped: **decision-support only — not verification.** Human review is required.
+Company research remains opt-in per stored analysis. `POST
+/analyses/{analysis_id}/research/company` uses the Responses API `web_search`
+tool with at most four searches, a 120-second request timeout, no automatic
+retry, and `store=false`. It sends only AI/code-derived organization name,
+dates, location, and relationship facts—not raw CV text or candidate contact
+data. Completed results are idempotent for the research contract version and
+persist citations, searches, access time, uncertainty, versions, and usage in
+SQLite; they never change deterministic score or band.
