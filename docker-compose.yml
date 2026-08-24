@@ -36,6 +36,8 @@ services:
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
+      CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}
     volumes:
       - cv_validator_data:/app/data
     healthcheck:

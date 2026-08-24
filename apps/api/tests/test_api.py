@@ -59,6 +59,9 @@ def test_single_analyze_success(client):
         "supporting_count",
         "conflicting_count",
         "deterministic",
+        "analysis_id",
+        "ai_analysis",
+        "checklist",
     }
     assert set(body["deterministic"]) == {
         "ruleset_version",
@@ -68,6 +71,9 @@ def test_single_analyze_success(client):
         "scoring_signals",
     }
     assert "decision-support" in body["disclaimer"].lower()
+    assert body["analysis_id"]
+    assert body["ai_analysis"]["status"] == "disabled"
+    assert len(body["checklist"]["checks"]) == 8
     assert body["score"] == 50
     assert body["band"] == "gray"
     assert body["ruleset_version"] == {
@@ -119,6 +125,83 @@ def test_mixed_batch(client):
     assert "deterministic" in successful["report"]
     assert failed["filename"] == "bad.txt"
     assert "report" not in failed
+
+
+def test_batch_rejects_more_than_the_v1_file_limit_before_analysis(
+    tmp_path,
+    location_resolver,
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def should_not_analyze(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("batch analysis started before file-count preflight")
+
+    monkeypatch.setattr(
+        "cv_validator.api.app.analyze_cv_bytes_result",
+        should_not_analyze,
+    )
+    app = create_app(
+        db_path=tmp_path / "batch-limit.db",
+        location_resolver=location_resolver,
+        batch_max_files=4,
+    )
+    files = [
+        (
+            "files",
+            (
+                f"candidate-{number}.docx",
+                _docx_bytes("Candidate\nSoftware engineer profile"),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+        )
+        for number in range(5)
+    ]
+
+    with TestClient(app) as local_client:
+        response = local_client.post("/analyze/batch", files=files)
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "batch_file_limit_exceeded"}
+    assert calls == 0
+
+
+def test_batch_rejects_total_readable_bytes_before_analysis(
+    tmp_path,
+    location_resolver,
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def should_not_analyze(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("batch analysis started before request-size preflight")
+
+    monkeypatch.setattr(
+        "cv_validator.api.app.analyze_cv_bytes_result",
+        should_not_analyze,
+    )
+    app = create_app(
+        db_path=tmp_path / "batch-bytes.db",
+        location_resolver=location_resolver,
+        batch_max_bytes=100,
+    )
+
+    with TestClient(app) as local_client:
+        response = local_client.post(
+            "/analyze/batch",
+            files=[
+                ("files", ("one.docx", b"a" * 60, "application/octet-stream")),
+                ("files", ("two.docx", b"b" * 60, "application/octet-stream")),
+            ],
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "batch_request_size_limit_exceeded"}
+    assert calls == 0
 
 
 def test_batch_isolates_upload_read_failure_and_continues_without_leaking_pii(
