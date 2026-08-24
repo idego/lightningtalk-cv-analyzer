@@ -44,3 +44,30 @@ class EducationResearchClientError(EducationResearchError):
 @dataclass(frozen=True)
 class EducationResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
+
+
+class LinkedInResearchError(Exception):
+    pass
+
+
+class LinkedInResearchTimeout(LinkedInResearchError):
+    pass
+
+
+class LinkedInResearchInvalidResponse(LinkedInResearchError):
+    pass
+
+
+class LinkedInResearchClientError(LinkedInResearchError):
+    pass
+
+
+@dataclass(frozen=True)
+class LinkedInDiscoveryRequest:
+    candidate: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LinkedInComparisonRequest:
+    candidate: dict[str, Any]
+    profile_url: str

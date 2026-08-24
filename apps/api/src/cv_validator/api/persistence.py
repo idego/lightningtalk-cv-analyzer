@@ -103,6 +103,25 @@ class PersistenceStore:
                     PRIMARY KEY (analysis_id, research_version),
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS linkedin_discovery (
+                    analysis_id TEXT NOT NULL, research_version TEXT NOT NULL,
+                    status TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                    configured_model TEXT NOT NULL, response_model TEXT, accessed_at TEXT NOT NULL,
+                    usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
+                    PRIMARY KEY (analysis_id, research_version), FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
+                CREATE TABLE IF NOT EXISTS linkedin_confirmation (
+                    analysis_id TEXT PRIMARY KEY, profile_url TEXT NOT NULL, discovery_version TEXT NOT NULL,
+                    confirmed_at TEXT NOT NULL, audit_json TEXT NOT NULL,
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
+                CREATE TABLE IF NOT EXISTS linkedin_comparison (
+                    analysis_id TEXT NOT NULL, research_version TEXT NOT NULL, profile_url TEXT NOT NULL,
+                    status TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                    configured_model TEXT NOT NULL, response_model TEXT, accessed_at TEXT NOT NULL,
+                    usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
+                    PRIMARY KEY (analysis_id, research_version), FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 """
             )
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
@@ -277,6 +296,59 @@ class PersistenceStore:
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("education research persistence failed") from exc
 
+    def get_linkedin_discovery(self, analysis_id: str) -> dict[str, Any] | None:
+        from cv_validator.research.linkedin import DISCOVERY_VERSION
+        return self._get_research_row("linkedin_discovery", analysis_id, DISCOVERY_VERSION)
+
+    def persist_linkedin_discovery(self, analysis_id: str, result: dict[str, Any]) -> None:
+        self._persist_linkedin_result("linkedin_discovery", analysis_id, result)
+
+    def confirm_linkedin_profile(self, analysis_id: str, profile_url: str, discovery_version: str) -> dict[str, Any]:
+        confirmed_at = _utc_now()
+        audit = {"action": "recruiter_confirmed_possible_profile", "analysis_id": analysis_id,
+                 "profile_url": profile_url, "discovery_version": discovery_version, "confirmed_at": confirmed_at,
+                 "caveat": "Confirmation authorizes comparison only; it does not establish identity."}
+        try:
+            with self._connect() as conn:
+                conn.execute("""INSERT INTO linkedin_confirmation (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
+                    VALUES (?, ?, ?, ?, ?) ON CONFLICT(analysis_id) DO NOTHING""",
+                    (analysis_id, profile_url, discovery_version, confirmed_at, json.dumps(audit)))
+                row = conn.execute("SELECT profile_url, audit_json FROM linkedin_confirmation WHERE analysis_id = ?", (analysis_id,)).fetchone()
+                if row is None or row["profile_url"] != profile_url: raise ValueError("different_profile_already_confirmed")
+                audit = json.loads(row["audit_json"])
+        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin confirmation persistence failed") from exc
+        return audit
+
+    def get_linkedin_confirmation(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM linkedin_confirmation WHERE analysis_id = ?", (analysis_id,)).fetchone()
+        return None if row is None else dict(row)
+
+    def get_linkedin_comparison(self, analysis_id: str) -> dict[str, Any] | None:
+        from cv_validator.research.linkedin import COMPARISON_VERSION
+        return self._get_research_row("linkedin_comparison", analysis_id, COMPARISON_VERSION)
+
+    def persist_linkedin_comparison(self, analysis_id: str, profile_url: str, result: dict[str, Any]) -> None:
+        self._persist_linkedin_result("linkedin_comparison", analysis_id, result, profile_url=profile_url)
+
+    def _get_research_row(self, table: str, analysis_id: str, version: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(f"SELECT * FROM {table} WHERE analysis_id = ? AND research_version = ?", (analysis_id, version)).fetchone()
+        return None if row is None else dict(row)
+
+    def _persist_linkedin_result(self, table: str, analysis_id: str, result: dict[str, Any], *, profile_url: str | None = None) -> None:
+        versions, model, now = result["versions"], result["model"], _utc_now()
+        columns = "analysis_id, research_version, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
+        values: tuple[Any, ...] = (analysis_id, versions["research"], result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
+        if profile_url is not None:
+            columns = "analysis_id, research_version, profile_url, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
+            values = (analysis_id, versions["research"], profile_url, result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
+        placeholders = ", ".join("?" for _ in values)
+        try:
+            with self._connect() as conn:
+                conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON CONFLICT(analysis_id, research_version) DO NOTHING", values)
+        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin research persistence failed") from exc
+
     def persist_analysis_payload_for_test(self, payload: dict[str, Any]) -> None:
         """Seed an anonymous stored payload without constructing an uploaded CV."""
         now = _utc_now()
@@ -300,6 +372,9 @@ class PersistenceStore:
             conn.execute("DELETE FROM ai_analyses WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM company_research WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM education_research WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM linkedin_discovery WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM linkedin_comparison WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM linkedin_confirmation WHERE confirmed_at < ?", (cutoff_iso,))
 
 
 def _utc_now() -> str:

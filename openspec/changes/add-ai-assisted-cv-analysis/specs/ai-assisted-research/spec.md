@@ -54,6 +54,7 @@ Education research SHALL check whether institutions, programs, degrees, and cert
 
 ### Requirement: Requested LinkedIn discovery and completeness checks
 LinkedIn discovery SHALL search by candidate name and, when useful, company or role from the CV. It MUST NOT claim identity. For possible public profiles it SHALL report match evidence, whether a photo is visible, and whether a public connection or follower count is visible. Missing photo data or a visible count below the configured threshold SHALL produce the requested profile-completeness flag.
+The V1 connection-count threshold SHALL default to 500 and SHALL be configurable. It SHALL apply only to an explicitly public visible minimum count with a cited source; an unknown count SHALL NOT produce a negative count-completeness flag.
 
 #### Scenario: Potential profiles found
 - **WHEN** LinkedIn discovery finds plausible profiles

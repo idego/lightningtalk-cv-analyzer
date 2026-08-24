@@ -62,6 +62,7 @@ Optional environment variables (via shell or `.env`):
 - `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
+- `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` — public, cited count-completeness threshold (default `500`; unknown counts are never negative evidence)
 
 The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
 request timeout, zero automatic retries, `store=false`, no tools, and a 4,096

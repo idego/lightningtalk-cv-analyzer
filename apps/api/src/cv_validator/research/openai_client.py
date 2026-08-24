@@ -6,7 +6,7 @@ from typing import Any
 
 import openai
 
-from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout
+from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout, LinkedInComparisonRequest, LinkedInDiscoveryRequest, LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
 
 
 class OpenAIResponsesCompanyResearcher:
@@ -87,6 +87,45 @@ class OpenAIResponsesEducationResearcher:
         return payload, response.model, usage
 
 
+class OpenAIResponsesLinkedInResearcher:
+    def __init__(self, *, client=None, api_key: str | None = None, timeout_seconds: float = 120.0):
+        self._client = client or openai.OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=0)
+
+    def discover(self, request: LinkedInDiscoveryRequest):
+        return self._call("linkedin-discovery.schema.json", "linkedin_discovery", {"candidate_facts": request.candidate})
+
+    def compare(self, request: LinkedInComparisonRequest):
+        return self._call("linkedin-comparison.schema.json", "linkedin_comparison", {"candidate_facts": request.candidate, "confirmed_profile_url": request.profile_url})
+
+    def _call(self, schema_file: str, schema_name: str, input_payload: dict[str, Any]):
+        prompt = files("cv_validator.research.contracts").joinpath("linkedin-prompt.md").read_text()
+        schema = json.loads(files("cv_validator.research.contracts").joinpath(schema_file).read_text())
+        try:
+            response = self._client.responses.create(
+                model="gpt-5.6-luna", reasoning={"effort": "medium"}, instructions=prompt,
+                input=json.dumps(input_payload, ensure_ascii=False),
+                tools=[{"type": "web_search", "search_context_size": "low"}],
+                include=["web_search_call.action.sources"], max_tool_calls=4,
+                text={"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}},
+                store=False, max_output_tokens=4096,
+            )
+        except openai.APITimeoutError as exc:
+            raise LinkedInResearchTimeout() from exc
+        except openai.APIError as exc:
+            raise LinkedInResearchClientError() from exc
+        try:
+            payload = json.loads(response.output_text)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise LinkedInResearchInvalidResponse() from exc
+        searches = _search_queries(response)
+        if not searches or len(searches) > 4: raise LinkedInResearchInvalidResponse()
+        payload["searches_performed"] = searches
+        cited = _nested_source_urls(payload)
+        if cited - _source_urls(response): raise LinkedInResearchInvalidResponse()
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        return payload, response.model, usage
+
+
 def _source_urls(response: Any) -> set[str]:
     urls: set[str] = set()
     for item in getattr(response, "output", ()):
@@ -113,3 +152,17 @@ def _search_queries(response: Any) -> list[str]:
             if isinstance(query, str) and query and query not in queries:
                 queries.append(query)
     return queries
+
+
+def _nested_source_urls(value: Any) -> set[str]:
+    urls: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"source_urls"} and isinstance(item, list):
+                urls.update(url for url in item if isinstance(url, str))
+            elif key in {"source_url", "photo_source_url", "profile_url"} and isinstance(item, str):
+                urls.add(item)
+            else: urls.update(_nested_source_urls(item))
+    elif isinstance(value, list):
+        for item in value: urls.update(_nested_source_urls(item))
+    return urls
