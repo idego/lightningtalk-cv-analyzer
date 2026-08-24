@@ -75,12 +75,12 @@
 
 ## 6. Slice 5 - Synchronous Education and Certification Research
 
-- [ ] 6.1 Let the recruiter start education and certification research for a stored analysis
-- [ ] 6.2 Add an idempotent education-research endpoint with a bounded timeout
-- [ ] 6.3 Define the Web Search prompt and schema for institutions, programs, degrees, certificates, dates, accreditation, city, and country
-- [ ] 6.4 Store cited results in SQLite and highlight unexplained location differences for review
-- [ ] 6.5 Show education research separately from company and LinkedIn results
-- [ ] 6.6 Test evidence, uncertainty, timeout, retry, duplicate requests, and cost limits
+- [x] 6.1 Let the recruiter start education and certification research for a stored analysis
+- [x] 6.2 Add an idempotent education-research endpoint with a bounded timeout
+- [x] 6.3 Define the Web Search prompt and schema for institutions, programs, degrees, certificates, dates, accreditation, city, and country
+- [x] 6.4 Store cited results in SQLite and highlight unexplained location differences for review
+- [x] 6.5 Show education research separately from company and LinkedIn results
+- [x] 6.6 Test evidence, uncertainty, timeout, retry, duplicate requests, and cost limits
 
 ## 7. Slice 6 - Synchronous LinkedIn Discovery and Comparison
 

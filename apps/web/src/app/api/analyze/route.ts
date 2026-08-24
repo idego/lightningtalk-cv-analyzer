@@ -30,11 +30,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No files provided" }, { status: 400 });
   }
 
+  const analysisAccessToken = crypto.randomUUID();
   const upstream = await fetch(`${INTERNAL_API_URL}/analyze/batch`, {
     method: "POST",
     body: payload,
+    headers: { "X-Analysis-Access-Token": analysisAccessToken },
   });
 
   const data = await upstream.json();
+  if (Array.isArray(data.results)) {
+    for (const item of data.results) {
+      if (item?.status === "ok" && item.report) item.report.analysis_access_token = analysisAccessToken;
+    }
+  }
   return NextResponse.json(data, { status: upstream.status });
 }
