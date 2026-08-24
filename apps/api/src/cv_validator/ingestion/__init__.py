@@ -25,6 +25,10 @@ class SourceLine:
     start_offset: int
     end_offset: int
 
+    @property
+    def line_id(self) -> str:
+        return f"{self.page_id}-line-{self.line_number:04d}"
+
 
 @dataclass(frozen=True)
 class SourcePage:

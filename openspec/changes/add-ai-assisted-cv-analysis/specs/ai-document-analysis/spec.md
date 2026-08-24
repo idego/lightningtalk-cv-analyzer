@@ -48,15 +48,24 @@ The AI analysis SHALL return structured education and employment facts when pres
 - **THEN** the field is explicitly marked as unknown instead of being guessed
 
 ### Requirement: Evidence required for document findings
-The system MUST NOT present an AI finding as fact unless the finding cites a location in the submitted CV.
+The system MUST NOT present an AI finding as fact unless the finding cites a
+stable page-scoped source-line ID from the submitted CV. Code SHALL resolve each
+accepted line ID to its canonical redacted page and materialize the exact source
+excerpt. The model SHALL NOT be trusted to reproduce or normalize candidate
+text as evidence.
 
 #### Scenario: Finding lacks evidence
 - **WHEN** an AI finding has no usable page and source excerpt
 - **THEN** the system excludes it from factual findings or marks it for manual review
 
 #### Scenario: Finding cites the wrong page
-- **WHEN** an excerpt is absent from the cited page's canonical source text
+- **WHEN** a source-line ID is unknown or does not belong to the cited page
 - **THEN** the system rejects that evidence item
+
+#### Scenario: Valid source line is cited
+- **WHEN** a model result cites a known line ID on its owning page
+- **THEN** code adds the canonical redacted line text as the exact excerpt
+- **AND** downstream report and persistence use that code-materialized evidence
 
 ### Requirement: AI excluded from deterministic authority
 AI-derived facts, associations, interpretations, and findings MUST NOT become inputs to deterministic score or band calculation. Deterministic arithmetic over AI-derived semantic facts MAY create an AI-assisted finding, but that finding SHALL remain outside the verdict path.

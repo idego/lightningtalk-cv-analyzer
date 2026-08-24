@@ -14,7 +14,7 @@ python scripts/eval_ai_document.py run \
   --model gpt-5.6-luna \
   --reasoning medium \
   --confirm-live-model-run \
-  --output data/ai-eval/results/baseline-2108.json
+  --output data/ai-eval/results/baseline-3108.json
 ```
 
 The command rejects manifests with more than four cases and processes accepted
@@ -22,16 +22,35 @@ cases sequentially in fresh contexts. Every case supplies one or more private
 page files with stable page IDs plus a private
 `deterministic-observations-v1` JSON file. The command validates the complete
 Draft 2020-12 output schema and records expected-finding recall, unsupported
-findings, unexpected findings, page-aware exact evidence, latency, usage, and
-explicitly configured estimated cost. Recall is not precision.
+findings, unexpected findings, page-aware exact evidence for findings and for
+all facts/findings/research candidates, latency, usage, and explicitly
+configured estimated cost. Aggregate acceptance uses micro recall and micro
+evidence exactness; the per-case macro recall remains diagnostic only. It prints
+a safe start/completion line for each anonymous case so a live run does not
+look stalled. Recall is not precision.
+
+The AI input marks every canonical redacted source line with a stable,
+page-scoped `line_id`. Model output cites `page_id` plus `line_id` and sets
+`excerpt` to `null`; code rejects unknown, cross-page, irrelevant, or
+model-authored evidence and materializes the exact redacted line text. A stored
+materialized result can be re-scored only when its excerpt still matches that
+canonical line.
+
+The strict acceptance gate requires all four responses to pass schema and
+protected-boundary validation, 100% expected-finding recall, 100% page-aware
+exact finding evidence, zero unsupported findings, and zero forbidden outputs.
+Every unexpected finding must be reviewed by index. Only `true positive` and
+`przydatne „warto wiedzieć”` additions are accepted; duplicates,
+overinterpretations, and parsing/flattening artifacts fail the gate. One
+finding can satisfy at most one expected finding.
 
 Re-score a stored response without another model call and attach an approved private manual review:
 
 ```bash
 python scripts/eval_ai_document.py rescore \
   --manifest data/ai-eval/manifest-2108.json \
-  --input data/ai-eval/results/baseline-2108.json \
-  --output data/ai-eval/results/baseline-2108.json
+  --input data/ai-eval/results/baseline-3108.json \
+  --output data/ai-eval/results/baseline-3108.json
 ```
 
 `--manual-review <private-markdown-path>` remains available when a future benchmark produces additional findings that require human classification; no manual-review file is needed for the accepted baseline.

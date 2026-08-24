@@ -23,18 +23,25 @@ def evidence(excerpt="source evidence", page_id="page-0001"):
     return {"page_id": page_id, "excerpt": excerpt}
 
 
-def valid_result(excerpt="source evidence"):
+def model_evidence(page_id="page-0001", line_id="page-0001-line-0001"):
+    return {"page_id": page_id, "line_id": line_id, "excerpt": None}
+
+
+def valid_result():
     return {
-        "schema_version": "document-analysis-schema-v3",
+        "schema_version": "document-analysis-schema-v7",
         "facts": {
-            "contact": [{"kind": "phone", "value": "+48 123", "status": "present", "authority": "ai", "source": "document_analyzer", "evidence": [evidence(excerpt)]}],
+            "contact": [{"kind": "phone", "value": "source evidence", "status": "present", "authority": "ai", "source": "document_analyzer", "evidence": [model_evidence()]}],
             "education": [],
             "employment": [],
         },
         "findings": [],
         "unknowns": [],
         "research_candidates": [],
-        "checklist": [{"id": item, "checked": True, "issue_count": 0} for item in sorted(MODULE.CHECK_IDS)],
+        "checklist": {
+            item: {"checked": True, "issue_count": 0}
+            for item in sorted(MODULE.CHECK_IDS)
+        },
         "analysis_limitations": ["Flattened input."],
     }
 
@@ -68,13 +75,16 @@ def test_private_path_guard_rejects_output_outside_eval_root(tmp_path, monkeypat
         MODULE.require_private_path(tmp_path / "leak.json", "output")
 
 
-def test_validate_result_rejects_non_source_evidence():
-    result = valid_result("invented")
+def test_validate_result_rejects_unknown_source_line():
+    result = valid_result()
+    result["facts"]["contact"][0]["evidence"][0]["line_id"] = (
+        "page-0001-line-9999"
+    )
 
     errors = MODULE.validate_result(result, {"page-0001": "source evidence"})
 
     assert errors == [
-        "AI document analysis response failed validation: exact excerpt"
+        "AI document analysis response failed validation: source line"
     ]
 
 
@@ -115,6 +125,254 @@ def test_score_names_finding_evidence_metric_precisely():
     assert "evidence_accuracy" not in metrics
 
 
+def test_score_reports_exactness_for_all_evidence_sections():
+    case = {"expected_findings": [], "forbidden_output_terms": []}
+    result = valid_result()
+    result["findings"] = [
+        {
+            "category": "document_artifact",
+            "evidence": [evidence("source evidence")],
+        }
+    ]
+    result["facts"]["contact"][0]["evidence"] = [evidence("invented fact")]
+    result["research_candidates"] = [
+        {
+            "category": "company",
+            "evidence": evidence("source evidence"),
+        }
+    ]
+
+    metrics = MODULE.score(case, result, {"page-0001": "source evidence"})
+
+    assert metrics["finding_evidence_exact_match_count"] == 1
+    assert metrics["finding_evidence_item_count"] == 1
+    assert metrics["all_evidence_exact_match_count"] == 2
+    assert metrics["all_evidence_item_count"] == 3
+    assert metrics["invalid_evidence_item_count"] == 1
+    assert metrics["all_evidence_exact_match_accuracy_page_aware"] == pytest.approx(
+        2 / 3
+    )
+
+
+def test_one_finding_cannot_satisfy_two_expected_findings():
+    case = {
+        "expected_findings": [
+            {"category": "timeline_overlap", "evidence_contains": "2020"},
+            {"category": "timeline_overlap", "evidence_contains": "2021"},
+        ],
+        "forbidden_output_terms": [],
+    }
+    result = {
+        "findings": [
+            {
+                "category": "timeline_overlap",
+                "status": "conflicting",
+                "evidence": [evidence("2020-2021")],
+            }
+        ]
+    }
+
+    metrics = MODULE.score(case, result, {"page-0001": "2020-2021"})
+
+    assert metrics["matched_expected_count"] == 1
+    assert metrics["recall"] == 0.5
+    assert metrics["unexpected_finding_indices"] == []
+
+
+def test_expected_missing_finding_can_match_status_without_arbitrary_excerpt():
+    case = {
+        "expected_findings": [
+            {"category": "missing_contact_data", "status": "missing"}
+        ],
+        "forbidden_output_terms": [],
+    }
+    result = {
+        "findings": [
+            {
+                "category": "missing_contact_data",
+                "status": "missing",
+                "evidence": [evidence("contact block")],
+            }
+        ]
+    }
+
+    metrics = MODULE.score(case, result, {"page-0001": "contact block"})
+
+    assert metrics["recall"] == 1.0
+    assert metrics["unexpected_finding_count"] == 0
+
+
+def test_invalid_raw_line_reference_does_not_crash_scoring():
+    case = {
+        "expected_findings": [
+            {"category": "timeline_overlap", "evidence_contains": "2020"}
+        ],
+        "forbidden_output_terms": [],
+    }
+    result = {
+        "findings": [
+            {
+                "category": "timeline_overlap",
+                "evidence": [
+                    {
+                        "page_id": "page-0001",
+                        "line_id": "page-0001-line-9999",
+                        "excerpt": None,
+                    }
+                ],
+            }
+        ]
+    }
+
+    metrics = MODULE.score(case, result, {"page-0001": "2020"})
+
+    assert metrics["recall"] == 0.0
+    assert metrics["invalid_evidence_item_count"] == 1
+
+
+def test_raw_model_line_reference_is_valid_but_not_exact_before_materialization():
+    case = {"expected_findings": [], "forbidden_output_terms": []}
+    result = valid_result()
+
+    metrics = MODULE.score(case, result, {"page-0001": "source evidence"})
+
+    assert metrics["line_reference_valid_count"] == 1
+    assert metrics["line_reference_item_count"] == 1
+    assert metrics["all_evidence_exact_match_count"] == 0
+    assert metrics["invalid_evidence_item_count"] == 1
+
+
+def test_raw_model_line_reference_must_belong_to_the_cited_page():
+    case = {"expected_findings": [], "forbidden_output_terms": []}
+    result = valid_result()
+    result["facts"]["contact"][0]["evidence"][0]["page_id"] = "page-0002"
+
+    metrics = MODULE.score(
+        case,
+        result,
+        {"page-0001": "source evidence", "page-0002": "other evidence"},
+    )
+
+    assert metrics["all_evidence_exact_match_count"] == 0
+    assert metrics["line_reference_valid_count"] == 0
+    assert metrics["invalid_evidence_item_count"] == 1
+
+
+def test_baseline_gate_rejects_unreviewed_additions_and_bad_metrics():
+    report = {
+        "validation_errors": [],
+        "metrics": {
+            "recall": 1.0,
+            "unsupported_finding_count": 0,
+            "unexpected_finding_count": 1,
+            "unexpected_finding_indices": [1],
+            "finding_evidence_exact_match_accuracy_page_aware": 1.0,
+            "invalid_evidence_item_count": 0,
+            "line_reference_validity": 1.0,
+            "forbidden_output_hits": [],
+        },
+    }
+
+    assert MODULE.baseline_is_acceptable([report]) is False
+
+    report["manual_review"] = [
+        {
+            "case_id": "case-1",
+            "finding_index": 1,
+            "classification": "przydatne „warto wiedzieć”",
+        }
+    ]
+    assert MODULE.baseline_is_acceptable([report]) is True
+
+    report["metrics"]["recall"] = 0.5
+    assert MODULE.baseline_is_acceptable([report]) is False
+
+
+@pytest.mark.parametrize(
+    "classification",
+    ("duplikat", "nadinterpretacja", "artefakt parsowania/flatteningu"),
+)
+def test_baseline_gate_rejects_low_quality_reviewed_additions(classification):
+    report = {
+        "validation_errors": [],
+        "metrics": {
+            "recall": 1.0,
+            "unsupported_finding_count": 0,
+            "unexpected_finding_count": 1,
+            "unexpected_finding_indices": [0],
+            "finding_evidence_exact_match_accuracy_page_aware": 1.0,
+            "invalid_evidence_item_count": 0,
+            "line_reference_validity": 1.0,
+            "forbidden_output_hits": [],
+        },
+        "manual_review": [
+            {
+                "case_id": "case-1",
+                "finding_index": 0,
+                "classification": classification,
+            }
+        ],
+    }
+
+    assert MODULE.baseline_is_acceptable([report]) is False
+
+
+def test_summary_uses_micro_recall_and_micro_evidence_accuracy():
+    reports = [
+        {
+            "validation_errors": [],
+            "latency_seconds": 1.0,
+            "estimated_cost_usd": 0.01,
+            "metrics": {
+                "expected_count": 2,
+                "matched_expected_count": 1,
+                "recall": 0.5,
+                "unsupported_finding_count": 0,
+                "unexpected_finding_count": 0,
+                "unexpected_finding_indices": [],
+                "finding_evidence_exact_match_count": 1,
+                "finding_evidence_item_count": 1,
+                "all_evidence_exact_match_count": 2,
+                "all_evidence_item_count": 2,
+                "invalid_evidence_item_count": 0,
+                "finding_evidence_exact_match_accuracy_page_aware": 1.0,
+                "all_evidence_exact_match_accuracy_page_aware": 1.0,
+                "forbidden_output_hits": [],
+            },
+        },
+        {
+            "validation_errors": ["invalid"],
+            "latency_seconds": 1.0,
+            "estimated_cost_usd": 0.01,
+            "metrics": {
+                "expected_count": 0,
+                "matched_expected_count": 0,
+                "recall": 1.0,
+                "unsupported_finding_count": 0,
+                "unexpected_finding_count": 0,
+                "unexpected_finding_indices": [],
+                "finding_evidence_exact_match_count": 1,
+                "finding_evidence_item_count": 3,
+                "all_evidence_exact_match_count": 1,
+                "all_evidence_item_count": 3,
+                "invalid_evidence_item_count": 2,
+                "finding_evidence_exact_match_accuracy_page_aware": 1 / 3,
+                "all_evidence_exact_match_accuracy_page_aware": 1 / 3,
+                "forbidden_output_hits": [],
+            },
+        },
+    ]
+
+    summary = MODULE.summarize(reports)
+
+    assert summary["expected_finding_micro_recall"] == 0.5
+    assert summary["accepted_expected_finding_micro_recall"] == 0.5
+    assert summary["finding_evidence_exact_match_accuracy_page_aware"] == 0.5
+    assert summary["all_evidence_exact_match_accuracy_page_aware"] == pytest.approx(
+        3 / 5
+    )
+
+
 def test_rescore_revalidates_stored_results_without_model_call(tmp_path, monkeypatch):
     private_root = tmp_path / "data" / "ai-eval"
     private_root.mkdir(parents=True)
@@ -144,6 +402,10 @@ def test_rescore_revalidates_stored_results_without_model_call(tmp_path, monkeyp
         ]
     }
     monkeypatch.setattr(MODULE, "PRIVATE_EVAL_ROOT", private_root.resolve())
+    saved_result, errors = MODULE.validate_and_materialize_result(
+        valid_result(), {"page-0001": "source evidence"}
+    )
+    assert errors == []
     report = {
         "cases": [{
             "case_id": "case-1",
@@ -151,7 +413,7 @@ def test_rescore_revalidates_stored_results_without_model_call(tmp_path, monkeyp
             "estimated_cost_usd": None,
             "validation_errors": ["stale"],
             "metrics": {},
-            "result": valid_result(),
+            "result": saved_result,
         }]
     }
 
@@ -161,6 +423,62 @@ def test_rescore_revalidates_stored_results_without_model_call(tmp_path, monkeyp
     assert rescored["summary"]["valid_case_count"] == 1
     assert rescored["summary"]["recall_is_not_precision"] is True
     assert rescored["summary"]["finding_evidence_exact_match_accuracy_page_aware"] == 1.0
+
+
+def test_rescore_does_not_trust_a_tampered_materialized_excerpt(
+    tmp_path,
+    monkeypatch,
+):
+    private_root = tmp_path / "data" / "ai-eval"
+    private_root.mkdir(parents=True)
+    (private_root / "source.txt").write_text("source evidence", encoding="utf-8")
+    (private_root / "observations.json").write_text(
+        json.dumps(
+            {
+                "contract_version": "deterministic-observations-v1",
+                "deterministic_ruleset_version": "1.0.0",
+                "observations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = {
+        "cases": [
+            {
+                "id": "case-1",
+                "pages": [{"page_id": "page-0001", "input": "source.txt"}],
+                "deterministic_observations": "observations.json",
+                "expected_findings": [],
+                "forbidden_output_terms": [],
+            }
+        ]
+    }
+    manifest_path = private_root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(MODULE, "PRIVATE_EVAL_ROOT", private_root.resolve())
+    saved_result, errors = MODULE.validate_and_materialize_result(
+        valid_result(), {"page-0001": "source evidence"}
+    )
+    assert errors == []
+    saved_result["facts"]["contact"][0]["evidence"][0]["excerpt"] = "tampered"
+    report = {
+        "cases": [
+            {
+                "case_id": "case-1",
+                "latency_seconds": 1.0,
+                "estimated_cost_usd": None,
+                "validation_errors": [],
+                "metrics": {},
+                "result": saved_result,
+            }
+        ]
+    }
+
+    rescored = MODULE.rescore_report(report, manifest, manifest_path)
+
+    assert rescored["cases"][0]["validation_errors"] == [
+        "AI document analysis response failed validation: model evidence"
+    ]
 
 
 def test_page_aware_eval_input_loads_private_pages_and_versioned_observations(
@@ -202,6 +520,8 @@ def test_page_aware_eval_input_loads_private_pages_and_versioned_observations(
     assert loaded.deterministic_observations == observations
     assert "<!-- page: page-0001 -->" in loaded.request_text
     assert "<!-- page: page-0002 -->" in loaded.request_text
+    assert "<!-- line: page-0001-line-0001 -->" in loaded.request_text
+    assert "<!-- line: page-0002-line-0001 -->" in loaded.request_text
     assert "deterministic-observations-v1" in loaded.request_text
 
 

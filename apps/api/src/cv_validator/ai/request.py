@@ -8,12 +8,12 @@ from typing import Any
 
 from cv_validator.ai.config import AISettings
 from cv_validator.domain import DeterministicAnalysisResult
-from cv_validator.ingestion import RedactedDocument
+from cv_validator.ingestion import RedactedDocument, SourcePage
 
 
-PROMPT_VERSION = "2108"
-SCHEMA_VERSION = "document-analysis-schema-v3"
-INPUT_CONTRACT_VERSION = "document-analysis-input-v1"
+PROMPT_VERSION = "3108"
+SCHEMA_VERSION = "document-analysis-schema-v7"
+INPUT_CONTRACT_VERSION = "document-analysis-input-v2"
 DETERMINISTIC_OBSERVATIONS_VERSION = "deterministic-observations-v1"
 
 
@@ -47,7 +47,10 @@ def build_document_analysis_request(
         "deterministic_ruleset_version": deterministic.ruleset_version,
         "observations": deterministic.to_dict()["observations"],
     }
-    input_text = format_document_analysis_input(document.markdown, observations)
+    input_text = format_document_analysis_input(
+        format_line_referenced_markdown(document.pages),
+        observations,
+    )
     payload: dict[str, Any] = {
         "model": settings.model,
         "reasoning": {"effort": settings.reasoning_effort},
@@ -99,6 +102,18 @@ def format_document_analysis_input(
         f"{page_markdown}\n"
         "</redacted_cv_markdown>"
     )
+
+
+def format_line_referenced_markdown(pages: tuple[SourcePage, ...]) -> str:
+    rendered_pages: list[str] = []
+    for page in pages:
+        rendered_lines = [f"<!-- page: {page.page_id} -->"]
+        for line in page.lines:
+            rendered_lines.extend(
+                (f"<!-- line: {line.line_id} -->", line.text)
+            )
+        rendered_pages.append("\n".join(rendered_lines))
+    return "\n\n".join(rendered_pages)
 
 
 def load_document_analysis_schema() -> dict[str, Any]:
