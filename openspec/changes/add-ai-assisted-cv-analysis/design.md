@@ -142,6 +142,11 @@ Research uses OpenAI Web Search and keeps its source data. It does not use brows
 
 LinkedIn discovery returns possible profiles. The recruiter must confirm a possible profile before a later comparison treats its differences from the CV as relevant.
 
+The V1 public connection-count completeness threshold is 500 and is configurable
+through `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD`. It applies only when a
+public minimum count is explicitly visible and cited. An unknown count never
+creates a negative completeness signal.
+
 ### D9: Keep the existing runtime and persistence
 
 Docker Compose continues to run `web` and `api`. Only `web` publishes a host port. The API stores reports, research results, prompt versions, usage, and audit records in SQLite.
@@ -242,4 +247,3 @@ Disabling AI and research must preserve a tested deterministic-only report based
 - Which per-CV and per-batch cost limits should production enforce?
 - How long should SQLite research cache entries remain valid?
 - Which retention period should replace the 90-day development value?
-- What configured threshold should the LinkedIn profile-completeness signal use?

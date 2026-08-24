@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 
 from cv_validator.ai.application import DocumentAnalyzer
@@ -29,10 +30,17 @@ from cv_validator.research.openai_client import OpenAIResponsesCompanyResearcher
 from cv_validator.research.education import EducationResearchService
 from cv_validator.research.domain import EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesEducationResearcher
+from cv_validator.research.linkedin import LinkedInComparisonService, LinkedInDiscoveryService, normalize_linkedin_url
+from cv_validator.research.domain import LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
+from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearcher
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
 DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
+
+
+class _LinkedInConfirmation(BaseModel):
+    profile_url: str
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,8 @@ def create_app(
     batch_max_bytes: int | None = None,
     company_researcher=None,
     education_researcher=None,
+    linkedin_researcher=None,
+    linkedin_connection_threshold: int | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
@@ -87,6 +97,10 @@ def create_app(
             api_key=selected_ai_settings.api_key,
             timeout_seconds=selected_ai_settings.timeout_seconds,
         )
+    selected_linkedin_researcher = linkedin_researcher
+    if selected_ai_settings.enabled and selected_linkedin_researcher is None:
+        selected_linkedin_researcher = OpenAIResponsesLinkedInResearcher(api_key=selected_ai_settings.api_key, timeout_seconds=selected_ai_settings.timeout_seconds)
+    selected_linkedin_threshold = linkedin_connection_threshold if linkedin_connection_threshold is not None else _positive_int_env("CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD", 500)
     resolver = location_resolver or load_location_resolver()
     store = PersistenceStore(
         PersistenceConfig(
@@ -291,6 +305,62 @@ def create_app(
         response["education_research"] = result
         return JSONResponse(response)
 
+    @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
+    def discover_linkedin(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+        stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        if selected_linkedin_researcher is None: raise HTTPException(status_code=503, detail="linkedin_research_disabled")
+        with research_locks_guard: lock = research_locks.setdefault(f"linkedin:{analysis_id}", threading.Lock())
+        with lock:
+            completed = store.get_linkedin_discovery(analysis_id)
+            if completed is not None: result = json.loads(completed["result_json"])
+            else:
+                try:
+                    result = LinkedInDiscoveryService(selected_linkedin_researcher, selected_linkedin_threshold).run(stored_payload)
+                    store.persist_linkedin_discovery(analysis_id, result)
+                except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+                except LinkedInResearchTimeout as exc: raise HTTPException(status_code=504, detail="linkedin_discovery_timeout") from exc
+                except LinkedInResearchInvalidResponse as exc: raise HTTPException(status_code=502, detail="linkedin_discovery_invalid_response") from exc
+                except LinkedInResearchClientError as exc: raise HTTPException(status_code=502, detail="linkedin_discovery_client_error") from exc
+        response = deepcopy(stored_payload); response["linkedin_discovery"] = result
+        return JSONResponse(response)
+
+    @app.post("/analyses/{analysis_id}/research/linkedin/confirmation")
+    def confirm_linkedin(analysis_id: str, confirmation: _LinkedInConfirmation, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+        _owned_payload(store, analysis_id, x_analysis_access_token)
+        discovery_row = store.get_linkedin_discovery(analysis_id)
+        if discovery_row is None: raise HTTPException(status_code=409, detail="linkedin_discovery_required")
+        discovery = json.loads(discovery_row["result_json"])
+        try: profile_url = normalize_linkedin_url(confirmation.profile_url)
+        except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
+        allowed = {normalize_linkedin_url(profile["profile_url"]) for profile in discovery["possible_profiles"]}
+        if profile_url not in allowed: raise HTTPException(status_code=409, detail="profile_not_in_discovery")
+        try: audit = store.confirm_linkedin_profile(analysis_id, profile_url, discovery["versions"]["research"])
+        except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse({"linkedin_confirmation": audit})
+
+    @app.post("/analyses/{analysis_id}/research/linkedin/comparison")
+    def compare_linkedin(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+        stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        if selected_linkedin_researcher is None: raise HTTPException(status_code=503, detail="linkedin_research_disabled")
+        confirmation = store.get_linkedin_confirmation(analysis_id)
+        discovery_row = store.get_linkedin_discovery(analysis_id)
+        if confirmation is None or discovery_row is None: raise HTTPException(status_code=409, detail="linkedin_confirmation_required")
+        stored_payload["linkedin_discovery"] = json.loads(discovery_row["result_json"])
+        with research_locks_guard: lock = research_locks.setdefault(f"linkedin-comparison:{analysis_id}", threading.Lock())
+        with lock:
+            completed = store.get_linkedin_comparison(analysis_id)
+            if completed is not None: result = json.loads(completed["result_json"])
+            else:
+                try:
+                    result = LinkedInComparisonService(selected_linkedin_researcher).run(stored_payload, confirmation["profile_url"])
+                    store.persist_linkedin_comparison(analysis_id, confirmation["profile_url"], result)
+                except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+                except LinkedInResearchTimeout as exc: raise HTTPException(status_code=504, detail="linkedin_comparison_timeout") from exc
+                except LinkedInResearchInvalidResponse as exc: raise HTTPException(status_code=502, detail="linkedin_comparison_invalid_response") from exc
+                except LinkedInResearchClientError as exc: raise HTTPException(status_code=502, detail="linkedin_comparison_client_error") from exc
+        response = deepcopy(stored_payload); response["linkedin_comparison"] = result
+        return JSONResponse(response)
+
     app.state.store = store
     app.state.location_resolver = resolver
     app.state.ai_settings = selected_ai_settings
@@ -299,6 +369,8 @@ def create_app(
     app.state.batch_max_bytes = selected_batch_max_bytes
     app.state.company_researcher = selected_company_researcher
     app.state.education_researcher = selected_education_researcher
+    app.state.linkedin_researcher = selected_linkedin_researcher
+    app.state.linkedin_connection_threshold = selected_linkedin_threshold
     return app
 
 
@@ -347,3 +419,10 @@ def _default_app() -> FastAPI:
 
 
 app = _default_app()
+
+
+def _owned_payload(store: PersistenceStore, analysis_id: str, access_token: str | None) -> dict:
+    if not store.analysis_access_allowed(analysis_id, access_token): raise HTTPException(status_code=404, detail="analysis_not_found")
+    payload = store.get_analysis_payload(analysis_id)
+    if payload is None: raise HTTPException(status_code=404, detail="analysis_not_found")
+    return payload

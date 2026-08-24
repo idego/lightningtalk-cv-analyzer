@@ -84,14 +84,14 @@
 
 ## 7. Slice 6 - Synchronous LinkedIn Discovery and Comparison
 
-- [ ] 7.1 Let the recruiter start candidate-scoped LinkedIn discovery for a stored analysis
-- [ ] 7.2 Add an idempotent LinkedIn-discovery endpoint with a bounded timeout
-- [ ] 7.3 Return possible profiles with match evidence and confidence without claiming identity
-- [ ] 7.4 Report visible photo and connection-count availability and apply the agreed completeness threshold without analyzing appearance
-- [ ] 7.5 Show a `linkedin_not_found` flag with the searches performed and their limitations
-- [ ] 7.6 Require recruiter confirmation before profile-to-CV comparison
-- [ ] 7.7 Compare a confirmed profile's companies, roles, dates, location, and education with the CV
-- [ ] 7.8 Test wrong-person matches, ambiguity, no profile, evidence, timeout, retry, and candidate isolation
+- [x] 7.1 Let the recruiter start candidate-scoped LinkedIn discovery for a stored analysis
+- [x] 7.2 Add an idempotent LinkedIn-discovery endpoint with a bounded timeout
+- [x] 7.3 Return possible profiles with match evidence and confidence without claiming identity
+- [x] 7.4 Report visible photo and connection-count availability and apply the agreed completeness threshold without analyzing appearance
+- [x] 7.5 Show a `linkedin_not_found` flag with the searches performed and their limitations
+- [x] 7.6 Require recruiter confirmation before profile-to-CV comparison
+- [x] 7.7 Compare a confirmed profile's companies, roles, dates, location, and education with the CV
+- [x] 7.8 Test wrong-person matches, ambiguity, no profile, evidence, timeout, retry, and candidate isolation
 
 ## 8. Slice 7 - V1 Hardening in the Existing Architecture
 
