@@ -14,6 +14,99 @@ export type Evidence = {
   excerpt: string;
 };
 
+export type ReviewEvidence = {
+  page_id: string;
+  page_number?: number;
+  line_id?: string;
+  start_offset?: number;
+  end_offset?: number;
+  excerpt: string;
+};
+
+export type ReviewImportance = "attention" | "worth_knowing" | "remaining";
+
+export type ReviewFlag = {
+  id: string;
+  source: "code" | "ai";
+  authority: "code" | "ai";
+  category: string;
+  status: string;
+  importance: ReviewImportance;
+  confidence: string;
+  observation: string;
+  reason: string;
+  limitation: string | null;
+  evidence: ReviewEvidence[];
+};
+
+export type ChecklistId =
+  | "contact"
+  | "education"
+  | "employment"
+  | "timeline"
+  | "duration_claims"
+  | "relationships"
+  | "document_quality"
+  | "protected_boundaries";
+
+type AIFactBase = {
+  status: "present" | "ambiguous";
+  authority: "ai";
+  source: "document_analyzer";
+  evidence: ReviewEvidence[];
+};
+
+export type AIContactFact = AIFactBase & {
+  kind: "phone" | "stated_location";
+  value: string;
+};
+
+export type AIEducationFact = AIFactBase & {
+  kind: "education";
+  institution: string;
+  program: string | null;
+  study_dates: string | null;
+};
+
+export type AIEmploymentFact = AIFactBase & {
+  kind: "employment";
+  organization: string;
+  role: string;
+  employment_dates: string | null;
+  location: string | null;
+  relationship_type: string | null;
+};
+
+export type AIAnalysis = {
+  status: "disabled" | "succeeded" | "failed";
+  failure_reason: "timeout" | "refusal" | "invalid_response" | "client_error" | null;
+  authority: "ai";
+  source: "document_analyzer";
+  model: {
+    provider: "openai";
+    configured: string;
+    response: string | null;
+    reasoning_effort: string;
+  };
+  versions: {
+    prompt: string;
+    schema: string;
+    input_contract: string;
+    deterministic_observations: string;
+  };
+  usage: Record<string, unknown> | null;
+  facts: {
+    contact: AIContactFact[];
+    education: AIEducationFact[];
+    employment: AIEmploymentFact[];
+  };
+  findings: unknown[];
+  unknowns: unknown[];
+  research_candidates: unknown[];
+  checklist: Record<ChecklistId, { checked: boolean; issue_count: number }>;
+  analysis_limitations: string[];
+};
+
 type ProvenanceFields = {
   authority: "code";
   evidence: Evidence[];
@@ -85,6 +178,7 @@ export type DeterministicScoringSignal = ProvenanceFields & {
 };
 
 export type AnalysisReport = {
+  analysis_id: string;
   score: number;
   band: Band;
   claimed_location: {
@@ -110,6 +204,11 @@ export type AnalysisReport = {
     facts: DeterministicFact[];
     observations: DeterministicObservation[];
     scoring_signals: DeterministicScoringSignal[];
+  };
+  ai_analysis: AIAnalysis;
+  checklist: {
+    checks: Record<ChecklistId, { checked: boolean; issue_count: number }>;
+    flags: ReviewFlag[];
   };
 };
 
