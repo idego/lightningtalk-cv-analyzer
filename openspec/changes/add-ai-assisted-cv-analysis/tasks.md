@@ -47,12 +47,14 @@
 ## 4. Slice 3 - Synchronous AI Base Report
 
 - [x] 4.1 Add OpenAI settings, secret documentation, a disabled feature flag, request timeout, and pinned GPT-5.6 Luna configuration
-- [x] 4.2 Update the Document Analyzer prompt, schema, and eval input contract for page-aware text plus versioned deterministic observations
+- [x] 4.2 Update the Document Analyzer prompt, schema, and eval input contract for page-aware text, stable page-scoped source-line evidence IDs, code-materialized exact excerpts, and versioned deterministic observations
 - [ ] 4.3 Re-run the four-CV baseline and accept a versioned prompt/schema only after evidence and finding metrics remain within agreed limits
+  - Prompt `3108` is frozen as the current implementation contract, but its four-case GPT-5.6 Luna baseline is not accepted: two responses failed the fail-closed evidence/checklist validation. Final model/prompt acceptance returns in the 4.13 model gate; metrics remain unchanged.
 - [ ] 4.4 Call the OpenAI Document Analyzer from the existing pipeline without web tools and validate its schema, page IDs, and exact excerpts
 - [ ] 4.5 Keep each CV request independent and reject invalid evidence, unsupported demographic inferences, malformed research candidates, and AI-derived verdict inputs
 - [ ] 4.6 Return deterministic contact facts and AI-derived education, employment, relationship, and reviewer findings with explicit authority/source labels
 - [ ] 4.7 Return code-owned phone-country, stated-location, and combined outside-EU observations with their limitations
+- [ ] 4.7a Add a reviewed, versioned, official-source-backed catalog of common public mail-provider domains and legitimate aliases covering major international families (Google, Microsoft, Yahoo, Proton, Apple, and Zoho) and common Polish providers (Onet, WP/o2, and Interia); emit a code-owned, zero-weight `possible_email_domain_typo` observation only for conservative close confusable spellings such as `gmail.cm`, with exact evidence, catalog provenance, a confirmation caveat, no custom-domain inference, and regression tests
 - [ ] 4.8 Store AI findings, importance, confidence, evidence, authority, deterministic-observation version, model versions, usage, and audit data in SQLite
 - [ ] 4.9 Merge AI findings into the report without changing deterministic score, band, facts, or rule findings
 - [ ] 4.10 Return a stable analysis ID and the complete flag checklist as JSON

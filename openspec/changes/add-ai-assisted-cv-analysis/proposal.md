@@ -9,6 +9,8 @@ The current analyzer checks location consistency with prototype fixed rules. Sev
 - Resolve locations through a replaceable `LocationResolver` backed in V1 by a versioned offline GeoNames index built from `cities500`, `countryInfo`, and filtered `alternateNamesV2` records. The application never downloads reference data while analyzing a CV.
 - Send the complete page-aware CV plus versioned deterministic observations to one synchronous OpenAI Document Analyzer call in the existing FastAPI pipeline.
 - Return structured contact, education, and employment data plus cited AI findings in the current report.
+- Let the model cite stable source-line IDs and let code materialize exact page excerpts, so the model never has to reproduce candidate text byte-for-byte.
+- Surface possible typos of well-known public email-provider domains as code-owned, non-scoring `worth knowing` observations with an explicit confirmation caveat.
 - Make Magdalena's HR backlog the required business scope: location flags, company checks, education checks, LinkedIn checks, a complete flag checklist, and JSON/HTML results.
 - Keep score and band calculation deterministic. Only code-owned facts may affect them. AI-derived facts and findings support human review but never enter the verdict path, reject, or advance a candidate.
 - Preserve the current JSON fields and add one nested `deterministic` object containing facts, observations, authority, evidence, and deterministic versions.

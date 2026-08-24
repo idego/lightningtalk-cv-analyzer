@@ -12,6 +12,7 @@ from cv_validator.ai.domain import (
 )
 from cv_validator.ai.request import (
     DETERMINISTIC_OBSERVATIONS_VERSION,
+    PROMPT_VERSION,
     build_document_analysis_request,
 )
 from cv_validator.ai.validation import (
@@ -58,7 +59,7 @@ def _valid_response() -> dict:
         "protected_boundaries",
     )
     return {
-        "schema_version": "document-analysis-schema-v3",
+        "schema_version": "document-analysis-schema-v7",
         "facts": {
             "contact": [],
             "education": [
@@ -73,7 +74,8 @@ def _valid_response() -> dict:
                     "evidence": [
                         {
                             "page_id": "page-0002",
-                            "excerpt": "Example University",
+                            "line_id": "page-0002-line-0002",
+                            "excerpt": None,
                         }
                     ],
                 }
@@ -83,10 +85,10 @@ def _valid_response() -> dict:
         "findings": [],
         "unknowns": [],
         "research_candidates": [],
-        "checklist": [
-            {"id": check_id, "checked": True, "issue_count": 0}
+        "checklist": {
+            check_id: {"checked": True, "issue_count": 0}
             for check_id in check_ids
-        ],
+        },
         "analysis_limitations": ["Only literal CV content was analyzed."],
     }
 
@@ -97,8 +99,8 @@ def _malformed_response(kind: str):
     response = _valid_response()
     if kind == "page-id-array":
         response["facts"]["education"][0]["evidence"][0]["page_id"] = []
-    elif kind == "excerpt-array":
-        response["facts"]["education"][0]["evidence"][0]["excerpt"] = []
+    elif kind == "line-id-array":
+        response["facts"]["education"][0]["evidence"][0]["line_id"] = []
     elif kind == "facts-array":
         response["facts"] = ["PRIVATE CANDIDATE TEXT"]
     else:  # pragma: no cover - test helper misuse
@@ -117,7 +119,8 @@ def _response_with_valid_research_candidate() -> dict:
             "source": "document_analyzer",
             "evidence": {
                 "page_id": "page-0002",
-                "excerpt": "Example University",
+                "line_id": "page-0002-line-0002",
+                "excerpt": None,
             },
         }
     ]
@@ -154,6 +157,8 @@ def test_request_builder_accepts_only_redacted_page_aware_documents() -> None:
     assert request.page_ids == ("page-0001", "page-0002")
     assert "<!-- page: page-0001 -->" in input_text
     assert "<!-- page: page-0002 -->" in input_text
+    assert "<!-- line: page-0001-line-0001 -->" in input_text
+    assert "<!-- line: page-0002-line-0002 -->" in input_text
     assert DETERMINISTIC_OBSERVATIONS_VERSION in input_text
     assert json.dumps(
         deterministic.to_dict()["observations"],
@@ -166,10 +171,27 @@ def test_request_builder_accepts_only_redacted_page_aware_documents() -> None:
     assert payload["store"] is False
     assert payload["max_output_tokens"] == settings.max_output_tokens
     assert payload["text"]["format"]["strict"] is True
+    assert f"Prompt version: `{PROMPT_VERSION}`" in payload["instructions"]
     assert "previous_response_id" not in payload
     assert "conversation" not in payload
     assert request.timeout_seconds == 120.0
     assert request.max_retries == 0
+
+
+def test_prompt_requires_a_final_evidence_and_relationship_audit() -> None:
+    _, redacted = _documents()
+    deterministic = analyze_deterministically(redacted, "1.0.0")
+    settings = AISettings(enabled=True, api_key="test-key")
+
+    instructions = build_document_analysis_request(
+        settings,
+        redacted,
+        deterministic,
+    ).openai_payload["instructions"]
+
+    assert "either remove the fact or add every missing line ID" in instructions
+    assert "employer, client, project, contractor, and employee" in instructions
+    assert "emit one `relationship_ambiguity` finding" in instructions
 
 
 def test_validator_requires_exact_excerpt_on_the_cited_page() -> None:
@@ -181,9 +203,436 @@ def test_validator_requires_exact_excerpt_on_the_cited_page() -> None:
     assert validated.payload["facts"]["education"][0]["institution"] == (
         "Example University"
     )
+    assert validated.payload["facts"]["education"][0]["evidence"] == [
+        {
+            "page_id": "page-0002",
+            "line_id": "page-0002-line-0002",
+            "excerpt": "Example University",
+        }
+    ]
 
     response["facts"]["education"][0]["evidence"][0]["page_id"] = "page-0001"
-    with pytest.raises(DocumentAnalysisValidationError, match="exact excerpt"):
+    with pytest.raises(DocumentAnalysisValidationError, match="source line"):
+        validate_document_analysis_response(response, redacted)
+
+
+def test_model_authored_excerpt_is_rejected_before_code_materialization() -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["facts"]["education"][0]["evidence"][0]["excerpt"] = (
+        "Example University"
+    )
+
+    with pytest.raises(DocumentAnalysisValidationError, match="model evidence"):
+        validate_document_analysis_response(response, redacted)
+
+
+def test_existing_but_unrelated_source_line_cannot_support_a_fact() -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["facts"]["education"][0]["evidence"][0]["line_id"] = (
+        "page-0002-line-0001"
+    )
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redacted)
+
+
+def test_checklist_contract_requires_each_named_check_as_one_object_key() -> None:
+    _, redacted = _documents()
+    deterministic = analyze_deterministically(redacted, "1.0.0")
+    settings = AISettings(enabled=True, api_key="test-key")
+
+    request = build_document_analysis_request(settings, redacted, deterministic)
+    checklist_schema = request.openai_payload["text"]["format"]["schema"][
+        "properties"
+    ]["checklist"]
+
+    assert checklist_schema["type"] == "object"
+    assert checklist_schema["additionalProperties"] is False
+    assert set(checklist_schema["required"]) == {
+        "contact",
+        "education",
+        "employment",
+        "timeline",
+        "duration_claims",
+        "relationships",
+        "document_quality",
+        "protected_boundaries",
+    }
+
+
+def test_evidence_can_support_one_literal_value_split_across_source_lines() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                "Education\nExample University\nMaster of\nComputer Science",
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    education = response["facts"]["education"][0]
+    education["program"] = "Master of Computer Science"
+    education["evidence"] = [
+        {
+            "page_id": "page-0001",
+            "line_id": line_id,
+            "excerpt": None,
+        }
+        for line_id in (
+            "page-0001-line-0002",
+            "page-0001-line-0003",
+            "page-0001-line-0004",
+        )
+    ]
+
+    validated = validate_document_analysis_response(
+        response,
+        redact_national_ids(raw),
+    )
+
+    assert validated.payload["facts"]["education"][0]["program"] == (
+        "Master of Computer Science"
+    )
+
+
+def test_multiline_semantic_value_ignores_flattened_parenthesis_spacing() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                (
+                    "Education\nExample University\n"
+                    "Master of Computer Systems (\nDistributed Systems)"
+                ),
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    education = response["facts"]["education"][0]
+    education["program"] = (
+        "Master of Computer Systems (Distributed Systems)"
+    )
+    education["evidence"] = [
+        {
+            "page_id": "page-0001",
+            "line_id": line_id,
+            "excerpt": None,
+        }
+        for line_id in (
+            "page-0001-line-0002",
+            "page-0001-line-0003",
+            "page-0001-line-0004",
+        )
+    ]
+
+    validated = validate_document_analysis_response(
+        response,
+        redact_national_ids(raw),
+    )
+
+    assert validated.payload["facts"]["education"][0]["program"] == (
+        "Master of Computer Systems (Distributed Systems)"
+    )
+
+
+def test_multiline_semantic_value_allows_interleaved_flattened_column_text() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                (
+                    "Education\n"
+                    "Cloud work, Information Technology\n"
+                    "pipeline text, Software Systems, Example University"
+                ),
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    education = response["facts"]["education"][0]
+    education["program"] = "Information Technology (Software Systems)"
+    education["evidence"] = [
+        {
+            "page_id": "page-0001",
+            "line_id": line_id,
+            "excerpt": None,
+        }
+        for line_id in (
+            "page-0001-line-0002",
+            "page-0001-line-0003",
+        )
+    ]
+
+    validated = validate_document_analysis_response(
+        response,
+        redact_national_ids(raw),
+    )
+
+    assert validated.payload["facts"]["education"][0]["program"] == (
+        "Information Technology (Software Systems)"
+    )
+
+
+def test_semantic_value_cannot_be_assembled_from_distant_source_lines() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                (
+                    "Example Org\nSenior\nunrelated\nData\nunrelated\n"
+                    "Visualization\nunrelated\nEngineer"
+                ),
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    response["facts"]["education"] = []
+    response["facts"]["employment"] = [
+        {
+            "kind": "employment",
+            "organization": "Example Org",
+            "role": "Senior Data Visualization Engineer",
+            "employment_dates": None,
+            "location": None,
+            "relationship_type": None,
+            "status": "present",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": line_id,
+                    "excerpt": None,
+                }
+                for line_id in (
+                    "page-0001-line-0001",
+                    "page-0001-line-0002",
+                    "page-0001-line-0004",
+                    "page-0001-line-0006",
+                    "page-0001-line-0008",
+                )
+            ],
+        }
+    ]
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_single_line_semantic_value_does_not_ignore_changed_punctuation() -> None:
+    raw = RawDocument(
+        pages=(SourcePage("page-0001", 1, "Example Org — Data Engineer"),),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    response["facts"]["education"] = []
+    response["facts"]["employment"] = [
+        {
+            "kind": "employment",
+            "organization": "Example Org",
+            "role": "Data-Engineer",
+            "employment_dates": None,
+            "location": None,
+            "relationship_type": None,
+            "status": "present",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": "page-0001-line-0001",
+                    "excerpt": None,
+                }
+            ],
+        }
+    ]
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_multiline_semantic_value_rejects_reordered_source_tokens() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                "Example University, Software Systems\nInformation Technology",
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    education = response["facts"]["education"][0]
+    education["program"] = "Information Technology Software Systems"
+    education["evidence"] = [
+        {
+            "page_id": "page-0001",
+            "line_id": line_id,
+            "excerpt": None,
+        }
+        for line_id in (
+            "page-0001-line-0001",
+            "page-0001-line-0002",
+        )
+    ]
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_checklist_issue_count_must_equal_findings_for_its_check() -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["findings"] = [
+        {
+            "category": "timeline_overlap",
+            "check_id": "timeline",
+            "status": "conflicting",
+            "observation": "Two entries overlap.",
+            "reason": "The cited entries use overlapping dates.",
+            "importance": "worth_knowing",
+            "confidence": "medium",
+            "limitation": "The document alone does not explain the overlap.",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": "page-0001-line-0002",
+                    "excerpt": None,
+                }
+            ],
+        }
+    ]
+
+    with pytest.raises(
+        DocumentAnalysisValidationError,
+        match="checklist completeness",
+    ):
+        validate_document_analysis_response(response, redacted)
+
+
+def test_multiline_evidence_rejects_duplicate_source_line_ids() -> None:
+    raw = RawDocument(
+        pages=(SourcePage("page-0001", 1, "Example Org — Data Engineer"),),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    response["facts"]["education"] = []
+    response["facts"]["employment"] = [
+        {
+            "kind": "employment",
+            "organization": "Example Org",
+            "role": "Data-Engineer",
+            "employment_dates": None,
+            "location": None,
+            "relationship_type": None,
+            "status": "present",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": "page-0001-line-0001",
+                    "excerpt": None,
+                },
+                {
+                    "page_id": "page-0001",
+                    "line_id": "page-0001-line-0001",
+                    "excerpt": None,
+                },
+            ],
+        }
+    ]
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_multiline_evidence_rejects_gap_larger_than_two_source_lines() -> None:
+    raw = RawDocument(
+        pages=(
+            SourcePage(
+                "page-0001",
+                1,
+                "Example Org\nSenior\nunrelated\nunrelated\nEngineer",
+            ),
+        ),
+        source_format="pdf",
+    )
+    response = _valid_response()
+    response["facts"]["education"] = []
+    response["facts"]["employment"] = [
+        {
+            "kind": "employment",
+            "organization": "Example Org",
+            "role": "Senior Engineer",
+            "employment_dates": None,
+            "location": None,
+            "relationship_type": None,
+            "status": "present",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": line_id,
+                    "excerpt": None,
+                }
+                for line_id in (
+                    "page-0001-line-0001",
+                    "page-0001-line-0002",
+                    "page-0001-line-0005",
+                )
+            ],
+        }
+    ]
+
+    with pytest.raises(DocumentAnalysisValidationError, match="evidence support"):
+        validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_finding_check_id_must_match_an_obvious_category_owner() -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["findings"] = [
+        {
+            "category": "timeline_gap",
+            "check_id": "contact",
+            "status": "unconfirmed",
+            "observation": "A timeline gap is present.",
+            "reason": "The cited entries leave a gap.",
+            "importance": "worth_knowing",
+            "confidence": "medium",
+            "limitation": "The document may omit relevant activity.",
+            "authority": "ai",
+            "source": "document_analyzer",
+            "evidence": [
+                {
+                    "page_id": "page-0001",
+                    "line_id": "page-0001-line-0002",
+                    "excerpt": None,
+                }
+            ],
+        }
+    ]
+    response["checklist"]["contact"]["issue_count"] = 1
+
+    with pytest.raises(
+        DocumentAnalysisValidationError,
+        match="checklist completeness",
+    ):
         validate_document_analysis_response(response, redacted)
 
 
@@ -259,7 +708,11 @@ def test_validator_allows_protected_word_inside_literal_entity_and_evidence() ->
     education = response["facts"]["education"][0]
     education["institution"] = "Origin University"
     education["evidence"] = [
-        {"page_id": "page-0001", "excerpt": "Origin University"}
+        {
+            "page_id": "page-0001",
+            "line_id": "page-0001-line-0003",
+            "excerpt": None,
+        }
     ]
 
     validated = validate_document_analysis_response(response, redacted)
@@ -276,8 +729,8 @@ def test_validator_allows_protected_word_inside_literal_entity_and_evidence() ->
         ("authority", "code", "schema"),
         ("source", "web_search", "schema"),
         ("evidence", [], "schema"),
-        ("evidence.page_id", "page-9999", "exact excerpt"),
-        ("evidence.excerpt", "invented excerpt", "exact excerpt"),
+        ("evidence.page_id", "page-9999", "source line"),
+        ("evidence.line_id", "page-9999-line-0001", "source line"),
     ),
     ids=(
         "category",
@@ -285,7 +738,7 @@ def test_validator_allows_protected_word_inside_literal_entity_and_evidence() ->
         "source",
         "evidence-shape",
         "evidence-page",
-        "evidence-excerpt",
+        "evidence-line-id",
     ),
 )
 def test_research_candidate_mutations_fail_closed_with_safe_diagnostics(
@@ -408,7 +861,9 @@ def test_composer_preserves_deterministic_bytes_for_every_enabled_outcome(
         )
     elif outcome_kind == "invalid":
         invalid = _valid_response()
-        invalid["facts"]["education"][0]["evidence"][0]["excerpt"] = "invented"
+        invalid["facts"]["education"][0]["evidence"][0]["line_id"] = (
+            "page-0002-line-9999"
+        )
         analyzer = FakeDocumentAnalyzer(
             DocumentAnalyzerResponse(
                 payload=invalid,
@@ -488,7 +943,9 @@ def test_application_boundary_converts_invalid_fake_response_to_safe_failure() -
     _, redacted = _documents()
     deterministic = analyze_deterministically(redacted, "1.0.0")
     invalid = _valid_response()
-    invalid["facts"]["education"][0]["evidence"][0]["excerpt"] = "invented"
+    invalid["facts"]["education"][0]["evidence"][0]["line_id"] = (
+        "page-0002-line-9999"
+    )
     analyzer = FakeDocumentAnalyzer(
         DocumentAnalyzerResponse(
             payload=invalid,
@@ -512,7 +969,7 @@ def test_application_boundary_converts_invalid_fake_response_to_safe_failure() -
 
 @pytest.mark.parametrize(
     "kind",
-    ("root-array", "page-id-array", "excerpt-array", "facts-array"),
+    ("root-array", "page-id-array", "line-id-array", "facts-array"),
 )
 def test_application_boundary_converts_wrong_type_payloads_to_safe_failure(
     kind,

@@ -69,7 +69,15 @@ Only code-owned facts may enter score and band calculation. An ambiguous claimed
 
 The Document Analyzer receives both the complete page-aware CV after required national-ID redaction and the versioned deterministic observations. It owns semantic tasks such as associating organizations, roles, dates, locations, education entries, relationship types, internal conflicts, document artifacts, and research candidates. The full redacted CV remains present so an incomplete candidate extractor cannot hide content from the model. Raw national-ID values never enter the model request, report, logs, audit, or persistence. The ingestion boundary distinguishes a raw document from a redacted document. National-ID spans are replaced with same-length masks before Markdown or any downstream output, which preserves page offsets without retaining the source value. Persistence receives a hash of redacted canonical text rather than raw file bytes.
 
-After the model call, code validates the schema, page IDs, exact excerpts, protected boundaries, and consistency between returned values and evidence. Deterministic date arithmetic or other checks over AI-extracted semantic facts remain AI-assisted findings and stay outside the score.
+The model cites evidence through stable page-scoped source-line IDs rather than
+copying candidate text. After the model call, code validates the schema, page
+and line IDs, materializes exact excerpts from the canonical redacted source,
+and validates protected boundaries and consistency between returned values and
+evidence. Unknown, cross-page, or mismatched line references fail closed. This
+keeps the final report source-exact without accepting whitespace normalization,
+reordered fragments, or model-authored evidence text. Deterministic date
+arithmetic or other checks over AI-extracted semantic facts remain AI-assisted
+findings and stay outside the score.
 
 ### D4: Make one bounded OpenAI call per CV
 
@@ -88,6 +96,22 @@ Requested weak signals remain visible. For example, the report can flag that no 
 The deterministic core keeps valid international phone-country parsing, explicitly person-owned claimed-location resolution, offline locality lookup, national-ID redaction, and other facts that can be reproduced from source evidence. It does not score spelling locale, currency, date-format locale, email TLD, education location, employer location, or postal compatibility as evidence of the candidate's location. Right-to-work statements may remain informational but never prove physical location or eligibility.
 
 Phone-shaped values that libphonenumber considers only possible remain observations. Only a valid international number that maps to one region can create a phone-country fact. The system preserves all detected phone candidates and facts. It creates one phone scoring signal only when all deterministically person-owned, country-resolved phone facts agree. Conflicting resolved countries create an ambiguous observation and no phone scoring signal. Numbers without an international prefix do not receive a guessed default country.
+
+A syntactically valid email domain is not automatically trustworthy or wrong.
+Code may compare it with a reviewed, versioned reference catalog of common
+public mail-provider domains and their legitimate aliases. The initial catalog
+shall cover major international provider families such as Google, Microsoft,
+Yahoo, Proton, Apple, and Zoho, plus common Polish providers such as Onet,
+Wirtualna Polska/o2, and Interia. Catalog entries require an official provider
+source and review; the catalog is intentionally maintainable rather than
+presented as a complete list of every mailbox provider. A non-scoring
+possible-typo observation may be emitted only for a close confusable spelling
+of a catalog entry. The observation names the literal similarity and asks the
+recruiter to confirm the address. It never claims that the domain, mailbox,
+person, or CV is fake, invalid, or nonexistent. Exact catalog domains and
+arbitrary company or custom domains do not produce this observation. Email TLD
+or provider choice remains excluded from physical-location evidence and
+scoring.
 
 Only an explicitly described person location may become the code-owned claimed location used by scoring. An unlabeled place name in the document header remains an observation. Candidate, employer, client, project, office, and education locations are separate concepts and are never collapsed into one location relation. Ambiguous postal formats and locations remain unknown. Postal compatibility stays unweighted until anonymous fixtures, calibration, and project-owner approval support a scoring change.
 
@@ -128,6 +152,13 @@ The report names each observed signal precisely. It does not turn a missing prof
 Use the private corpus during development to create an anonymous finding taxonomy, completeness checklist, prompt, schema, and eval set. Never copy raw CVs or HR comments into tracked files or runtime images.
 
 Start with four CVs. Measure expected-finding recall, unsupported findings, evidence accuracy, latency, tokens, and cost. Re-run the baseline after the Document Analyzer input changes from document-only text to page-aware text plus deterministic observations. Use the full permitted corpus only for broader regression testing.
+
+Prompt `3108` is frozen as the current implementation contract while the
+remaining Slice 3 integration is built behind the disabled feature flag. Its
+four-case GPT-5.6 Luna baseline is not accepted: two responses failed the
+fail-closed evidence or checklist validation. This model-quality result does
+not weaken validation and does not enable the feature. Final prompt/model
+acceptance returns as part of the full Slice 3 gate in task 4.13.
 
 ### D12: Use a replaceable offline location resolver
 

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -19,13 +20,18 @@ sys.path.insert(0, str(ROOT / "apps/api/src"))
 
 from cv_validator.ai.request import (  # noqa: E402
     DETERMINISTIC_OBSERVATIONS_VERSION,
+    INPUT_CONTRACT_VERSION,
+    PROMPT_VERSION,
+    SCHEMA_VERSION,
     format_document_analysis_input,
+    format_line_referenced_markdown,
 )
 from cv_validator.ai.validation import (  # noqa: E402
     DocumentAnalysisValidationError,
     REQUIRED_CHECK_IDS,
     validate_document_analysis_payload,
 )
+from cv_validator.ingestion import SourcePage  # noqa: E402
 
 PRIVATE_EVAL_ROOT = (ROOT / "data/ai-eval").resolve()
 CONTRACT_ROOT = ROOT / "apps/api/src/cv_validator/ai/contracts"
@@ -33,6 +39,7 @@ PROMPT_PATH = CONTRACT_ROOT / "prompt.md"
 SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.json"
 CHECK_IDS = set(REQUIRED_CHECK_IDS)
 MANUAL_LABELS = {"true positive", "przydatne „warto wiedzieć”", "duplikat", "nadinterpretacja", "artefakt parsowania/flatteningu"}
+ACCEPTED_ADDITIONAL_LABELS = {"true positive", "przydatne „warto wiedzieć”"}
 MAX_EVAL_CASES = 4
 
 
@@ -129,8 +136,11 @@ def load_case_input(case: dict[str, Any], manifest_path: Path) -> EvalCaseInput:
     ):
         raise ValueError("deterministic observations do not match the versioned contract")
 
-    markdown = "\n\n".join(
-        f"<!-- page: {page_id} -->\n{text}" for page_id, text in pages.items()
+    markdown = format_line_referenced_markdown(
+        tuple(
+            SourcePage(page_id, page_number, text)
+            for page_number, (page_id, text) in enumerate(pages.items(), start=1)
+        )
     )
     return EvalCaseInput(
         pages=pages,
@@ -143,20 +153,31 @@ def validate_result(
     result: Any,
     pages: dict[str, str],
 ) -> list[str]:
+    _, errors = validate_and_materialize_result(result, pages)
+    return errors
+
+
+def validate_and_materialize_result(
+    result: Any,
+    pages: dict[str, str],
+) -> tuple[Any, list[str]]:
     try:
-        validate_document_analysis_payload(
+        validated = validate_document_analysis_payload(
             result,
             pages=pages,
             deterministic_observations_version=DETERMINISTIC_OBSERVATIONS_VERSION,
         )
     except DocumentAnalysisValidationError as error:
-        return [str(error)]
-    return []
+        return result, [str(error)]
+    return validated.payload, []
 
 
 def evidence_is_exact(evidence: dict[str, Any], pages: dict[str, str]) -> bool:
-    page_id = evidence.get("page_id")
+    source_line = source_line_for_evidence(evidence, pages)
     excerpt = evidence.get("excerpt")
+    if source_line is not None:
+        return isinstance(excerpt, str) and excerpt == source_line
+    page_id = evidence.get("page_id")
     return (
         isinstance(page_id, str)
         and isinstance(excerpt, str)
@@ -164,6 +185,93 @@ def evidence_is_exact(evidence: dict[str, Any], pages: dict[str, str]) -> bool:
         and page_id in pages
         and excerpt in pages[page_id]
     )
+
+
+def source_line_for_evidence(
+    evidence: dict[str, Any],
+    pages: dict[str, str],
+) -> str | None:
+    page_id = evidence.get("page_id")
+    line_id = evidence.get("line_id")
+    if not isinstance(page_id, str) or not isinstance(line_id, str):
+        return None
+    page_text = pages.get(page_id)
+    if not isinstance(page_text, str):
+        return None
+    page_number = tuple(pages).index(page_id) + 1
+    source_line = next(
+        (
+            line
+            for line in SourcePage(page_id, page_number, page_text).lines
+            if line.line_id == line_id
+        ),
+        None,
+    )
+    return source_line.text if source_line is not None and source_line.text else None
+
+
+def line_reference_is_valid(
+    evidence: dict[str, Any],
+    pages: dict[str, str],
+) -> bool:
+    if isinstance(evidence.get("line_id"), str):
+        return source_line_for_evidence(evidence, pages) is not None
+    return evidence_is_exact(evidence, pages)
+
+
+def evidence_items_by_section(
+    result: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    fact_evidence = [
+        evidence
+        for fact_group in result.get("facts", {}).values()
+        if isinstance(fact_group, list)
+        for fact in fact_group
+        if isinstance(fact, dict)
+        for evidence in fact.get("evidence", [])
+        if isinstance(evidence, dict)
+    ]
+    finding_evidence = [
+        evidence
+        for finding in result.get("findings", [])
+        if isinstance(finding, dict)
+        for evidence in finding.get("evidence", [])
+        if isinstance(evidence, dict)
+    ]
+    research_evidence = [
+        candidate["evidence"]
+        for candidate in result.get("research_candidates", [])
+        if isinstance(candidate, dict)
+        and isinstance(candidate.get("evidence"), dict)
+    ]
+    return {
+        "facts": fact_evidence,
+        "findings": finding_evidence,
+        "research_candidates": research_evidence,
+    }
+
+
+def dematerialize_code_owned_excerpts(
+    result: dict[str, Any],
+    pages: dict[str, str],
+) -> dict[str, Any]:
+    candidate = deepcopy(result)
+    source_lines = {
+        line.line_id: (page.page_id, line.text)
+        for page_number, (page_id, text) in enumerate(pages.items(), start=1)
+        for page in (SourcePage(page_id, page_number, text),)
+        for line in page.lines
+    }
+    for evidence_items in evidence_items_by_section(candidate).values():
+        for evidence in evidence_items:
+            source = source_lines.get(evidence.get("line_id"))
+            if (
+                source is not None
+                and source[0] == evidence.get("page_id")
+                and source[1] == evidence.get("excerpt")
+            ):
+                evidence["excerpt"] = None
+    return candidate
 
 
 def call_responses(model: str, reasoning: str, instructions: str, document: str, schema: dict[str, Any], max_output_tokens: int) -> tuple[dict[str, Any], dict[str, Any], str]:
@@ -215,21 +323,72 @@ def call_codex(model: str, reasoning: str, prompt: str, schema_path: Path) -> tu
 def matches(expected: dict[str, Any], finding: dict[str, Any]) -> bool:
     if expected["category"] != finding.get("category"):
         return False
+    expected_status = expected.get("status")
+    if expected_status is not None and expected_status != finding.get("status"):
+        return False
     needle = expected.get("evidence_contains", "").casefold()
-    excerpts = " ".join(item.get("excerpt", "") for item in finding.get("evidence", [])).casefold()
+    excerpts = " ".join(
+        item.get("excerpt") or "" for item in finding.get("evidence", [])
+    ).casefold()
     return not needle or needle in excerpts
+
+
+def _maximum_expected_finding_matches(
+    expected: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> dict[int, int]:
+    """Return a one-to-one expected-index to finding-index matching."""
+    finding_to_expected: dict[int, int] = {}
+
+    def assign(expected_index: int, seen: set[int]) -> bool:
+        for finding_index, finding in enumerate(findings):
+            if finding_index in seen or not matches(expected[expected_index], finding):
+                continue
+            seen.add(finding_index)
+            previous = finding_to_expected.get(finding_index)
+            if previous is None or assign(previous, seen):
+                finding_to_expected[finding_index] = expected_index
+                return True
+        return False
+
+    for expected_index in range(len(expected)):
+        assign(expected_index, set())
+    return {
+        expected_index: finding_index
+        for finding_index, expected_index in finding_to_expected.items()
+    }
 
 
 def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -> dict[str, Any]:
     expected = case["expected_findings"]
     findings = result.get("findings", [])
-    matched_expected = {index for index, item in enumerate(expected) if any(matches(item, finding) for finding in findings)}
-    matched_findings = {index for index, finding in enumerate(findings) if any(matches(item, finding) for item in expected)}
-    evidence_items = [evidence for finding in findings for evidence in finding.get("evidence", [])]
+    matching = _maximum_expected_finding_matches(expected, findings)
+    matched_expected = set(matching)
+    matched_findings = set(matching.values())
+    unexpected_finding_indices = [
+        index for index in range(len(findings)) if index not in matched_findings
+    ]
+    evidence_sections = evidence_items_by_section(result)
+    evidence_items = evidence_sections["findings"]
     accurate = sum(evidence_is_exact(evidence, pages) for evidence in evidence_items)
+    all_evidence_items = [
+        evidence
+        for section in evidence_sections.values()
+        for evidence in section
+    ]
+    all_accurate = sum(
+        evidence_is_exact(evidence, pages) for evidence in all_evidence_items
+    )
+    valid_line_references = sum(
+        line_reference_is_valid(evidence, pages)
+        for evidence in all_evidence_items
+    )
     unsupported_findings = sum(
         not finding.get("evidence")
-        or any(not evidence_is_exact(evidence, pages) for evidence in finding.get("evidence", []))
+        or any(
+            not line_reference_is_valid(evidence, pages)
+            for evidence in finding.get("evidence", [])
+        )
         for finding in findings
     )
     serialized = json.dumps(result, ensure_ascii=False).casefold()
@@ -240,11 +399,47 @@ def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -
         "recall": len(matched_expected) / len(expected) if expected else 1.0,
         "finding_count": len(findings),
         "unsupported_finding_count": unsupported_findings,
-        "unexpected_finding_count": len(findings) - len(matched_findings),
+        "unexpected_finding_count": len(unexpected_finding_indices),
+        "unexpected_finding_indices": unexpected_finding_indices,
+        "finding_evidence_exact_match_count": accurate,
         "finding_evidence_item_count": len(evidence_items),
         "finding_evidence_exact_match_accuracy_page_aware": accurate / len(evidence_items) if evidence_items else 1.0,
+        "all_evidence_exact_match_count": all_accurate,
+        "all_evidence_item_count": len(all_evidence_items),
+        "invalid_evidence_item_count": len(all_evidence_items) - all_accurate,
+        "all_evidence_exact_match_accuracy_page_aware": all_accurate / len(all_evidence_items) if all_evidence_items else 1.0,
+        "line_reference_valid_count": valid_line_references,
+        "line_reference_item_count": len(all_evidence_items),
+        "line_reference_validity": valid_line_references / len(all_evidence_items) if all_evidence_items else 1.0,
         "forbidden_output_hits": forbidden_hits,
     }
+
+
+def baseline_is_acceptable(reports: list[dict[str, Any]]) -> bool:
+    """Apply the agreed strict gate without treating recall as precision."""
+    for report in reports:
+        metrics = report["metrics"]
+        if (
+            report["validation_errors"]
+            or metrics["recall"] < 1.0
+            or metrics["unsupported_finding_count"] != 0
+            or metrics.get("invalid_evidence_item_count", 1) != 0
+            or metrics.get("line_reference_validity", 0.0) < 1.0
+            or metrics["finding_evidence_exact_match_accuracy_page_aware"] < 1.0
+            or metrics["forbidden_output_hits"]
+        ):
+            return False
+        unexpected = set(metrics.get("unexpected_finding_indices", []))
+        reviews = {
+            review["finding_index"]: review["classification"]
+            for review in report.get("manual_review", [])
+        }
+        if set(reviews) != unexpected or any(
+            reviews[index] not in ACCEPTED_ADDITIONAL_LABELS
+            for index in unexpected
+        ):
+            return False
+    return True
 
 
 def parse_manual_review(path: Path) -> list[dict[str, Any]]:
@@ -303,14 +498,53 @@ def token_value(usage: dict[str, Any], *names: str) -> int | None:
 
 def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
     valid = [report for report in reports if not report["validation_errors"]]
+    expected_count = sum(report["metrics"]["expected_count"] for report in reports)
+    matched_expected_count = sum(
+        report["metrics"]["matched_expected_count"] for report in reports
+    )
+    accepted_matched_expected_count = sum(
+        report["metrics"]["matched_expected_count"] for report in valid
+    )
+    finding_evidence_count = sum(
+        report["metrics"]["finding_evidence_item_count"] for report in reports
+    )
+    finding_evidence_exact_count = sum(
+        report["metrics"]["finding_evidence_exact_match_count"]
+        for report in reports
+    )
+    all_evidence_count = sum(
+        report["metrics"]["all_evidence_item_count"] for report in reports
+    )
+    all_evidence_exact_count = sum(
+        report["metrics"]["all_evidence_exact_match_count"] for report in reports
+    )
+    line_reference_count = sum(
+        report["metrics"].get(
+            "line_reference_item_count",
+            report["metrics"]["all_evidence_item_count"],
+        )
+        for report in reports
+    )
+    valid_line_reference_count = sum(
+        report["metrics"].get(
+            "line_reference_valid_count",
+            report["metrics"]["all_evidence_exact_match_count"],
+        )
+        for report in reports
+    )
     summary: dict[str, Any] = {
         "case_count": len(reports),
         "valid_case_count": len(valid),
         "macro_recall": sum(report["metrics"]["recall"] for report in reports) / len(reports),
+        "expected_finding_micro_recall": matched_expected_count / expected_count if expected_count else 1.0,
+        "accepted_expected_finding_micro_recall": accepted_matched_expected_count / expected_count if expected_count else 1.0,
         "recall_is_not_precision": True,
         "unsupported_finding_count": sum(report["metrics"]["unsupported_finding_count"] for report in reports),
         "unexpected_finding_count": sum(report["metrics"]["unexpected_finding_count"] for report in reports),
-        "finding_evidence_exact_match_accuracy_page_aware": sum(report["metrics"]["finding_evidence_exact_match_accuracy_page_aware"] for report in reports) / len(reports),
+        "finding_evidence_exact_match_accuracy_page_aware": finding_evidence_exact_count / finding_evidence_count if finding_evidence_count else 1.0,
+        "all_evidence_exact_match_accuracy_page_aware": all_evidence_exact_count / all_evidence_count if all_evidence_count else 1.0,
+        "invalid_evidence_item_count": all_evidence_count - all_evidence_exact_count,
+        "line_reference_validity": valid_line_reference_count / line_reference_count if line_reference_count else 1.0,
         "total_latency_seconds": sum(report["latency_seconds"] for report in reports),
         "estimated_cost_usd": None if any(report["estimated_cost_usd"] is None for report in reports) else sum(report["estimated_cost_usd"] for report in reports),
     }
@@ -318,7 +552,33 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
     if manual:
         counts = Counter(review["classification"] for review in manual)
         summary["manual_review"] = {"reviewed_additional_finding_count": len(manual), "classification_counts": dict(sorted(counts.items()))}
+    summary["accepted"] = baseline_is_acceptable(reports)
     return summary
+
+
+def build_eval_output(
+    reports: list[dict[str, Any]],
+    *,
+    model: str,
+    reasoning: str,
+    backend: str,
+    output_limit_metadata: dict[str, Any],
+    complete: bool,
+) -> dict[str, Any]:
+    return {
+        "eval_version": f"document-eval-{PROMPT_VERSION}",
+        "prompt_version": PROMPT_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "input_contract_version": INPUT_CONTRACT_VERSION,
+        "deterministic_observations_version": DETERMINISTIC_OBSERVATIONS_VERSION,
+        "model": model,
+        "reasoning": reasoning,
+        **output_limit_metadata,
+        "backend": backend,
+        "complete": complete,
+        "summary": summarize(reports),
+        "cases": reports,
+    }
 
 
 def rescore_report(report: dict[str, Any], manifest: dict[str, Any], manifest_path: Path, reviews: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -326,7 +586,14 @@ def rescore_report(report: dict[str, Any], manifest: dict[str, Any], manifest_pa
     for case_report in report["cases"]:
         case = cases_by_id[case_report["case_id"]]
         case_input = load_case_input(case, manifest_path)
-        case_report["validation_errors"] = validate_result(case_report["result"], case_input.pages)
+        materialized, errors = validate_and_materialize_result(
+            dematerialize_code_owned_excerpts(
+                case_report["result"], case_input.pages
+            ),
+            case_input.pages,
+        )
+        case_report["result"] = materialized
+        case_report["validation_errors"] = errors
         case_report["metrics"] = score(case, case_report["result"], case_input.pages)
     if reviews is not None:
         attach_manual_review(report, reviews)
@@ -363,7 +630,7 @@ def main() -> int:
         report = rescore_report(load_json(input_path), manifest, manifest_path, reviews)
         write_private_json(args.output, report)
         print(json.dumps(report["summary"], indent=2, ensure_ascii=False))
-        return 0 if report["summary"]["valid_case_count"] == report["summary"]["case_count"] else 1
+        return 0 if report["summary"]["accepted"] else 1
 
     schema = load_json(SCHEMA_PATH)
     instructions = PROMPT_PATH.read_text(encoding="utf-8")
@@ -376,7 +643,12 @@ def main() -> int:
             "live eval requires --confirm-live-model-run after coordinator approval"
         )
     reports = []
-    for case in manifest["cases"]:
+    for case_index, case in enumerate(manifest["cases"], start=1):
+        print(
+            f"[{case_index}/{len(manifest['cases'])}] starting {case['id']}",
+            file=sys.stderr,
+            flush=True,
+        )
         case_input = load_case_input(case, manifest_path)
         request_prompt = f"{instructions}\n\n{case_input.request_text}"
         started = time.perf_counter()
@@ -393,7 +665,9 @@ def main() -> int:
             result, usage = call_codex(args.model, args.reasoning, request_prompt, SCHEMA_PATH)
             response_model = args.model
         latency = time.perf_counter() - started
-        validation_errors = validate_result(result, case_input.pages)
+        result, validation_errors = validate_and_materialize_result(
+            result, case_input.pages
+        )
         metrics = score(case, result, case_input.pages)
         input_tokens = token_value(usage, "input_tokens", "input_token_count")
         output_tokens = token_value(usage, "output_tokens", "output_token_count")
@@ -401,12 +675,36 @@ def main() -> int:
         if input_tokens is not None and output_tokens is not None and args.input_usd_per_million is not None and args.output_usd_per_million is not None:
             estimated_cost = input_tokens * args.input_usd_per_million / 1_000_000 + output_tokens * args.output_usd_per_million / 1_000_000
         reports.append({"case_id": case["id"], "response_model": response_model, "latency_seconds": latency, "usage": usage, "estimated_cost_usd": estimated_cost, "validation_errors": validation_errors, "metrics": metrics, "result": result})
+        write_private_json(
+            args.output,
+            build_eval_output(
+                reports,
+                model=args.model,
+                reasoning=args.reasoning,
+                backend=args.backend,
+                output_limit_metadata=output_limit_metadata,
+                complete=False,
+            ),
+        )
+        print(
+            f"[{case_index}/{len(manifest['cases'])}] completed {case['id']} "
+            f"in {latency:.2f}s",
+            file=sys.stderr,
+            flush=True,
+        )
 
-    summary = summarize(reports)
-    output = {"eval_version": "document-eval-2108", "prompt_version": "2108", "schema_version": "document-analysis-schema-v3", "input_contract_version": "document-analysis-input-v1", "deterministic_observations_version": DETERMINISTIC_OBSERVATIONS_VERSION, "model": args.model, "reasoning": args.reasoning, **output_limit_metadata, "backend": args.backend, "summary": summary, "cases": reports}
+    output = build_eval_output(
+        reports,
+        model=args.model,
+        reasoning=args.reasoning,
+        backend=args.backend,
+        output_limit_metadata=output_limit_metadata,
+        complete=True,
+    )
+    summary = output["summary"]
     write_private_json(args.output, output)
     print(json.dumps(summary, indent=2))
-    return 0 if summary["valid_case_count"] == summary["case_count"] and not any(report["metrics"]["forbidden_output_hits"] for report in reports) else 1
+    return 0 if summary["accepted"] else 1
 
 
 if __name__ == "__main__":

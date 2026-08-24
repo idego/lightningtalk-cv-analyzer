@@ -83,6 +83,20 @@ The system SHALL extract versioned deterministic candidates, facts, and observat
 - **WHEN** the CV contains a currency, spelling variant, date convention, email TLD, or organization location
 - **THEN** the system does not use that observation as evidence of the candidate's physical location
 
+#### Scenario: Email domain resembles a well-known provider typo
+- **WHEN** a syntactically extracted email domain closely resembles, but does not equal, an official-source-backed domain or legitimate alias in the versioned common-provider reference catalog
+- **THEN** the system may emit a code-owned `possible_email_domain_typo` observation with exact redacted source evidence and the reference-set version
+- **AND** the observation has zero scoring weight and asks for confirmation without claiming that the address, domain, person, or CV is fake, invalid, or nonexistent
+
+#### Scenario: Exact or custom email domain is present
+- **WHEN** the extracted domain exactly matches a catalog entry or is an arbitrary company, organization, or custom domain
+- **THEN** the common-provider typo rule emits no observation
+- **AND** the system does not infer provider validity from absence in the bounded catalog
+
+#### Scenario: Common-provider catalog is updated
+- **WHEN** maintainers add or change a public-provider domain or legitimate alias
+- **THEN** they record its provider family and official source, bump the catalog version, and review regression fixtures before release
+
 #### Scenario: Date-format convention detected
 - **WHEN** dates use a consistent DD/MM or MM/DD convention
 - **THEN** the system may record the literal convention as a non-scoring observation but does not infer the candidate's country or locale from it

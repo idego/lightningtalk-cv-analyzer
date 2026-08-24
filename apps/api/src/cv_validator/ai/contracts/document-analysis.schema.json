@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "document-analysis-schema-v3",
+  "$id": "document-analysis-schema-v7",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "facts", "findings", "unknowns", "research_candidates", "checklist", "analysis_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "document-analysis-schema-v3"},
+    "schema_version": {"type": "string", "const": "document-analysis-schema-v7"},
     "facts": {
       "type": "object",
       "additionalProperties": false,
@@ -19,7 +19,21 @@
     "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
     "unknowns": {"type": "array", "items": {"$ref": "#/$defs/unknown"}},
     "research_candidates": {"type": "array", "items": {"$ref": "#/$defs/researchCandidate"}},
-    "checklist": {"type": "array", "minItems": 8, "maxItems": 8, "items": {"$ref": "#/$defs/check"}},
+    "checklist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contact", "education", "employment", "timeline", "duration_claims", "relationships", "document_quality", "protected_boundaries"],
+      "properties": {
+        "contact": {"$ref": "#/$defs/check"},
+        "education": {"$ref": "#/$defs/check"},
+        "employment": {"$ref": "#/$defs/check"},
+        "timeline": {"$ref": "#/$defs/check"},
+        "duration_claims": {"$ref": "#/$defs/check"},
+        "relationships": {"$ref": "#/$defs/check"},
+        "document_quality": {"$ref": "#/$defs/check"},
+        "protected_boundaries": {"$ref": "#/$defs/check"}
+      }
+    },
     "analysis_limitations": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
   "$defs": {
@@ -28,10 +42,11 @@
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["page_id", "excerpt"],
+      "required": ["page_id", "line_id", "excerpt"],
       "properties": {
         "page_id": {"type": "string", "minLength": 1},
-        "excerpt": {"type": "string", "minLength": 1}
+        "line_id": {"type": "string", "minLength": 1},
+        "excerpt": {"type": ["string", "null"]}
       }
     },
     "contactFact": {
@@ -82,9 +97,10 @@
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["category", "status", "observation", "reason", "importance", "confidence", "limitation", "authority", "source", "evidence"],
+      "required": ["category", "check_id", "status", "observation", "reason", "importance", "confidence", "limitation", "authority", "source", "evidence"],
       "properties": {
         "category": {"type": "string", "enum": ["contact_conflict", "missing_contact_data", "timeline_gap", "timeline_overlap", "duration_claim_conflict", "relationship_ambiguity", "document_artifact", "semantic_outlier", "internal_fact_conflict"]},
+        "check_id": {"type": "string", "enum": ["contact", "education", "employment", "timeline", "duration_claims", "relationships", "document_quality", "protected_boundaries"]},
         "status": {"type": "string", "enum": ["conflicting", "unconfirmed", "missing"]},
         "observation": {"type": "string", "minLength": 1},
         "reason": {"type": "string", "minLength": 1},
@@ -121,9 +137,8 @@
     "check": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "checked", "issue_count"],
+      "required": ["checked", "issue_count"],
       "properties": {
-        "id": {"type": "string", "enum": ["contact", "education", "employment", "timeline", "duration_claims", "relationships", "document_quality", "protected_boundaries"]},
         "checked": {"type": "boolean", "const": true},
         "issue_count": {"type": "integer", "minimum": 0}
       }
