@@ -6,7 +6,7 @@ from typing import Any
 
 import openai
 
-from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout
+from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout
 
 
 class OpenAIResponsesCompanyResearcher:
@@ -51,6 +51,42 @@ class OpenAIResponsesCompanyResearcher:
         return payload, response.model, usage
 
 
+class OpenAIResponsesEducationResearcher:
+    def __init__(self, *, client=None, api_key: str | None = None, timeout_seconds: float = 120.0):
+        self._client = client or openai.OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=0)
+
+    def research(self, request: EducationResearchRequest):
+        prompt = files("cv_validator.research.contracts").joinpath("education-prompt.md").read_text()
+        schema = json.loads(files("cv_validator.research.contracts").joinpath("education-research.schema.json").read_text())
+        try:
+            response = self._client.responses.create(
+                model="gpt-5.6-luna", reasoning={"effort": "medium"}, instructions=prompt,
+                input=json.dumps({"education_facts": request.input_facts}, ensure_ascii=False),
+                tools=[{"type": "web_search", "search_context_size": "low"}],
+                include=["web_search_call.action.sources"], max_tool_calls=4,
+                text={"format": {"type": "json_schema", "name": "education_research", "strict": True, "schema": schema}},
+                store=False, max_output_tokens=4096,
+            )
+        except openai.APITimeoutError as exc:
+            raise EducationResearchTimeout() from exc
+        except openai.APIError as exc:
+            raise EducationResearchClientError() from exc
+        try:
+            payload = json.loads(response.output_text)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise EducationResearchInvalidResponse() from exc
+        source_urls = _source_urls(response)
+        actual_queries = _search_queries(response)
+        if not actual_queries or len(actual_queries) > 4:
+            raise EducationResearchInvalidResponse()
+        payload["searches_performed"] = actual_queries
+        cited = {url for item in payload.get("credentials", []) for finding in item.get("findings", []) for url in finding.get("source_urls", [])}
+        if cited - source_urls:
+            raise EducationResearchInvalidResponse()
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        return payload, response.model, usage
+
+
 def _source_urls(response: Any) -> set[str]:
     urls: set[str] = set()
     for item in getattr(response, "output", ()):
@@ -70,6 +106,9 @@ def _search_queries(response: Any) -> list[str]:
     for item in getattr(response, "output", ()):
         if getattr(item, "type", None) != "web_search_call":
             continue
+        query = getattr(getattr(item, "action", None), "query", None)
+        if isinstance(query, str) and query and query not in queries:
+            queries.append(query)
         for query in getattr(getattr(item, "action", None), "queries", ()) or ():
             if isinstance(query, str) and query and query not in queries:
                 queries.append(query)

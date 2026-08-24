@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 import json
 import threading
+import secrets
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from cv_validator.ai.application import DocumentAnalyzer
@@ -25,6 +26,9 @@ from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.research.company import CompanyResearchService
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesCompanyResearcher
+from cv_validator.research.education import EducationResearchService
+from cv_validator.research.domain import EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout
+from cv_validator.research.openai_client import OpenAIResponsesEducationResearcher
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -62,6 +66,7 @@ def create_app(
     batch_max_files: int | None = None,
     batch_max_bytes: int | None = None,
     company_researcher=None,
+    education_researcher=None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
@@ -73,6 +78,12 @@ def create_app(
     selected_company_researcher = company_researcher
     if selected_ai_settings.enabled and selected_company_researcher is None:
         selected_company_researcher = OpenAIResponsesCompanyResearcher(
+            api_key=selected_ai_settings.api_key,
+            timeout_seconds=selected_ai_settings.timeout_seconds,
+        )
+    selected_education_researcher = education_researcher
+    if selected_ai_settings.enabled and selected_education_researcher is None:
+        selected_education_researcher = OpenAIResponsesEducationResearcher(
             api_key=selected_ai_settings.api_key,
             timeout_seconds=selected_ai_settings.timeout_seconds,
         )
@@ -114,7 +125,7 @@ def create_app(
         return {"status": "ok"}
 
     @app.post("/analyze")
-    async def analyze_single(file: UploadFile = File(...)) -> JSONResponse:
+    async def analyze_single(file: UploadFile = File(...), x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
         filename = file.filename or "upload.pdf"
         try:
             content = await _read_upload(file)
@@ -127,6 +138,7 @@ def create_app(
                 document_analyzer=selected_document_analyzer,
             )
             analysis_id = str(uuid4())
+            access_token = x_analysis_access_token or secrets.token_urlsafe(32)
             payload = serialize_analysis_payload(
                 result,
                 selected_ai_settings,
@@ -138,6 +150,7 @@ def create_app(
                 report_payload=payload,
                 analysis_id=analysis_id,
                 ai_analysis=payload["ai_analysis"],
+                access_token=access_token,
             )
         except IngestionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -150,7 +163,7 @@ def create_app(
         return JSONResponse(payload)
 
     @app.post("/analyze/batch")
-    async def analyze_batch(files: list[UploadFile] = File(...)) -> JSONResponse:
+    async def analyze_batch(files: list[UploadFile] = File(...), x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
         prepared = await _prepare_batch(
             files,
             max_files=selected_batch_max_files,
@@ -180,6 +193,7 @@ def create_app(
                     document_analyzer=selected_document_analyzer,
                 )
                 analysis_id = str(uuid4())
+                access_token = x_analysis_access_token or secrets.token_urlsafe(32)
                 payload = serialize_analysis_payload(
                     result,
                     selected_ai_settings,
@@ -191,6 +205,7 @@ def create_app(
                     report_payload=payload,
                     analysis_id=analysis_id,
                     ai_analysis=payload["ai_analysis"],
+                    access_token=access_token,
                 )
                 results.append(
                     {
@@ -215,9 +230,11 @@ def create_app(
     research_locks_guard = threading.Lock()
 
     @app.post("/analyses/{analysis_id}/research/company")
-    def research_company(analysis_id: str) -> JSONResponse:
+    def research_company(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
         if selected_company_researcher is None:
             raise HTTPException(status_code=503, detail="company_research_disabled")
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
         stored_payload = store.get_analysis_payload(analysis_id)
         if stored_payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
@@ -243,6 +260,37 @@ def create_app(
         response["company_research"] = result
         return JSONResponse(response)
 
+    @app.post("/analyses/{analysis_id}/research/education")
+    def research_education(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+        if selected_education_researcher is None:
+            raise HTTPException(status_code=503, detail="education_research_disabled")
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        stored_payload = store.get_analysis_payload(analysis_id)
+        if stored_payload is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        with research_locks_guard:
+            lock = research_locks.setdefault(analysis_id, threading.Lock())
+        with lock:
+            completed = store.get_education_research(analysis_id)
+            if completed is not None:
+                result = json.loads(completed["result_json"])
+            else:
+                try:
+                    result = EducationResearchService(selected_education_researcher).run(stored_payload)
+                    store.persist_education_research(analysis_id, result)
+                except ValueError as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                except EducationResearchTimeout as exc:
+                    raise HTTPException(status_code=504, detail="education_research_timeout") from exc
+                except EducationResearchInvalidResponse as exc:
+                    raise HTTPException(status_code=502, detail="education_research_invalid_response") from exc
+                except EducationResearchClientError as exc:
+                    raise HTTPException(status_code=502, detail="education_research_client_error") from exc
+        response = deepcopy(stored_payload)
+        response["education_research"] = result
+        return JSONResponse(response)
+
     app.state.store = store
     app.state.location_resolver = resolver
     app.state.ai_settings = selected_ai_settings
@@ -250,6 +298,7 @@ def create_app(
     app.state.batch_max_files = selected_batch_max_files
     app.state.batch_max_bytes = selected_batch_max_bytes
     app.state.company_researcher = selected_company_researcher
+    app.state.education_researcher = selected_education_researcher
     return app
 
 
