@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from cv_validator.ai.config import AISettings, load_ai_settings
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.config import load_ingestion_config, load_location_resolver
 from cv_validator.ingestion import IngestionError
@@ -30,8 +31,10 @@ def create_app(
     db_path: Path | None = None,
     retention_days: int | None = None,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
+    selected_ai_settings = ai_settings or load_ai_settings()
     resolver = location_resolver or load_location_resolver()
     store = PersistenceStore(
         PersistenceConfig(
@@ -124,6 +127,7 @@ def create_app(
 
     app.state.store = store
     app.state.location_resolver = resolver
+    app.state.ai_settings = selected_ai_settings
     return app
 
 

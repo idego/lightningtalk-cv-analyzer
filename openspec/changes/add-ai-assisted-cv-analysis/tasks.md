@@ -46,8 +46,8 @@
 
 ## 4. Slice 3 - Synchronous AI Base Report
 
-- [ ] 4.1 Add OpenAI settings, secret documentation, a disabled feature flag, request timeout, and pinned GPT-5.6 Luna configuration
-- [ ] 4.2 Update the Document Analyzer prompt, schema, and eval input contract for page-aware text plus versioned deterministic observations
+- [x] 4.1 Add OpenAI settings, secret documentation, a disabled feature flag, request timeout, and pinned GPT-5.6 Luna configuration
+- [x] 4.2 Update the Document Analyzer prompt, schema, and eval input contract for page-aware text plus versioned deterministic observations
 - [ ] 4.3 Re-run the four-CV baseline and accept a versioned prompt/schema only after evidence and finding metrics remain within agreed limits
 - [ ] 4.4 Call the OpenAI Document Analyzer from the existing pipeline without web tools and validate its schema, page IDs, and exact excerpts
 - [ ] 4.5 Keep each CV request independent and reject invalid evidence, unsupported demographic inferences, malformed research candidates, and AI-derived verdict inputs

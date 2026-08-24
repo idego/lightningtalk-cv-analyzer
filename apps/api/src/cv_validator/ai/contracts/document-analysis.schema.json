@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "document-analysis-schema-v2",
+  "$id": "document-analysis-schema-v3",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "facts", "findings", "unknowns", "research_candidates", "checklist", "analysis_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "document-analysis-schema-v2"},
+    "schema_version": {"type": "string", "const": "document-analysis-schema-v3"},
     "facts": {
       "type": "object",
       "additionalProperties": false,
@@ -23,6 +23,8 @@
     "analysis_limitations": {"type": "array", "items": {"type": "string", "minLength": 1}}
   },
   "$defs": {
+    "authority": {"type": "string", "const": "ai"},
+    "source": {"type": "string", "const": "document_analyzer"},
     "evidence": {
       "type": "object",
       "additionalProperties": false,
@@ -35,31 +37,35 @@
     "contactFact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "value", "status", "evidence"],
+      "required": ["kind", "value", "status", "authority", "source", "evidence"],
       "properties": {
         "kind": {"type": "string", "enum": ["phone", "stated_location"]},
         "value": {"type": "string", "minLength": 1},
         "status": {"type": "string", "enum": ["present", "ambiguous"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "source": {"$ref": "#/$defs/source"},
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
       }
     },
     "educationFact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "institution", "program", "study_dates", "status", "evidence"],
+      "required": ["kind", "institution", "program", "study_dates", "status", "authority", "source", "evidence"],
       "properties": {
         "kind": {"type": "string", "const": "education"},
         "institution": {"type": "string", "minLength": 1},
         "program": {"type": ["string", "null"]},
         "study_dates": {"type": ["string", "null"]},
         "status": {"type": "string", "enum": ["present", "ambiguous"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "source": {"$ref": "#/$defs/source"},
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
       }
     },
     "employmentFact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "organization", "role", "employment_dates", "location", "relationship_type", "status", "evidence"],
+      "required": ["kind", "organization", "role", "employment_dates", "location", "relationship_type", "status", "authority", "source", "evidence"],
       "properties": {
         "kind": {"type": "string", "const": "employment"},
         "organization": {"type": "string", "minLength": 1},
@@ -68,13 +74,15 @@
         "location": {"type": ["string", "null"]},
         "relationship_type": {"type": ["string", "null"]},
         "status": {"type": "string", "enum": ["present", "ambiguous"]},
+        "authority": {"$ref": "#/$defs/authority"},
+        "source": {"$ref": "#/$defs/source"},
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
       }
     },
     "finding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["category", "status", "observation", "reason", "importance", "confidence", "limitation", "evidence"],
+      "required": ["category", "status", "observation", "reason", "importance", "confidence", "limitation", "authority", "source", "evidence"],
       "properties": {
         "category": {"type": "string", "enum": ["contact_conflict", "missing_contact_data", "timeline_gap", "timeline_overlap", "duration_claim_conflict", "relationship_ambiguity", "document_artifact", "semantic_outlier", "internal_fact_conflict"]},
         "status": {"type": "string", "enum": ["conflicting", "unconfirmed", "missing"]},
@@ -83,6 +91,8 @@
         "importance": {"type": "string", "enum": ["attention", "worth_knowing", "remaining"]},
         "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
         "limitation": {"type": "string", "minLength": 1},
+        "authority": {"$ref": "#/$defs/authority"},
+        "source": {"$ref": "#/$defs/source"},
         "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
       }
     },
@@ -98,11 +108,13 @@
     "researchCandidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["category", "query_subject", "question", "evidence"],
+      "required": ["category", "query_subject", "question", "authority", "source", "evidence"],
       "properties": {
         "category": {"type": "string", "enum": ["company", "education_or_certification", "linkedin"]},
         "query_subject": {"type": "string", "minLength": 1},
         "question": {"type": "string", "minLength": 1},
+        "authority": {"$ref": "#/$defs/authority"},
+        "source": {"$ref": "#/$defs/source"},
         "evidence": {"$ref": "#/$defs/evidence"}
       }
     },

@@ -1,34 +1,73 @@
 # AI document eval
 
-Slice 0 is deliberately separate from the runtime pipeline. Tracked files contain only anonymous rules, a strict schema, and an evaluation tool. Inputs, expectations, raw responses, and reports live under gitignored `data/ai-eval/`.
+Inputs, expectations, deterministic observations, raw responses, and reports
+live under gitignored `data/ai-eval/`. The runtime request builder and this
+harness share the single tracked prompt/schema source in
+`apps/api/src/cv_validator/ai/contracts/`.
 
 Run the four-case baseline with the authenticated Codex model transport:
 
 ```bash
 python scripts/eval_ai_document.py run \
-  --manifest data/ai-eval/manifest-2008.json \
+  --manifest data/ai-eval/manifest-2108.json \
   --backend codex \
   --model gpt-5.6-luna \
   --reasoning medium \
-  --output data/ai-eval/results/baseline-2008.json
+  --confirm-live-model-run \
+  --output data/ai-eval/results/baseline-2108.json
 ```
 
-The command validates the complete Draft 2020-12 schema and records expected-finding recall, unsupported findings (missing or non-source evidence), unexpected additional findings for manual review, exact-match accuracy of finding evidence against the flattened input, latency, token usage when exposed by the backend, and estimated cost when input/output token prices are supplied. Recall is reported separately and MUST NOT be read as precision. Cost remains `null` rather than inventing a price when the selected transport does not expose billable API usage or an approved rate.
+The command rejects manifests with more than four cases and processes accepted
+cases sequentially in fresh contexts. Every case supplies one or more private
+page files with stable page IDs plus a private
+`deterministic-observations-v1` JSON file. The command validates the complete
+Draft 2020-12 output schema and records expected-finding recall, unsupported
+findings, unexpected findings, page-aware exact evidence, latency, usage, and
+explicitly configured estimated cost. Recall is not precision.
 
 Re-score a stored response without another model call and attach an approved private manual review:
 
 ```bash
 python scripts/eval_ai_document.py rescore \
-  --manifest data/ai-eval/manifest-2008.json \
-  --input data/ai-eval/results/baseline-2008.json \
-  --output data/ai-eval/results/baseline-2008.json
+  --manifest data/ai-eval/manifest-2108.json \
+  --input data/ai-eval/results/baseline-2108.json \
+  --output data/ai-eval/results/baseline-2108.json
 ```
 
 `--manual-review <private-markdown-path>` remains available when a future benchmark produces additional findings that require human classification; no manual-review file is needed for the accepted baseline.
 
 The manifest, stored responses, manual review, and every output path are required to resolve under the gitignored `data/ai-eval/` directory. The runner refuses paths outside it.
 
-Use `--backend responses` with `OPENAI_API_KEY` for a direct Responses API run. Optional `--input-usd-per-million` and `--output-usd-per-million` make the estimate explicit and reproducible. No result path under `data/` should be added to Git.
+The Codex backend has no supported output-token cap in this harness. Its report
+therefore records `max_output_tokens: null` and
+`output_limit_enforcement: not_enforced`; passing `--max-output-tokens` does not
+change that metadata or claim enforcement.
+
+Use `--backend responses` with `OPENAI_API_KEY` only after separate coordinator
+approval for live calls. For Responses, `--max-output-tokens` and the explicit
+`--confirm-live-model-run` acknowledgement are mandatory, and the report marks
+the limit as `enforced`. The runner performs no automatic retries, uses a
+120-second timeout, sets `store=false`, and sends no tools. Optional explicit
+token prices make the estimate reproducible. No path under `data/` may be added
+to Git.
+
+Each private manifest case has this input shape:
+
+```json
+{
+  "id": "private-case-id",
+  "pages": [
+    {"page_id": "page-0001", "input": "case/page-0001.txt"}
+  ],
+  "deterministic_observations": "case/observations.json",
+  "expected_findings": [],
+  "forbidden_output_terms": []
+}
+```
+
+The observations file must contain `contract_version`,
+`deterministic_ruleset_version`, and an `observations` array. All referenced
+files must resolve under ignored `data/ai-eval/`.
 
 ## Business coverage
 
