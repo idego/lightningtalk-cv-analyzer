@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { aiStatusMessage, partitionReviewFlags } from "@/lib/review-findings";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
+import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 
 function bandBadgeClass(band: string) {
   switch (band) {
@@ -174,6 +175,7 @@ export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
               <CompanyResearchPanel report={report} />
 
               <EducationResearchPanel report={report} />
+              <LinkedInResearchPanel report={report} />
 
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-medium">

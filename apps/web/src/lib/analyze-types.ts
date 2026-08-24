@@ -167,6 +167,21 @@ export type EducationResearch = {
   }>;
 };
 
+export type LinkedInDiscovery = {
+  status: "completed"; outcome: "completed" | "ambiguous" | "insufficient_evidence";
+  linkedin_not_found: boolean; not_found_caveat: string; searches_performed: string[]; search_limitations: string[];
+  possible_profiles: Array<{ profile_url: string; confidence: "low" | "medium" | "high"; uncertainty: string;
+    match_evidence: Array<{ field: string; cv_value: string; profile_value: string; source_urls: string[] }>;
+    conflicts: Array<{ field: string; summary: string; source_urls: string[] }>;
+    photo_visible: "true" | "false" | "unknown"; photo_source_url: string | null;
+    connection_count: { visibility: "visible" | "unknown"; minimum: number | null; maximum: number | null; display: string | null; source_url: string | null };
+    connection_completeness_flag: boolean }>;
+};
+
+export type LinkedInComparison = { status: "completed"; profile_url: string; searches_performed: string[]; limitations: string[]; comparisons: Array<{
+  field: "companies" | "roles" | "dates" | "stated_location" | "education"; status: "consistent" | "mismatch_for_review" | "unknown";
+  cv_value: string | null; profile_value: string | null; summary: string; source_urls: string[]; confidence: string; uncertainty: string }> };
+
 type ProvenanceFields = {
   authority: "code";
   evidence: Evidence[];
@@ -273,6 +288,8 @@ export type AnalysisReport = {
   };
   company_research?: CompanyResearch;
   education_research?: EducationResearch;
+  linkedin_discovery?: LinkedInDiscovery;
+  linkedin_comparison?: LinkedInComparison;
 };
 
 export type AnalyzeItemResult =
