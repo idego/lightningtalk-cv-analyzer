@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from cv_validator.ai.application import DocumentAnalyzer, run_document_analysis
+from cv_validator.ai.config import AISettings
+from cv_validator.ai.domain import (
+    AIAnalysisStatus,
+    AIDocumentAnalysisOutcome,
+)
 from cv_validator.config import (
     IngestionConfig,
     WeightsConfig,
@@ -28,6 +34,7 @@ class PipelineResult:
     report: Report
     deterministic: DeterministicAnalysisResult
     document_identity: RedactedDocumentIdentity
+    ai_outcome: AIDocumentAnalysisOutcome
 
 
 def analyze_cv_text(
@@ -36,12 +43,16 @@ def analyze_cv_text(
     ingestion_config: IngestionConfig | None = None,
     *,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> Report:
     return analyze_cv_text_result(
         text,
         weights,
         ingestion_config,
         location_resolver=location_resolver,
+        ai_settings=ai_settings,
+        document_analyzer=document_analyzer,
     ).report
 
 
@@ -51,6 +62,8 @@ def analyze_cv_text_result(
     ingestion_config: IngestionConfig | None = None,
     *,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = RawDocument(
@@ -58,7 +71,13 @@ def analyze_cv_text_result(
         source_format="text",
     )
     validate_text_sufficiency(parsed, ingestion_config or load_ingestion_config())
-    return _analyze_raw(parsed, cfg, location_resolver)
+    return _analyze_raw(
+        parsed,
+        cfg,
+        location_resolver,
+        ai_settings,
+        document_analyzer,
+    )
 
 
 def analyze_cv_bytes(
@@ -68,6 +87,8 @@ def analyze_cv_bytes(
     ingestion_config: IngestionConfig | None = None,
     *,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> Report:
     return analyze_cv_bytes_result(
         content,
@@ -75,6 +96,8 @@ def analyze_cv_bytes(
         weights,
         ingestion_config,
         location_resolver=location_resolver,
+        ai_settings=ai_settings,
+        document_analyzer=document_analyzer,
     ).report
 
 
@@ -85,10 +108,18 @@ def analyze_cv_bytes_result(
     ingestion_config: IngestionConfig | None = None,
     *,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = ingest_cv(content, filename=filename, config=ingestion_config)
-    return _analyze_raw(parsed, cfg, location_resolver)
+    return _analyze_raw(
+        parsed,
+        cfg,
+        location_resolver,
+        ai_settings,
+        document_analyzer,
+    )
 
 
 def analyze_cv_file(
@@ -97,6 +128,8 @@ def analyze_cv_file(
     ingestion_config: IngestionConfig | None = None,
     *,
     location_resolver: LocationResolver | None = None,
+    ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> Report:
     content = path.read_bytes()
     return analyze_cv_bytes(
@@ -105,6 +138,8 @@ def analyze_cv_file(
         weights=weights,
         ingestion_config=ingestion_config,
         location_resolver=location_resolver,
+        ai_settings=ai_settings,
+        document_analyzer=document_analyzer,
     )
 
 
@@ -112,6 +147,8 @@ def _analyze_raw(
     parsed: RawDocument,
     weights: WeightsConfig,
     location_resolver: LocationResolver | None,
+    ai_settings: AISettings | None,
+    document_analyzer: DocumentAnalyzer | None,
 ) -> PipelineResult:
     redacted = redact_national_ids(parsed)
     deterministic = analyze_deterministically(
@@ -120,8 +157,29 @@ def _analyze_raw(
         location_resolver=location_resolver,
     )
     report = score_deterministic(deterministic, weights)
+    selected_ai_settings = ai_settings or AISettings()
+    if selected_ai_settings.enabled:
+        if document_analyzer is None:
+            from cv_validator.ai.openai_client import (
+                OpenAIResponsesDocumentAnalyzer,
+            )
+
+            document_analyzer = OpenAIResponsesDocumentAnalyzer(
+                selected_ai_settings
+            )
+        ai_outcome = run_document_analysis(
+            selected_ai_settings,
+            document_analyzer,
+            redacted,
+            deterministic,
+        )
+    else:
+        ai_outcome = AIDocumentAnalysisOutcome(
+            status=AIAnalysisStatus.DISABLED
+        )
     return PipelineResult(
         report=report,
         deterministic=deterministic,
         document_identity=redacted.identity,
+        ai_outcome=ai_outcome,
     )

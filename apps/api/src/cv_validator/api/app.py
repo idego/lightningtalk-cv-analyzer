@@ -7,7 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from cv_validator.ai.application import DocumentAnalyzer
 from cv_validator.ai.config import AISettings, load_ai_settings
+from cv_validator.ai.openai_client import OpenAIResponsesDocumentAnalyzer
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.config import load_ingestion_config, load_location_resolver
 from cv_validator.ingestion import IngestionError
@@ -32,9 +34,15 @@ def create_app(
     retention_days: int | None = None,
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
+    document_analyzer: DocumentAnalyzer | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
+    selected_document_analyzer = document_analyzer
+    if selected_ai_settings.enabled and selected_document_analyzer is None:
+        selected_document_analyzer = OpenAIResponsesDocumentAnalyzer(
+            selected_ai_settings
+        )
     resolver = location_resolver or load_location_resolver()
     store = PersistenceStore(
         PersistenceConfig(
@@ -70,6 +78,8 @@ def create_app(
                 filename=filename,
                 ingestion_config=ingestion_config,
                 location_resolver=resolver,
+                ai_settings=selected_ai_settings,
+                document_analyzer=selected_document_analyzer,
             )
             payload = serialize_report_payload(result.report)
             store.persist_report(
@@ -99,6 +109,8 @@ def create_app(
                     filename=filename,
                     ingestion_config=ingestion_config,
                     location_resolver=resolver,
+                    ai_settings=selected_ai_settings,
+                    document_analyzer=selected_document_analyzer,
                 )
                 payload = serialize_report_payload(result.report)
                 store.persist_report(
@@ -128,6 +140,7 @@ def create_app(
     app.state.store = store
     app.state.location_resolver = resolver
     app.state.ai_settings = selected_ai_settings
+    app.state.document_analyzer = selected_document_analyzer
     return app
 
 

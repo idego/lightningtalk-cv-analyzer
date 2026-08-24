@@ -3,6 +3,9 @@ from __future__ import annotations
 from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.extraction.candidates import extract_candidates
 from cv_validator.extraction.eu_observations import classify_eu_observations
+from cv_validator.extraction.email_providers import (
+    classify_common_email_provider_typos,
+)
 from cv_validator.extraction.locations import classify_locations
 from cv_validator.extraction.informational import classify_informational_candidates
 from cv_validator.extraction.phones import classify_and_aggregate_phones
@@ -23,6 +26,7 @@ def analyze_deterministically(
         ruleset_version,
     )
     informational_observations = classify_informational_candidates(candidates)
+    email_provider_observations = classify_common_email_provider_typos(candidates)
     added_candidates, location_facts, location_observations, location_signals = (
         classify_locations(
             document,
@@ -48,6 +52,7 @@ def analyze_deterministically(
             (
                 *phone_observations,
                 *informational_observations,
+                *email_provider_observations,
                 *location_observations,
                 *eu_observations,
             )
