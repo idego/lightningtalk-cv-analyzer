@@ -85,6 +85,15 @@ Use the OpenAI Responses API and GPT-5.6 Luna. Start with medium reasoning and s
 
 Each call starts without a previous response or another candidate's context. The current batch endpoint can call this flow sequentially. V1 documents and enforces a practical batch limit based on measured request duration.
 
+The synchronous V1 batch limit is four files and 20 MiB of combined readable
+upload data by default. Both values are configurable and are checked before any
+CV analysis starts. The file cap matches the only current end-to-end batch
+measurement: four sequential Luna calls took about 97.5 seconds in total
+(about 24.4 seconds per CV on average). This is a conservative development
+boundary rather than a latency guarantee; one model request may still run until
+the fixed 120-second timeout. Raising the cap requires later production-volume
+measurements, not a queue or service-boundary change in this slice.
+
 ### D5: Keep AI outside the verdict
 
 Only code-owned facts and fixed rules can change the score and band. Neither AI findings nor AI-selected facts may become verdict inputs. AI findings have separate `importance` and `confidence` values. The UI can highlight an important finding, but the finding cannot change weights or bands.
@@ -136,6 +145,15 @@ LinkedIn discovery returns possible profiles. The recruiter must confirm a possi
 ### D9: Keep the existing runtime and persistence
 
 Docker Compose continues to run `web` and `api`. Only `web` publishes a host port. The API stores reports, research results, prompt versions, usage, and audit records in SQLite.
+
+Each accepted base analysis receives one opaque UUID. The same ID links the
+HTTP report, deterministic report row, AI-analysis row, and audit row. Existing
+SQLite databases are migrated additively: old report and audit rows receive a
+stable `legacy-<row id>` identifier and remain readable. The AI row stores the
+validated AI payload, importance, confidence, exact evidence, authority,
+prompt/schema/input/deterministic-observation versions, configured and response
+model names, usage, and safe failure state. It never stores raw file bytes or a
+raw national-ID value.
 
 Cache company, institution, program, and certification results in SQLite by normalized entity, research version, and freshness window. Keep source and retrieval data on cache hits. Keep LinkedIn results scoped to one candidate.
 
@@ -221,7 +239,6 @@ Disabling AI and research must preserve a tested deterministic-only report based
 ## Open Questions
 
 - Which GPT-5.6 Luna snapshot and reasoning level pass the four-CV eval?
-- What timeout and maximum batch size keep the synchronous V1 usable?
 - Which per-CV and per-batch cost limits should production enforce?
 - How long should SQLite research cache entries remain valid?
 - Which retention period should replace the 90-day development value?
