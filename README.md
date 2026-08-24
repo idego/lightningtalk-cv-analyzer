@@ -60,13 +60,18 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
 - `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis; defaults to `false`
 - `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
+- `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
+- `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
 
 The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
 request timeout, zero automatic retries, `store=false`, no tools, and a 4,096
 output-token ceiling. The feature is disabled by default. Enabling it without
-`OPENAI_API_KEY` fails during application startup. The current stage provides
-only the tested local request/validation seam; it does not yet call OpenAI from
-the production pipeline or change API responses.
+`OPENAI_API_KEY` fails during application startup. When enabled, each CV uses
+an independent synchronous Responses API request. A refused, timed-out, or
+invalid AI response fails closed and leaves the deterministic report available.
+The API stores the validated AI result, model and contract versions, token
+usage, and audit payload under one stable analysis ID. AI findings are review
+notes and never change the deterministic score, band, facts, or rule findings.
 
 The tracked Document Analyzer prompt and strict output schema live in
 `apps/api/src/cv_validator/ai/contracts/`. Runtime request construction and the
@@ -119,6 +124,15 @@ uvicorn cv_validator.api.app:app --reload
 - `POST /analyze` — single CV upload
 - `POST /analyze/batch` — multiple CVs; per-file errors isolated
 - `GET /health` — health check
+
+The V1 batch endpoint remains deliberately sequential. Its default cap is four
+files and 20 MiB of readable upload data, checked before any CV analysis starts.
+The four-file cap is based on the existing four-CV Luna measurement: about
+97.5 seconds total (about 24.4 seconds per CV on average). It is a conservative
+synchronous limit, not a throughput guarantee: the configured per-model-call
+timeout is still 120 seconds, so production concurrency and larger batches must
+be measured separately before raising it. Both limits are configurable through
+the environment and do not introduce a background queue.
 
 ## Calibration fixtures
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from cv_validator.domain import Report
 from cv_validator.errors import PersistenceError
@@ -48,16 +49,47 @@ class PersistenceStore:
                     score INTEGER NOT NULL,
                     band TEXT NOT NULL,
                     findings_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    analysis_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     input_hash TEXT NOT NULL,
                     ruleset_version TEXT NOT NULL,
                     output_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    analysis_id TEXT
+                );
+                CREATE TABLE IF NOT EXISTS ai_analyses (
+                    analysis_id TEXT PRIMARY KEY,
+                    input_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    authority TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    schema_version TEXT NOT NULL,
+                    input_contract_version TEXT NOT NULL,
+                    deterministic_observations_version TEXT NOT NULL,
+                    configured_model TEXT NOT NULL,
+                    response_model TEXT,
+                    usage_json TEXT,
+                    result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
                 """
+            )
+            _ensure_column(conn, "reports", "analysis_id", "TEXT")
+            _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
+            conn.execute(
+                "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
+            )
+            conn.execute(
+                "UPDATE audit_log SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS reports_analysis_id ON reports(analysis_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
             )
 
     def persist_report(
@@ -66,7 +98,10 @@ class PersistenceStore:
         report: Report,
         *,
         report_payload: dict[str, Any] | None = None,
-    ) -> None:
+        analysis_id: str | None = None,
+        ai_analysis: dict[str, Any] | None = None,
+    ) -> str:
+        selected_analysis_id = analysis_id or str(uuid4())
         payload = (
             serialize_report_payload(report)
             if report_payload is None
@@ -80,8 +115,11 @@ class PersistenceStore:
             with self._connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO reports (input_hash, ruleset_version, score, band, findings_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO reports (
+                        input_hash, ruleset_version, score, band, findings_json,
+                        created_at, analysis_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -90,27 +128,49 @@ class PersistenceStore:
                         report.band.value,
                         json.dumps(findings["findings"]),
                         now,
+                        selected_analysis_id,
                     ),
                 )
                 conn.execute(
                     """
-                    INSERT INTO audit_log (input_hash, ruleset_version, output_json, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO audit_log (
+                        input_hash, ruleset_version, output_json, created_at,
+                        analysis_id
+                    )
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
                         report.ruleset_version.audit_identity,
                         json.dumps(findings),
                         now,
+                        selected_analysis_id,
                     ),
                 )
+                if ai_analysis is not None:
+                    _insert_ai_analysis(
+                        conn,
+                        analysis_id=selected_analysis_id,
+                        input_hash=input_hash,
+                        ai_analysis=ai_analysis,
+                        created_at=now,
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("report persistence failed") from exc
+        return selected_analysis_id
 
     def get_audit_entries(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY id").fetchall()
         return [dict(row) for row in rows]
+
+    def get_ai_analysis(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_analyses WHERE analysis_id = ?",
+                (analysis_id,),
+            ).fetchone()
+        return None if row is None else dict(row)
 
     def _purge_expired(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
@@ -118,10 +178,62 @@ class PersistenceStore:
         with self._connect() as conn:
             conn.execute("DELETE FROM reports WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM ai_analyses WHERE created_at < ?", (cutoff_iso,))
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    declaration: str,
+) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def _insert_ai_analysis(
+    conn: sqlite3.Connection,
+    *,
+    analysis_id: str,
+    input_hash: str,
+    ai_analysis: dict[str, Any],
+    created_at: str,
+) -> None:
+    versions = ai_analysis["versions"]
+    model = ai_analysis["model"]
+    conn.execute(
+        """
+        INSERT INTO ai_analyses (
+            analysis_id, input_hash, status, authority, prompt_version,
+            schema_version, input_contract_version,
+            deterministic_observations_version, configured_model,
+            response_model, usage_json, result_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            analysis_id,
+            input_hash,
+            ai_analysis["status"],
+            ai_analysis["authority"],
+            versions["prompt"],
+            versions["schema"],
+            versions["input_contract"],
+            versions["deterministic_observations"],
+            model["configured"],
+            model["response"],
+            json.dumps(ai_analysis["usage"]),
+            json.dumps(ai_analysis),
+            created_at,
+        ),
+    )
 
 
 def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:

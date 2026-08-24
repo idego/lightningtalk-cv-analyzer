@@ -1,18 +1,169 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+from typing import TYPE_CHECKING
 from typing import Any
 
+from cv_validator.ai.config import AISettings
+from cv_validator.ai.domain import AIAnalysisStatus
+from cv_validator.ai.request import (
+    DETERMINISTIC_OBSERVATIONS_VERSION,
+    INPUT_CONTRACT_VERSION,
+    PROMPT_VERSION,
+    SCHEMA_VERSION,
+)
 from cv_validator.domain import Report
 from cv_validator.errors import ReportSerializationError
+
+if TYPE_CHECKING:
+    from cv_validator.pipeline import PipelineResult
+
+
+_CHECK_IDS = (
+    "contact",
+    "education",
+    "employment",
+    "timeline",
+    "duration_claims",
+    "relationships",
+    "document_quality",
+    "protected_boundaries",
+)
 
 
 def serialize_report_payload(report: Report) -> dict[str, Any]:
     payload = report.to_dict()
+    _validate_json(payload)
+    return payload
+
+
+def serialize_analysis_payload(
+    result: PipelineResult,
+    settings: AISettings,
+    *,
+    analysis_id: str,
+) -> dict[str, Any]:
+    """Add the AI review envelope without mutating the deterministic report."""
+    payload = serialize_report_payload(result.report)
+    ai_payload = _serialize_ai_outcome(result, settings)
+    payload.update(
+        {
+            "analysis_id": analysis_id,
+            "ai_analysis": ai_payload,
+            "checklist": {
+                "checks": deepcopy(ai_payload["checklist"]),
+                "flags": _serialize_flags(payload["findings"], ai_payload["findings"]),
+            },
+        }
+    )
+    _validate_json(payload)
+    return payload
+
+
+def _serialize_ai_outcome(
+    result: PipelineResult,
+    settings: AISettings,
+) -> dict[str, Any]:
+    outcome = result.ai_outcome
+    analysis = (
+        deepcopy(outcome.analysis.payload)
+        if outcome.status is AIAnalysisStatus.SUCCEEDED
+        and outcome.analysis is not None
+        else None
+    )
+    empty_facts = {"contact": [], "education": [], "employment": []}
+    empty_checks = {
+        check_id: {"checked": False, "issue_count": 0}
+        for check_id in _CHECK_IDS
+    }
+    return {
+        "status": outcome.status.value,
+        "failure_reason": (
+            outcome.failure_reason.value if outcome.failure_reason is not None else None
+        ),
+        "authority": "ai",
+        "source": "document_analyzer",
+        "model": {
+            "provider": "openai",
+            "configured": settings.model,
+            "response": outcome.response_model,
+            "reasoning_effort": settings.reasoning_effort,
+        },
+        "versions": {
+            "prompt": PROMPT_VERSION,
+            "schema": SCHEMA_VERSION,
+            "input_contract": INPUT_CONTRACT_VERSION,
+            "deterministic_observations": DETERMINISTIC_OBSERVATIONS_VERSION,
+        },
+        "usage": deepcopy(outcome.usage),
+        "facts": deepcopy(analysis["facts"]) if analysis is not None else empty_facts,
+        "findings": deepcopy(analysis["findings"]) if analysis is not None else [],
+        "unknowns": deepcopy(analysis["unknowns"]) if analysis is not None else [],
+        "research_candidates": (
+            deepcopy(analysis["research_candidates"]) if analysis is not None else []
+        ),
+        "checklist": (
+            deepcopy(analysis["checklist"]) if analysis is not None else empty_checks
+        ),
+        "analysis_limitations": (
+            deepcopy(analysis["analysis_limitations"]) if analysis is not None else []
+        ),
+    }
+
+
+def _serialize_flags(
+    deterministic_findings: list[dict[str, Any]],
+    ai_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    flags: list[dict[str, Any]] = []
+    for index, finding in enumerate(deterministic_findings, start=1):
+        flags.append(
+            {
+                "id": f"code-{index:04d}",
+                "source": "code",
+                "authority": "code",
+                "category": finding["signal"],
+                "status": finding["direction"],
+                "importance": _deterministic_importance(finding),
+                "confidence": "deterministic",
+                "observation": finding["observed"],
+                "reason": finding["rationale"],
+                "limitation": None,
+                "evidence": deepcopy(finding.get("evidence", [])),
+            }
+        )
+    for index, finding in enumerate(ai_findings, start=1):
+        flags.append(
+            {
+                "id": f"ai-{index:04d}",
+                "source": "ai",
+                "authority": finding["authority"],
+                "category": finding["category"],
+                "status": finding["status"],
+                "importance": finding["importance"],
+                "confidence": finding["confidence"],
+                "observation": finding["observation"],
+                "reason": finding["reason"],
+                "limitation": finding["limitation"],
+                "evidence": deepcopy(finding["evidence"]),
+            }
+        )
+    return flags
+
+
+def _deterministic_importance(finding: dict[str, Any]) -> str:
+    if finding.get("score_impact") == "weighted" and finding.get("direction") == "conflicts":
+        return "attention"
+    if finding.get("score_impact") == "weighted":
+        return "worth_knowing"
+    return "remaining"
+
+
+def _validate_json(payload: dict[str, Any]) -> None:
     try:
         json.dumps(payload, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ReportSerializationError(
             "report contains a value that is not JSON-safe"
         ) from exc
-    return payload
