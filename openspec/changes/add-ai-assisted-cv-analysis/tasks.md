@@ -65,13 +65,13 @@
 
 ## 5. Slice 4 - Synchronous Company Research
 
-- [ ] 5.1 Let the recruiter start company research for a stored analysis
-- [ ] 5.2 Add an idempotent company-research endpoint with a bounded timeout
-- [ ] 5.3 Define the Web Search prompt and schema for company existence, dates, activity, location, employer/client/project relations, websites, company pages, and registries
-- [ ] 5.4 Store cited findings, confidence, access time, usage, and completed result in SQLite
-- [ ] 5.5 Show company research without changing score or band
-- [ ] 5.6 Show the requested limited-online-presence flag with the searches performed and their limits
-- [ ] 5.7 Test sources, uncertainty, prompt injection, timeout, retry, duplicate requests, and cost limits
+- [x] 5.1 Let the recruiter start company research for a stored analysis
+- [x] 5.2 Add an idempotent company-research endpoint with a bounded timeout
+- [x] 5.3 Define the Web Search prompt and schema for company existence, dates, activity, location, employer/client/project relations, websites, company pages, and registries
+- [x] 5.4 Store cited findings, confidence, access time, usage, and completed result in SQLite
+- [x] 5.5 Show company research without changing score or band
+- [x] 5.6 Show the requested limited-online-presence flag with the searches performed and their limits
+- [x] 5.7 Test sources, uncertainty, prompt injection, timeout, retry, duplicate requests, and cost limits
 
 ## 6. Slice 5 - Synchronous Education and Certification Research
 
