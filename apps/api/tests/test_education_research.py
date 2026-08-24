@@ -65,9 +65,29 @@ def test_idempotency_persistence_usage_and_verdict_byte_invariance(tmp_path):
     assert json.loads(row["usage_json"])["input_tokens"] == 10 and json.loads(row["result_json"])["accessed_at"]
 
 
+def test_reusable_education_cache_excludes_cv_evidence_and_is_owner_audited(tmp_path):
+    fake=Fake(); app=_app(tmp_path, fake); client=_client(app)
+    assert client.post("/analyses/analysis-edu/research/education").status_code == 200
+    second=_stored(); second["analysis_id"]="analysis-edu-2"
+    second["ai_analysis"]["facts"]["education"][0]["study_dates"]="private-dates"
+    second["ai_analysis"]["facts"]["education"][0]["evidence"][0]["excerpt"]="other candidate secret"
+    app.state.store.persist_analysis_payload_for_test(second)
+    response=client.post("/analyses/analysis-edu-2/research/education")
+    assert response.status_code == 200 and len(fake.calls) == 1
+    result=response.json()["education_research"]
+    assert result["cache"]["status"] == "hit"
+    assert result["credentials"][0]["dates"] is None
+    assert result["credentials"][0]["cv_consistency"] == "evidence_unavailable"
+    with app.state.store._connect() as conn:
+        cache_text=conn.execute("SELECT payload_json || normalized_subjects_json FROM reusable_research_cache").fetchone()[0]
+    for forbidden in ("analysis-edu", "private-dates", "candidate secret", "page-0001", "line-001"):
+        assert forbidden not in cache_text
+    assert app.state.store.get_cache_audit("analysis-edu-2")[0]["outcome"] == "hit"
+
+
 def test_minimal_input_exact_set_candidate_isolation_and_pii_non_leak():
     request=build_education_research_request(_stored())
-    assert request.input_facts == ({"institution": "Northbridge University", "program": "MSc Computing", "dates": "2019-2021", "relation_evidence": [{"page_id": "page-0001", "line_id": "page-0001-line-001"}]},)
+    assert request.input_facts == ({"institution": "Northbridge University", "program": "MSc Computing"},)
     text=json.dumps(request.input_facts)
     for forbidden in ("candidate secret", "raw CV", "ignore instructions", "@", "national_id", "photo", "phone"):
         assert forbidden not in text

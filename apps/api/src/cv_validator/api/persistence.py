@@ -27,6 +27,7 @@ _SAFE_NATIONAL_ID_TYPES = frozenset(
 class PersistenceConfig:
     db_path: Path
     retention_days: int = 90
+    research_cache_ttl_days: int = 30
 
 
 class PersistenceStore:
@@ -122,6 +123,21 @@ class PersistenceStore:
                     usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
                     PRIMARY KEY (analysis_id, research_version), FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS reusable_research_cache (
+                    cache_key TEXT PRIMARY KEY, cache_format_version TEXT NOT NULL,
+                    category TEXT NOT NULL, normalized_subjects_json TEXT NOT NULL,
+                    research_version TEXT NOT NULL, prompt_version TEXT NOT NULL,
+                    schema_version TEXT NOT NULL, model_version TEXT NOT NULL,
+                    search_policy_version TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    source_accessed_at TEXT NOT NULL, created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL, invalidated_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS research_cache_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_id TEXT NOT NULL,
+                    category TEXT NOT NULL, cache_key TEXT NOT NULL, outcome TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 """
             )
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
@@ -160,7 +176,7 @@ class PersistenceStore:
         input_hash = identity.digest
         now = _utc_now()
         try:
-            self._purge_expired()
+            self.purge_expired()
             with self._connect() as conn:
                 conn.execute(
                     """
@@ -296,6 +312,59 @@ class PersistenceStore:
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("education research persistence failed") from exc
 
+    def get_reusable_research(self, descriptor: Any) -> dict[str, Any] | None:
+        now = _utc_now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM reusable_research_cache
+                   WHERE cache_key = ? AND category = ? AND cache_format_version = ?
+                     AND research_version = ? AND prompt_version = ? AND schema_version = ?
+                     AND model_version = ? AND search_policy_version = ?
+                     AND invalidated_at IS NULL AND expires_at > ?""",
+                (descriptor.cache_key, descriptor.category, descriptor.cache_format_version,
+                 descriptor.research_version, descriptor.prompt_version, descriptor.schema_version,
+                 descriptor.model_version, descriptor.search_policy_version, now),
+            ).fetchone()
+        return None if row is None else json.loads(row["payload_json"])
+
+    def persist_reusable_research(self, descriptor: Any, payload: dict[str, Any]) -> None:
+        now_dt = datetime.now(timezone.utc)
+        expires_at = now_dt + timedelta(days=self.config.research_cache_ttl_days)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO reusable_research_cache (
+                    cache_key, cache_format_version, category, normalized_subjects_json,
+                    research_version, prompt_version, schema_version, model_version,
+                    search_policy_version, payload_json, source_accessed_at, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,
+                    source_accessed_at=excluded.source_accessed_at, created_at=excluded.created_at,
+                    expires_at=excluded.expires_at, invalidated_at=NULL""",
+                (descriptor.cache_key, descriptor.cache_format_version, descriptor.category,
+                 json.dumps(descriptor.normalized_subjects), descriptor.research_version,
+                 descriptor.prompt_version, descriptor.schema_version, descriptor.model_version,
+                 descriptor.search_policy_version, json.dumps(payload), payload["accessed_at"],
+                 now_dt.isoformat(), expires_at.isoformat()),
+            )
+
+    def record_cache_use(self, analysis_id: str, category: str, cache_key: str, outcome: str) -> None:
+        with self._connect() as conn:
+            conn.execute("INSERT INTO research_cache_audit (analysis_id, category, cache_key, outcome, created_at) VALUES (?, ?, ?, ?, ?)",
+                         (analysis_id, category, cache_key, outcome, _utc_now()))
+
+    def get_cache_audit(self, analysis_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT analysis_id, category, cache_key, outcome, created_at FROM research_cache_audit WHERE analysis_id = ? ORDER BY id", (analysis_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def invalidate_reusable_research(self, cache_key: str | None = None) -> int:
+        with self._connect() as conn:
+            if cache_key is None:
+                cursor = conn.execute("UPDATE reusable_research_cache SET invalidated_at = ? WHERE invalidated_at IS NULL", (_utc_now(),))
+            else:
+                cursor = conn.execute("UPDATE reusable_research_cache SET invalidated_at = ? WHERE cache_key = ? AND invalidated_at IS NULL", (_utc_now(), cache_key))
+        return cursor.rowcount
+
     def get_linkedin_discovery(self, analysis_id: str) -> dict[str, Any] | None:
         from cv_validator.research.linkedin import DISCOVERY_VERSION
         return self._get_research_row("linkedin_discovery", analysis_id, DISCOVERY_VERSION)
@@ -363,18 +432,25 @@ class PersistenceStore:
                 ("test-redacted-hash", "test-rules", json.dumps(payload), now, analysis_id),
             )
 
-    def _purge_expired(self) -> None:
+    def purge_expired(self) -> dict[str, int]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
         cutoff_iso = cutoff.isoformat()
+        deleted: dict[str, int] = {}
         with self._connect() as conn:
-            conn.execute("DELETE FROM reports WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM ai_analyses WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM company_research WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM education_research WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM linkedin_discovery WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM linkedin_comparison WHERE created_at < ?", (cutoff_iso,))
-            conn.execute("DELETE FROM linkedin_confirmation WHERE confirmed_at < ?", (cutoff_iso,))
+            expired_ids = [row[0] for row in conn.execute("SELECT analysis_id FROM reports WHERE created_at < ?", (cutoff_iso,)).fetchall()]
+            if expired_ids:
+                placeholders = ",".join("?" for _ in expired_ids)
+                for table in ("research_cache_audit", "ai_analyses", "company_research", "education_research",
+                              "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation", "audit_log"):
+                    deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
+                deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
+            for table, column in (("research_cache_audit", "created_at"), ("ai_analyses", "created_at"),
+                                  ("company_research", "created_at"), ("education_research", "created_at"),
+                                  ("linkedin_discovery", "created_at"), ("linkedin_comparison", "created_at"),
+                                  ("linkedin_confirmation", "confirmed_at"), ("audit_log", "created_at")):
+                deleted[table] = deleted.get(table, 0) + conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff_iso,)).rowcount
+            deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
+        return deleted
 
 
 def _utc_now() -> str:

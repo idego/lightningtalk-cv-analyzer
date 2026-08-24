@@ -4,11 +4,12 @@ import os
 import json
 import threading
 import secrets
+from time import perf_counter
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -24,15 +25,20 @@ from cv_validator.pipeline import analyze_cv_bytes_result
 from cv_validator.location import LocationResolver, SQLiteLocationResolver
 from cv_validator.errors import AnalysisRuntimeError, UploadReadError
 from cv_validator.serialization import serialize_analysis_payload
-from cv_validator.research.company import CompanyResearchService
+from cv_validator.research.company import CompanyResearchService, build_company_research_request
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesCompanyResearcher
-from cv_validator.research.education import EducationResearchService
+from cv_validator.research.education import EducationResearchService, build_education_research_request
+from cv_validator.research.cache import (
+    company_cache_descriptor, education_cache_descriptor, materialize_cache_hit,
+    reusable_payload,
+)
 from cv_validator.research.domain import EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesEducationResearcher
 from cv_validator.research.linkedin import LinkedInComparisonService, LinkedInDiscoveryService, normalize_linkedin_url
 from cv_validator.research.domain import LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearcher
+from cv_validator.operations import OperationsTelemetry, safe_log
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -77,6 +83,7 @@ def create_app(
     education_researcher=None,
     linkedin_researcher=None,
     linkedin_connection_threshold: int | None = None,
+    research_cache_ttl_days: int | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
@@ -106,6 +113,7 @@ def create_app(
         PersistenceConfig(
             db_path=db_path or _db_path_from_env(),
             retention_days=retention_days if retention_days is not None else _retention_days_from_env(),
+            research_cache_ttl_days=research_cache_ttl_days if research_cache_ttl_days is not None else _positive_int_env("CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS", 30),
         )
     )
     selected_batch_max_files = (
@@ -133,10 +141,47 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
+    telemetry = OperationsTelemetry()
+
+    @app.middleware("http")
+    async def observe_request(request, call_next):
+        supplied_correlation_id = request.headers.get("X-Correlation-ID")
+        try:
+            correlation_id = str(UUID(supplied_correlation_id)) if supplied_correlation_id else str(uuid4())
+        except (ValueError, AttributeError):
+            correlation_id = str(uuid4())
+        started = perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = (perf_counter() - started) * 1000
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            telemetry.request(route, 500, duration_ms)
+            safe_log("request_completed", correlation_id=correlation_id, status_code=500, duration_ms=round(duration_ms, 2), error_code="unhandled")
+            raise
+        duration_ms = (perf_counter() - started) * 1000
+        route = getattr(request.scope.get("route"), "path", "unmatched")
+        telemetry.request(route, response.status_code, duration_ms)
+        safe_log("request_completed", correlation_id=correlation_id, status_code=response.status_code, duration_ms=round(duration_ms, 2))
+        response.headers["X-Correlation-ID"] = correlation_id
+        return response
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/operations/metrics")
+    def operations_metrics() -> dict:
+        return telemetry.snapshot()
+
+    @app.get("/operations/status")
+    def operations_status() -> dict:
+        return {
+            "ai_enabled": selected_ai_settings.enabled,
+            "retention": {"days": store.config.retention_days, "production_approved": False},
+            "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
+            "batch": {"max_files": selected_batch_max_files, "max_bytes": selected_batch_max_bytes},
+        }
 
     @app.post("/analyze")
     async def analyze_single(file: UploadFile = File(...), x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
@@ -252,24 +297,46 @@ def create_app(
         stored_payload = store.get_analysis_payload(analysis_id)
         if stored_payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
+        try:
+            request = build_company_research_request(stored_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        descriptor = company_cache_descriptor(request)
         with research_locks_guard:
-            lock = research_locks.setdefault(analysis_id, threading.Lock())
+            lock = research_locks.setdefault(f"cache:{descriptor.cache_key}", threading.Lock())
         with lock:
             completed = store.get_company_research(analysis_id)
             if completed is not None:
                 result = json.loads(completed["result_json"])
             else:
-                try:
-                    result = CompanyResearchService(selected_company_researcher).run(stored_payload)
+                cached = store.get_reusable_research(descriptor)
+                if cached is not None:
+                    result = materialize_cache_hit("company", cached, descriptor=descriptor)
+                    store.record_cache_use(analysis_id, "company", descriptor.cache_key, "hit")
                     store.persist_company_research(analysis_id, result)
-                except ValueError as exc:
-                    raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except CompanyResearchTimeout as exc:
-                    raise HTTPException(status_code=504, detail="company_research_timeout") from exc
-                except CompanyResearchInvalidResponse as exc:
-                    raise HTTPException(status_code=502, detail="company_research_invalid_response") from exc
-                except CompanyResearchClientError as exc:
-                    raise HTTPException(status_code=502, detail="company_research_client_error") from exc
+                    telemetry.increment("research_cache_total", category="company", outcome="hit")
+                else:
+                    try:
+                        result = CompanyResearchService(selected_company_researcher).run(stored_payload)
+                        result["cache"] = {"status": "miss", "format_version": descriptor.cache_format_version}
+                        store.persist_reusable_research(descriptor, reusable_payload("company", result))
+                        store.record_cache_use(analysis_id, "company", descriptor.cache_key, "miss")
+                        store.persist_company_research(analysis_id, result)
+                        telemetry.increment("research_cache_total", category="company", outcome="miss")
+                    except ValueError as exc:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    except CompanyResearchTimeout as exc:
+                        telemetry.increment("research_failures_total", category="company", outcome="timeout")
+                        safe_log("research_failed", analysis_id=analysis_id, category="company", error_code="timeout")
+                        raise HTTPException(status_code=504, detail="company_research_timeout") from exc
+                    except CompanyResearchInvalidResponse as exc:
+                        telemetry.increment("research_failures_total", category="company", outcome="invalid_response")
+                        safe_log("research_failed", analysis_id=analysis_id, category="company", error_code="invalid_response")
+                        raise HTTPException(status_code=502, detail="company_research_invalid_response") from exc
+                    except CompanyResearchClientError as exc:
+                        telemetry.increment("research_failures_total", category="company", outcome="client_error")
+                        safe_log("research_failed", analysis_id=analysis_id, category="company", error_code="client_error")
+                        raise HTTPException(status_code=502, detail="company_research_client_error") from exc
         response = deepcopy(stored_payload)
         response["company_research"] = result
         return JSONResponse(response)
@@ -283,24 +350,46 @@ def create_app(
         stored_payload = store.get_analysis_payload(analysis_id)
         if stored_payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
+        try:
+            request = build_education_research_request(stored_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        descriptor = education_cache_descriptor(request)
         with research_locks_guard:
-            lock = research_locks.setdefault(analysis_id, threading.Lock())
+            lock = research_locks.setdefault(f"cache:{descriptor.cache_key}", threading.Lock())
         with lock:
             completed = store.get_education_research(analysis_id)
             if completed is not None:
                 result = json.loads(completed["result_json"])
             else:
-                try:
-                    result = EducationResearchService(selected_education_researcher).run(stored_payload)
+                cached = store.get_reusable_research(descriptor)
+                if cached is not None:
+                    result = materialize_cache_hit("education", cached, descriptor=descriptor)
+                    store.record_cache_use(analysis_id, "education", descriptor.cache_key, "hit")
                     store.persist_education_research(analysis_id, result)
-                except ValueError as exc:
-                    raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except EducationResearchTimeout as exc:
-                    raise HTTPException(status_code=504, detail="education_research_timeout") from exc
-                except EducationResearchInvalidResponse as exc:
-                    raise HTTPException(status_code=502, detail="education_research_invalid_response") from exc
-                except EducationResearchClientError as exc:
-                    raise HTTPException(status_code=502, detail="education_research_client_error") from exc
+                    telemetry.increment("research_cache_total", category="education", outcome="hit")
+                else:
+                    try:
+                        result = EducationResearchService(selected_education_researcher).run(stored_payload)
+                        result["cache"] = {"status": "miss", "format_version": descriptor.cache_format_version}
+                        store.persist_reusable_research(descriptor, reusable_payload("education", result))
+                        store.record_cache_use(analysis_id, "education", descriptor.cache_key, "miss")
+                        store.persist_education_research(analysis_id, result)
+                        telemetry.increment("research_cache_total", category="education", outcome="miss")
+                    except ValueError as exc:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+                    except EducationResearchTimeout as exc:
+                        telemetry.increment("research_failures_total", category="education", outcome="timeout")
+                        safe_log("research_failed", analysis_id=analysis_id, category="education", error_code="timeout")
+                        raise HTTPException(status_code=504, detail="education_research_timeout") from exc
+                    except EducationResearchInvalidResponse as exc:
+                        telemetry.increment("research_failures_total", category="education", outcome="invalid_response")
+                        safe_log("research_failed", analysis_id=analysis_id, category="education", error_code="invalid_response")
+                        raise HTTPException(status_code=502, detail="education_research_invalid_response") from exc
+                    except EducationResearchClientError as exc:
+                        telemetry.increment("research_failures_total", category="education", outcome="client_error")
+                        safe_log("research_failed", analysis_id=analysis_id, category="education", error_code="client_error")
+                        raise HTTPException(status_code=502, detail="education_research_client_error") from exc
         response = deepcopy(stored_payload)
         response["education_research"] = result
         return JSONResponse(response)
@@ -318,9 +407,15 @@ def create_app(
                     result = LinkedInDiscoveryService(selected_linkedin_researcher, selected_linkedin_threshold).run(stored_payload)
                     store.persist_linkedin_discovery(analysis_id, result)
                 except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except LinkedInResearchTimeout as exc: raise HTTPException(status_code=504, detail="linkedin_discovery_timeout") from exc
-                except LinkedInResearchInvalidResponse as exc: raise HTTPException(status_code=502, detail="linkedin_discovery_invalid_response") from exc
-                except LinkedInResearchClientError as exc: raise HTTPException(status_code=502, detail="linkedin_discovery_client_error") from exc
+                except LinkedInResearchTimeout as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "timeout")
+                    raise HTTPException(status_code=504, detail="linkedin_discovery_timeout") from exc
+                except LinkedInResearchInvalidResponse as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "invalid_response")
+                    raise HTTPException(status_code=502, detail="linkedin_discovery_invalid_response") from exc
+                except LinkedInResearchClientError as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "client_error")
+                    raise HTTPException(status_code=502, detail="linkedin_discovery_client_error") from exc
         response = deepcopy(stored_payload); response["linkedin_discovery"] = result
         return JSONResponse(response)
 
@@ -355,9 +450,15 @@ def create_app(
                     result = LinkedInComparisonService(selected_linkedin_researcher).run(stored_payload, confirmation["profile_url"])
                     store.persist_linkedin_comparison(analysis_id, confirmation["profile_url"], result)
                 except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except LinkedInResearchTimeout as exc: raise HTTPException(status_code=504, detail="linkedin_comparison_timeout") from exc
-                except LinkedInResearchInvalidResponse as exc: raise HTTPException(status_code=502, detail="linkedin_comparison_invalid_response") from exc
-                except LinkedInResearchClientError as exc: raise HTTPException(status_code=502, detail="linkedin_comparison_client_error") from exc
+                except LinkedInResearchTimeout as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "timeout")
+                    raise HTTPException(status_code=504, detail="linkedin_comparison_timeout") from exc
+                except LinkedInResearchInvalidResponse as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "invalid_response")
+                    raise HTTPException(status_code=502, detail="linkedin_comparison_invalid_response") from exc
+                except LinkedInResearchClientError as exc:
+                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "client_error")
+                    raise HTTPException(status_code=502, detail="linkedin_comparison_client_error") from exc
         response = deepcopy(stored_payload); response["linkedin_comparison"] = result
         return JSONResponse(response)
 
@@ -371,7 +472,14 @@ def create_app(
     app.state.education_researcher = selected_education_researcher
     app.state.linkedin_researcher = selected_linkedin_researcher
     app.state.linkedin_connection_threshold = selected_linkedin_threshold
+    app.state.research_cache_ttl_days = store.config.research_cache_ttl_days
+    app.state.telemetry = telemetry
     return app
+
+
+def _record_research_failure(telemetry: OperationsTelemetry, analysis_id: str, category: str, outcome: str) -> None:
+    telemetry.increment("research_failures_total", category=category, outcome=outcome)
+    safe_log("research_failed", analysis_id=analysis_id, category=category, error_code=outcome)
 
 
 async def _read_upload(upload: UploadFile) -> bytes:

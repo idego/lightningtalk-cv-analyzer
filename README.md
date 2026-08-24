@@ -63,6 +63,12 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
 - `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` — public, cited count-completeness threshold (default `500`; unknown counts are never negative evidence)
+- `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` — reusable public research-fact cache TTL (development default `30`)
+
+Production retention and cost limits are intentionally not approved yet. See
+[`docs/operations.md`](docs/operations.md),
+[`docs/v1-measurements.md`](docs/v1-measurements.md), and the external
+[`acceptance checklist`](docs/v1-acceptance-checklist.md).
 
 The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
 request timeout, zero automatic retries, `store=false`, no tools, and a 4,096
@@ -210,8 +216,8 @@ Every report is stamped: **decision-support only — not verification.** Human r
 Company research remains opt-in per stored analysis. `POST
 /analyses/{analysis_id}/research/company` uses the Responses API `web_search`
 tool with at most four searches, a 120-second request timeout, no automatic
-retry, and `store=false`. It sends only AI/code-derived organization name,
-dates, location, and relationship facts—not raw CV text or candidate contact
-data. Completed results are idempotent for the research contract version and
+retry, and `store=false`. Reusable research sends only validated public
+organization subjects—not CV dates, locations, relations, evidence, raw CV
+text, or candidate contact data. Completed results are idempotent for the research contract version and
 persist citations, searches, access time, uncertainty, versions, and usage in
 SQLite; they never change deterministic score or band.
