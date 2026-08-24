@@ -95,12 +95,12 @@
 
 ## 8. Slice 7 - V1 Hardening in the Existing Architecture
 
-- [ ] 8.1 Add versioned SQLite cache entries for reusable company, institution, program, and certificate research
-- [ ] 8.2 Reuse cache entries without leaking candidate data and record cache use in the audit
+- [x] 8.1 Add versioned SQLite cache entries for reusable company, institution, program, and certificate research
+- [x] 8.2 Reuse cache entries without leaking candidate data and record cache use in the audit
 - [ ] 8.3 Measure single-CV and realistic-batch latency, request failures, token use, and cost
 - [ ] 8.4 Set request timeout, batch size, retry, search, and cost limits from measurements
 - [ ] 8.5 Verify original-file deletion, national-ID redaction, development retention, and the approved production retention
-- [ ] 8.6 Add request metrics, structured logs, research error reporting, cache metrics, and an operations guide
+- [x] 8.6 Add request metrics, structured logs, research error reporting, cache metrics, and an operations guide
 - [ ] 8.7 Run the wider permitted corpus regression and agree on acceptance criteria with HR
 - [ ] 8.8 Get stakeholder acceptance, enable the feature, and keep a tested deterministic-only rollback based on the new code-owned facts
 - [ ] 8.9 Create a separate architecture proposal only if measured volume or failures require background processing

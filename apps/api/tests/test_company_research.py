@@ -122,6 +122,45 @@ def test_company_research_is_idempotent_and_preserves_verdict(tmp_path):
     assert json.loads(stored["result_json"])["accessed_at"]
 
 
+def test_reusable_company_cache_is_public_only_owner_audited_and_cross_candidate_safe(tmp_path):
+    researcher = FakeResearcher()
+    app = _app(tmp_path, researcher)
+    second = _stored_payload("Acme Systems")
+    second["analysis_id"] = "analysis-2"
+    second["ai_analysis"]["facts"]["employment"][0].update({
+        "role": "Private Role", "employment_dates": "private-dates",
+        "location": "private-location", "relationship_type": "client",
+    })
+    app.state.store.persist_analysis_payload_for_test(second)
+    client = _client(app)
+
+    first = client.post("/analyses/analysis-1/research/company")
+    cached = client.post("/analyses/analysis-2/research/company")
+
+    assert first.status_code == cached.status_code == 200
+    assert len(researcher.calls) == 1
+    assert cached.json()["company_research"]["cache"]["status"] == "hit"
+    assert cached.json()["company_research"]["organizations"][0]["relationship"] is None
+    assert app.state.store.get_cache_audit("analysis-1")[0]["outcome"] == "miss"
+    assert app.state.store.get_cache_audit("analysis-2")[0]["outcome"] == "hit"
+    db_bytes = (tmp_path / "db.sqlite").read_bytes()
+    for forbidden in (b"analysis-1", b"analysis-2", b"Private Role", b"private-dates", b"private-location", b"candidate secret"):
+        # Analysis-owned tables may contain IDs; reusable payload itself may not.
+        rows = app.state.store._connect().execute("SELECT cache_key, payload_json, normalized_subjects_json FROM reusable_research_cache").fetchall()
+        assert all(forbidden not in (row["cache_key"] + row["payload_json"] + row["normalized_subjects_json"]).encode() for row in rows)
+
+
+def test_company_cache_manual_invalidation_forces_refresh(tmp_path):
+    researcher = FakeResearcher(); app = _app(tmp_path, researcher); client = _client(app)
+    assert client.post("/analyses/analysis-1/research/company").status_code == 200
+    key = app.state.store.get_cache_audit("analysis-1")[0]["cache_key"]
+    assert app.state.store.invalidate_reusable_research(key) == 1
+    second = _stored_payload(); second["analysis_id"] = "analysis-2"
+    app.state.store.persist_analysis_payload_for_test(second)
+    assert client.post("/analyses/analysis-2/research/company").status_code == 200
+    assert len(researcher.calls) == 2
+
+
 def test_company_research_requires_analysis_capability(tmp_path):
     app = _app(tmp_path, FakeResearcher())
     assert TestClient(app).post("/analyses/analysis-1/research/company").status_code == 404
@@ -235,8 +274,8 @@ def test_concurrent_duplicate_requests_share_one_completed_call(tmp_path):
 def test_company_research_inputs_are_candidate_isolated():
     first = build_company_research_request(_stored_payload("Alpha One"))
     second = build_company_research_request(_stored_payload("Beta Two"))
-    assert first.input_facts == ({"organization": "Alpha One", "dates": "2020-2022", "location": "Warsaw", "relationship": "employer"},)
-    assert second.input_facts == ({"organization": "Beta Two", "dates": "2020-2022", "location": "Warsaw", "relationship": "employer"},)
+    assert first.input_facts == ({"organization": "Alpha One"},)
+    assert second.input_facts == ({"organization": "Beta Two"},)
     assert "Beta Two" not in json.dumps(first.input_facts)
 
 
