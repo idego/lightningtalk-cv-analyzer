@@ -65,12 +65,9 @@ def build_company_research_request(stored_report: dict[str, Any]) -> CompanyRese
         match = next((item for item in employment if isinstance(item, dict) and str(item.get("organization", "")).strip().casefold() == normalized), None)
         if match is None:
             continue
-        fact: dict[str, Any] = {"organization": subject.strip()}
-        for source, target in (("employment_dates", "dates"), ("location", "location"), ("relationship_type", "relationship")):
-            value = match.get(source)
-            if isinstance(value, str) and value.strip():
-                fact[target] = value.strip()[:200]
-        facts.append(fact)
+        # Reusable public-web research receives only the public organization
+        # subject. Candidate dates, locations and relations stay owner-scoped.
+        facts.append({"organization": subject.strip()})
         if len(facts) == MAX_ORGANIZATIONS:
             break
     if not facts:

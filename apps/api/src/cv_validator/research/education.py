@@ -73,18 +73,7 @@ def build_education_research_request(stored_report: dict[str, Any]) -> Education
         fact: dict[str, Any] = {"institution": institution.strip()}
         if isinstance(program, str) and program.strip():
             fact["program"] = program.strip()[:200]
-        dates = item.get("study_dates")
-        if isinstance(dates, str) and dates.strip():
-            fact["dates"] = dates.strip()[:100]
-        evidence = []
-        for entry in item.get("evidence", []):
-            if not isinstance(entry, dict):
-                continue
-            page_id, line_id = entry.get("page_id"), entry.get("line_id")
-            if isinstance(page_id, str) and isinstance(line_id, str):
-                evidence.append({"page_id": page_id[:40], "line_id": line_id[:80]})
-        if evidence:
-            fact["relation_evidence"] = evidence[:4]
+        # CV dates and evidence are never inputs to reusable public research.
         facts.append(fact)
         if len(facts) == MAX_CREDENTIALS:
             break
