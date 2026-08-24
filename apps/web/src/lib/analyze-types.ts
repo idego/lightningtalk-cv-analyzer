@@ -140,6 +140,33 @@ export type CompanyResearch = {
   }>;
 };
 
+export type EducationResearch = {
+  status: "completed";
+  outcome: "completed" | "insufficient_evidence";
+  accessed_at: string;
+  searches_performed: string[];
+  search_limitations: string[];
+  credentials: Array<{
+    institution: string | null;
+    program: string | null;
+    degree: string | null;
+    certificate: string | null;
+    institution_exists: "supported" | "mismatch" | "evidence_unavailable";
+    program_exists: "supported" | "mismatch" | "evidence_unavailable";
+    degree_exists: "supported" | "mismatch" | "evidence_unavailable";
+    certificate_exists: "supported" | "mismatch" | "evidence_unavailable";
+    dates: string | null;
+    accreditation_status: "established" | "not_established" | "evidence_unavailable";
+    city: string | null;
+    country: string | null;
+    cv_consistency: "supported" | "mismatch" | "evidence_unavailable";
+    location_difference_for_review: string | null;
+    confidence: "low" | "medium" | "high";
+    uncertainty: string;
+    findings: Array<{ kind: string; summary: string; source_urls: string[]; confidence: string; uncertainty: string }>;
+  }>;
+};
+
 type ProvenanceFields = {
   authority: "code";
   evidence: Evidence[];
@@ -212,6 +239,7 @@ export type DeterministicScoringSignal = ProvenanceFields & {
 
 export type AnalysisReport = {
   analysis_id: string;
+  analysis_access_token?: string;
   score: number;
   band: Band;
   claimed_location: {
@@ -244,6 +272,7 @@ export type AnalysisReport = {
     flags: ReviewFlag[];
   };
   company_research?: CompanyResearch;
+  education_research?: EducationResearch;
 };
 
 export type AnalyzeItemResult =

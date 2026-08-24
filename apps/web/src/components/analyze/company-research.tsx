@@ -22,7 +22,7 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
     try {
       const response = await fetch(
         `/api/analyses/${encodeURIComponent(report.analysis_id)}/research/company`,
-        { method: "POST" },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token }) },
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
