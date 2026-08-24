@@ -55,12 +55,13 @@
 - [x] 4.6 Return deterministic contact facts and AI-derived education, employment, relationship, and reviewer findings with explicit authority/source labels
 - [x] 4.7 Return code-owned phone-country, stated-location, and combined outside-EU observations with their limitations
 - [x] 4.7a Add a reviewed, versioned, official-source-backed catalog of common public mail-provider domains and legitimate aliases covering major international families (Google, Microsoft, Yahoo, Proton, Apple, and Zoho) and common Polish providers (Onet, WP/o2, and Interia); emit a code-owned, zero-weight `possible_email_domain_typo` observation only for conservative close confusable spellings such as `gmail.cm`, with exact evidence, catalog provenance, a confirmation caveat, no custom-domain inference, and regression tests
-- [ ] 4.8 Store AI findings, importance, confidence, evidence, authority, deterministic-observation version, model versions, usage, and audit data in SQLite
-- [ ] 4.9 Merge AI findings into the report without changing deterministic score, band, facts, or rule findings
-- [ ] 4.10 Return a stable analysis ID and the complete flag checklist as JSON
-- [ ] 4.11 Show `Wymaga uwagi`, `Warto wiedzieć`, and collapsed `Pozostałe sygnały` in the HTML UI
-- [ ] 4.12 Set and document a measured V1 limit for the existing sequential batch endpoint
+- [x] 4.8 Store AI findings, importance, confidence, evidence, authority, deterministic-observation version, model versions, usage, and audit data in SQLite
+- [x] 4.9 Merge AI findings into the report without changing deterministic score, band, facts, or rule findings
+- [x] 4.10 Return a stable analysis ID and the complete flag checklist as JSON
+- [x] 4.11 Show `Wymaga uwagi`, `Warto wiedzieć`, and collapsed `Pozostałe sygnały` in the HTML UI
+- [x] 4.12 Set and document a measured V1 limit for the existing sequential batch endpoint
 - [ ] 4.13 Test the full single-CV and bounded-batch flow in the backend, frontend, deterministic suite, and four-CV eval
+  - The non-live gate is complete: single-CV and four-file fake-client HTTP flows, SQLite migration and audit equality, deterministic byte-invariance, 328 backend tests, frontend grouping tests, typecheck, changed-file lint, and the Node 24 production build pass. The only remaining Slice 3 gate is the unaccepted four-CV Luna model baseline recorded under 4.3; no additional live call was made in this stage.
 
 ## 5. Slice 4 - Synchronous Company Research
 
