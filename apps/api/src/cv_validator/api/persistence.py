@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import hashlib
+import hmac
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -50,7 +52,8 @@ class PersistenceStore:
                     band TEXT NOT NULL,
                     findings_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    analysis_id TEXT
+                    analysis_id TEXT,
+                    access_token_hash TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,9 +93,20 @@ class PersistenceStore:
                     PRIMARY KEY (analysis_id, research_version),
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS education_research (
+                    analysis_id TEXT NOT NULL, research_version TEXT NOT NULL,
+                    status TEXT NOT NULL, prompt_version TEXT NOT NULL,
+                    schema_version TEXT NOT NULL, configured_model TEXT NOT NULL,
+                    response_model TEXT, accessed_at TEXT NOT NULL,
+                    usage_json TEXT NOT NULL, result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (analysis_id, research_version),
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 """
             )
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
+            _ensure_column(conn, "reports", "access_token_hash", "TEXT")
             _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
             conn.execute(
                 "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
@@ -115,6 +129,7 @@ class PersistenceStore:
         report_payload: dict[str, Any] | None = None,
         analysis_id: str | None = None,
         ai_analysis: dict[str, Any] | None = None,
+        access_token: str | None = None,
     ) -> str:
         selected_analysis_id = analysis_id or str(uuid4())
         payload = (
@@ -132,9 +147,9 @@ class PersistenceStore:
                     """
                     INSERT INTO reports (
                         input_hash, ruleset_version, score, band, findings_json,
-                        created_at, analysis_id
+                        created_at, analysis_id, access_token_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -144,6 +159,7 @@ class PersistenceStore:
                         json.dumps(findings["findings"]),
                         now,
                         selected_analysis_id,
+                        _token_hash(access_token) if access_token else None,
                     ),
                 )
                 conn.execute(
@@ -195,6 +211,13 @@ class PersistenceStore:
             ).fetchone()
         return None if row is None else json.loads(row["output_json"])
 
+    def analysis_access_allowed(self, analysis_id: str, access_token: str | None) -> bool:
+        if not access_token:
+            return False
+        with self._connect() as conn:
+            row = conn.execute("SELECT access_token_hash FROM reports WHERE analysis_id = ?", (analysis_id,)).fetchone()
+        return row is not None and isinstance(row["access_token_hash"], str) and hmac.compare_digest(row["access_token_hash"], _token_hash(access_token))
+
     def get_company_research(self, analysis_id: str) -> dict[str, Any] | None:
         from cv_validator.research.company import RESEARCH_VERSION
         with self._connect() as conn:
@@ -227,14 +250,41 @@ class PersistenceStore:
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("company research persistence failed") from exc
 
+    def get_education_research(self, analysis_id: str) -> dict[str, Any] | None:
+        from cv_validator.research.education import RESEARCH_VERSION
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM education_research WHERE analysis_id = ? AND research_version = ?",
+                (analysis_id, RESEARCH_VERSION),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def persist_education_research(self, analysis_id: str, result: dict[str, Any]) -> None:
+        versions, model, now = result["versions"], result["model"], _utc_now()
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO education_research (
+                        analysis_id, research_version, status, prompt_version,
+                        schema_version, configured_model, response_model,
+                        accessed_at, usage_json, result_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(analysis_id, research_version) DO NOTHING""",
+                    (analysis_id, versions["research"], result["status"], versions["prompt"],
+                     versions["schema"], model["configured"], model["response"], result["accessed_at"],
+                     json.dumps(result["usage"]), json.dumps(result), now),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("education research persistence failed") from exc
+
     def persist_analysis_payload_for_test(self, payload: dict[str, Any]) -> None:
         """Seed an anonymous stored payload without constructing an uploaded CV."""
         now = _utc_now()
         analysis_id = payload["analysis_id"]
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO reports (input_hash, ruleset_version, score, band, findings_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("test-redacted-hash", "test-rules", payload["score"], payload["band"], "[]", now, analysis_id),
+                "INSERT INTO reports (input_hash, ruleset_version, score, band, findings_json, created_at, analysis_id, access_token_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("test-redacted-hash", "test-rules", payload["score"], payload["band"], "[]", now, analysis_id, _token_hash("test-access-token")),
             )
             conn.execute(
                 "INSERT INTO audit_log (input_hash, ruleset_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
@@ -249,10 +299,15 @@ class PersistenceStore:
             conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM ai_analyses WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM company_research WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM education_research WHERE created_at < ?", (cutoff_iso,))
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _ensure_column(

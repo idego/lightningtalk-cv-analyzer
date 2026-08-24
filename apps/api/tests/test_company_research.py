@@ -100,10 +100,14 @@ def _app(tmp_path, researcher):
     return app
 
 
+def _client(app):
+    return TestClient(app, headers={"X-Analysis-Access-Token": "test-access-token"})
+
+
 def test_company_research_is_idempotent_and_preserves_verdict(tmp_path):
     researcher = FakeResearcher()
     app = _app(tmp_path, researcher)
-    client = TestClient(app)
+    client = _client(app)
 
     first = client.post("/analyses/analysis-1/research/company")
     second = client.post("/analyses/analysis-1/research/company")
@@ -118,9 +122,17 @@ def test_company_research_is_idempotent_and_preserves_verdict(tmp_path):
     assert json.loads(stored["result_json"])["accessed_at"]
 
 
+def test_company_research_requires_analysis_capability(tmp_path):
+    app = _app(tmp_path, FakeResearcher())
+    assert TestClient(app).post("/analyses/analysis-1/research/company").status_code == 404
+    assert TestClient(app, headers={"X-Analysis-Access-Token": "wrong"}).post(
+        "/analyses/analysis-1/research/company"
+    ).status_code == 404
+
+
 def test_company_research_sends_only_minimal_organization_facts(tmp_path):
     researcher = FakeResearcher()
-    client = TestClient(_app(tmp_path, researcher))
+    client = _client(_app(tmp_path, researcher))
     assert client.post("/analyses/analysis-1/research/company").status_code == 200
     request_text = json.dumps(researcher.calls[0].input_facts)
     assert "Acme Systems" in request_text
@@ -133,7 +145,7 @@ def test_company_research_rejects_uncited_source(tmp_path):
     result = _valid_result()
     result["organizations"][0]["findings"][0]["source_urls"] = ["https://invented.example/"]
     researcher = FakeResearcher(result=result)
-    response = TestClient(_app(tmp_path, researcher)).post(
+    response = _client(_app(tmp_path, researcher)).post(
         "/analyses/analysis-1/research/company"
     )
     assert response.status_code == 502
@@ -142,13 +154,13 @@ def test_company_research_rejects_uncited_source(tmp_path):
 def test_company_research_rejects_uncited_claims_and_unrelated_output(tmp_path):
     uncited = _valid_result()
     uncited["organizations"][0]["findings"] = []
-    assert TestClient(_app(tmp_path / "uncited", FakeResearcher(result=uncited))).post(
+    assert _client(_app(tmp_path / "uncited", FakeResearcher(result=uncited))).post(
         "/analyses/analysis-1/research/company"
     ).status_code == 502
 
     unrelated = _valid_result()
     unrelated["organizations"][0]["query_subject"] = "Unrelated Corp"
-    assert TestClient(_app(tmp_path / "unrelated", FakeResearcher(result=unrelated))).post(
+    assert _client(_app(tmp_path / "unrelated", FakeResearcher(result=unrelated))).post(
         "/analyses/analysis-1/research/company"
     ).status_code == 502
 
@@ -165,7 +177,7 @@ def test_limited_presence_requires_nonconclusive_caveat(tmp_path):
         "limited_online_presence": True,
         "limited_online_presence_reason": "No records, so this is a fake business.",
     })
-    assert TestClient(_app(tmp_path, FakeResearcher(result=result))).post(
+    assert _client(_app(tmp_path, FakeResearcher(result=result))).post(
         "/analyses/analysis-1/research/company"
     ).status_code == 502
 
@@ -175,7 +187,7 @@ def test_company_research_timeout_is_retryable_and_not_completed(tmp_path):
 
     researcher = FakeResearcher(error=CompanyResearchTimeout())
     app = _app(tmp_path, researcher)
-    response = TestClient(app).post("/analyses/analysis-1/research/company")
+    response = _client(app).post("/analyses/analysis-1/research/company")
     assert response.status_code == 504
     assert response.json()["detail"] == "company_research_timeout"
     assert app.state.store.get_company_research("analysis-1") is None
@@ -192,7 +204,7 @@ def test_company_research_retry_after_timeout_can_complete(tmp_path):
             return self.result, "gpt-5.6-luna", {"input_tokens": 10}
 
     researcher = TimeoutOnce()
-    client = TestClient(_app(tmp_path, researcher))
+    client = _client(_app(tmp_path, researcher))
     assert client.post("/analyses/analysis-1/research/company").status_code == 504
     assert client.post("/analyses/analysis-1/research/company").status_code == 200
     assert len(researcher.calls) == 2
@@ -210,7 +222,7 @@ def test_concurrent_duplicate_requests_share_one_completed_call(tmp_path):
             return self.result, "gpt-5.6-luna", {"input_tokens": 10}
 
     researcher = BlockingResearcher()
-    client = TestClient(_app(tmp_path, researcher))
+    client = _client(_app(tmp_path, researcher))
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(client.post, "/analyses/analysis-1/research/company")
         assert entered.wait(timeout=2)
@@ -260,7 +272,7 @@ def test_limited_presence_keeps_searches_and_never_claims_nonexistence(tmp_path)
         "findings": [],
         "official_website": None,
     })
-    response = TestClient(_app(tmp_path, FakeResearcher(result=result))).post(
+    response = _client(_app(tmp_path, FakeResearcher(result=result))).post(
         "/analyses/analysis-1/research/company"
     )
     payload = response.json()["company_research"]

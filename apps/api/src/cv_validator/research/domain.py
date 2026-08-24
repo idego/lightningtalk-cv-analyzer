@@ -23,3 +23,24 @@ class CompanyResearchClientError(CompanyResearchError):
 @dataclass(frozen=True)
 class CompanyResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
+
+
+class EducationResearchError(Exception):
+    pass
+
+
+class EducationResearchTimeout(EducationResearchError):
+    pass
+
+
+class EducationResearchInvalidResponse(EducationResearchError):
+    pass
+
+
+class EducationResearchClientError(EducationResearchError):
+    pass
+
+
+@dataclass(frozen=True)
+class EducationResearchRequest:
+    input_facts: tuple[dict[str, Any], ...]
