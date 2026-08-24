@@ -75,6 +75,21 @@ class PersistenceStore:
                     result_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS company_research (
+                    analysis_id TEXT NOT NULL,
+                    research_version TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    schema_version TEXT NOT NULL,
+                    configured_model TEXT NOT NULL,
+                    response_model TEXT,
+                    accessed_at TEXT NOT NULL,
+                    usage_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (analysis_id, research_version),
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 """
             )
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
@@ -172,6 +187,60 @@ class PersistenceStore:
             ).fetchone()
         return None if row is None else dict(row)
 
+    def get_analysis_payload(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT output_json FROM audit_log WHERE analysis_id = ?",
+                (analysis_id,),
+            ).fetchone()
+        return None if row is None else json.loads(row["output_json"])
+
+    def get_company_research(self, analysis_id: str) -> dict[str, Any] | None:
+        from cv_validator.research.company import RESEARCH_VERSION
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM company_research WHERE analysis_id = ? AND research_version = ?",
+                (analysis_id, RESEARCH_VERSION),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def persist_company_research(self, analysis_id: str, result: dict[str, Any]) -> None:
+        versions = result["versions"]
+        model = result["model"]
+        now = _utc_now()
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO company_research (
+                        analysis_id, research_version, status, prompt_version,
+                        schema_version, configured_model, response_model,
+                        accessed_at, usage_json, result_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(analysis_id, research_version) DO NOTHING
+                    """,
+                    (analysis_id, versions["research"], result["status"],
+                     versions["prompt"], versions["schema"], model["configured"],
+                     model["response"], result["accessed_at"],
+                     json.dumps(result["usage"]), json.dumps(result), now),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("company research persistence failed") from exc
+
+    def persist_analysis_payload_for_test(self, payload: dict[str, Any]) -> None:
+        """Seed an anonymous stored payload without constructing an uploaded CV."""
+        now = _utc_now()
+        analysis_id = payload["analysis_id"]
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO reports (input_hash, ruleset_version, score, band, findings_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("test-redacted-hash", "test-rules", payload["score"], payload["band"], "[]", now, analysis_id),
+            )
+            conn.execute(
+                "INSERT INTO audit_log (input_hash, ruleset_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
+                ("test-redacted-hash", "test-rules", json.dumps(payload), now, analysis_id),
+            )
+
     def _purge_expired(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
         cutoff_iso = cutoff.isoformat()
@@ -179,6 +248,7 @@ class PersistenceStore:
             conn.execute("DELETE FROM reports WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff_iso,))
             conn.execute("DELETE FROM ai_analyses WHERE created_at < ?", (cutoff_iso,))
+            conn.execute("DELETE FROM company_research WHERE created_at < ?", (cutoff_iso,))
 
 
 def _utc_now() -> str:

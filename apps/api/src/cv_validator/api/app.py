@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
+import threading
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +22,9 @@ from cv_validator.pipeline import analyze_cv_bytes_result
 from cv_validator.location import LocationResolver, SQLiteLocationResolver
 from cv_validator.errors import AnalysisRuntimeError, UploadReadError
 from cv_validator.serialization import serialize_analysis_payload
+from cv_validator.research.company import CompanyResearchService
+from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
+from cv_validator.research.openai_client import OpenAIResponsesCompanyResearcher
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -55,6 +61,7 @@ def create_app(
     document_analyzer: DocumentAnalyzer | None = None,
     batch_max_files: int | None = None,
     batch_max_bytes: int | None = None,
+    company_researcher=None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
@@ -62,6 +69,12 @@ def create_app(
     if selected_ai_settings.enabled and selected_document_analyzer is None:
         selected_document_analyzer = OpenAIResponsesDocumentAnalyzer(
             selected_ai_settings
+        )
+    selected_company_researcher = company_researcher
+    if selected_ai_settings.enabled and selected_company_researcher is None:
+        selected_company_researcher = OpenAIResponsesCompanyResearcher(
+            api_key=selected_ai_settings.api_key,
+            timeout_seconds=selected_ai_settings.timeout_seconds,
         )
     resolver = location_resolver or load_location_resolver()
     store = PersistenceStore(
@@ -198,12 +211,45 @@ def create_app(
                 )
         return JSONResponse({"results": results})
 
+    research_locks: dict[str, threading.Lock] = {}
+    research_locks_guard = threading.Lock()
+
+    @app.post("/analyses/{analysis_id}/research/company")
+    def research_company(analysis_id: str) -> JSONResponse:
+        if selected_company_researcher is None:
+            raise HTTPException(status_code=503, detail="company_research_disabled")
+        stored_payload = store.get_analysis_payload(analysis_id)
+        if stored_payload is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        with research_locks_guard:
+            lock = research_locks.setdefault(analysis_id, threading.Lock())
+        with lock:
+            completed = store.get_company_research(analysis_id)
+            if completed is not None:
+                result = json.loads(completed["result_json"])
+            else:
+                try:
+                    result = CompanyResearchService(selected_company_researcher).run(stored_payload)
+                    store.persist_company_research(analysis_id, result)
+                except ValueError as exc:
+                    raise HTTPException(status_code=409, detail=str(exc)) from exc
+                except CompanyResearchTimeout as exc:
+                    raise HTTPException(status_code=504, detail="company_research_timeout") from exc
+                except CompanyResearchInvalidResponse as exc:
+                    raise HTTPException(status_code=502, detail="company_research_invalid_response") from exc
+                except CompanyResearchClientError as exc:
+                    raise HTTPException(status_code=502, detail="company_research_client_error") from exc
+        response = deepcopy(stored_payload)
+        response["company_research"] = result
+        return JSONResponse(response)
+
     app.state.store = store
     app.state.location_resolver = resolver
     app.state.ai_settings = selected_ai_settings
     app.state.document_analyzer = selected_document_analyzer
     app.state.batch_max_files = selected_batch_max_files
     app.state.batch_max_bytes = selected_batch_max_bytes
+    app.state.company_researcher = selected_company_researcher
     return app
 
 
