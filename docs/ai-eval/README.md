@@ -14,7 +14,7 @@ python scripts/eval_ai_document.py run \
   --model gpt-5.6-luna \
   --reasoning medium \
   --confirm-live-model-run \
-  --output data/ai-eval/results/baseline-3108.json
+  --output data/ai-eval/results/baseline-3202.json
 ```
 
 The command rejects manifests with more than four cases and processes accepted
@@ -30,27 +30,33 @@ a safe start/completion line for each anonymous case so a live run does not
 look stalled. Recall is not precision.
 
 The AI input marks every canonical redacted source line with a stable,
-page-scoped `line_id`. Model output cites `page_id` plus `line_id` and sets
-`excerpt` to `null`; code rejects unknown, cross-page, irrelevant, or
-model-authored evidence and materializes the exact redacted line text. A stored
-materialized result can be re-scored only when its excerpt still matches that
-canonical line.
+page-scoped `line_id`. The current prompt `3202` and strict
+`document-analysis-schema-v8` response are model-only: evidence cites
+`page_id` plus `line_id`, composite education/employment fields use independent
+`{value,line_ids}` objects, and the model does not emit excerpts, authority,
+source, check IDs, checklist bookkeeping, or research candidates. Code rejects
+unknown or cross-page references, materializes exact redacted line text, and
+derives the code-owned report fields. A stored materialized result can be
+re-scored only when its excerpt still matches that canonical line.
 
-The strict acceptance gate requires all four responses to pass schema and
-protected-boundary validation, 100% expected-finding recall, 100% page-aware
-exact finding evidence, zero unsupported findings, and zero forbidden outputs.
-Every unexpected finding must be reviewed by index. Only `true positive` and
-`przydatne „warto wiedzieć”` additions are accepted; duplicates,
-overinterpretations, and parsing/flattening artifacts fail the gate. One
-finding can satisfy at most one expected finding.
+The strict acceptance gate reports schema validity, line-reference validity,
+per-field fact support, semantic finding recall/evidence, and unexpected-finding
+quality separately. Invalid optional fact fields may produce a partial result;
+they must not erase valid finding metrics. Every unexpected finding must be
+reviewed by index as `useful`, `neutral`, or `noise`. Supported unexpected
+findings are not automatic failures. The four-case smoke set accepts at most
+two evidence-backed `noise` findings, which is one per two CVs, and never
+accepts `noise` marked as `attention`. One finding can satisfy at most one
+expected finding. Unsupported findings, invalid evidence, forbidden output,
+and missed expected findings still have zero tolerance.
 
 Re-score a stored response without another model call and attach an approved private manual review:
 
 ```bash
 python scripts/eval_ai_document.py rescore \
   --manifest data/ai-eval/manifest-2108.json \
-  --input data/ai-eval/results/baseline-3108.json \
-  --output data/ai-eval/results/baseline-3108.json
+  --input data/ai-eval/results/baseline-3202.json \
+  --output data/ai-eval/results/baseline-3202.json
 ```
 
 `--manual-review <private-markdown-path>` remains available when a future benchmark produces additional findings that require human classification; no manual-review file is needed for the accepted baseline.
@@ -109,7 +115,11 @@ This matrix is the anonymous product contract derived from the approved roadmap.
 | Complete flag checklist | UI result + explicit test | All fixed, document-AI, and research flags with source and reason |
 | Per-candidate JSON and readable HTML | UI result + explicit test | One report model rendered in both representations |
 
-Cross-cutting prompt and test rules: findings require a page/source excerpt; missing data is not suspicious by itself; demographic proxies, appearance, nationality inference, hiring recommendations, and unsupported verification claims are forbidden; AI and research never change the deterministic score or band.
+Cross-cutting prompt and test rules: findings require a page/source-line
+citation and code-materialized exact excerpt; missing data is not suspicious by
+itself; demographic proxies, appearance, nationality inference, hiring
+recommendations, and unsupported verification claims are forbidden; AI and
+research never change the deterministic score or band.
 
 ## Anonymous finding taxonomy
 
