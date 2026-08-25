@@ -64,10 +64,16 @@ def load_ingestion_config() -> IngestionConfig:
     return IngestionConfig(minimum_meaningful_tokens=threshold)
 
 
-def load_location_resolver() -> SQLiteLocationResolver | None:
+def load_location_resolver(*, required: bool = False) -> SQLiteLocationResolver | None:
     index_path = os.environ.get("CV_VALIDATOR_LOCATION_INDEX_PATH")
     manifest_path = os.environ.get("CV_VALIDATOR_LOCATION_MANIFEST_PATH")
     if index_path is None and manifest_path is None:
+        if required:
+            raise LocationConfigurationError(
+                "GeoNames reference data is required: set "
+                "CV_VALIDATOR_LOCATION_INDEX_PATH and "
+                "CV_VALIDATOR_LOCATION_MANIFEST_PATH"
+            )
         return None
     if index_path is None or manifest_path is None:
         raise LocationConfigurationError(

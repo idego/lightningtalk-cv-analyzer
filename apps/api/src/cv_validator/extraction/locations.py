@@ -20,6 +20,7 @@ from cv_validator.domain import (
     ObservationStatus,
     Provenance,
     ScoringSignal,
+    SourceContext,
     Subject,
 )
 from cv_validator.extraction.candidates import source_context_for_offset
@@ -185,8 +186,16 @@ def _unlabeled_locations(
                     informational_if_resolved=True,
                     observation_kind=ObservationKind.UNLABELED_LOCATION,
                     reason_prefix=(
-                        "Whole-line place match has no explicit ownership relation "
-                        "and is non-scoring"
+                        (
+                            "Possible header location requires human confirmation; "
+                            "the whole-line place match has no explicit ownership "
+                            "relation and is non-scoring"
+                        )
+                        if candidate.source_context is SourceContext.DOCUMENT_START_BLOCK
+                        else (
+                            "Whole-line place match has no explicit ownership relation "
+                            "and is non-scoring"
+                        )
                     ),
                 )
             )

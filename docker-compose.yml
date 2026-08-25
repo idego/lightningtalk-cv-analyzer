@@ -34,13 +34,22 @@ services:
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS: ${CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS:-5}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
-      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}
+      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
       CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}
       CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS: ${CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS:-30}
+      CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3
+      CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json
+      CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: "true"
     volumes:
       - cv_validator_data:/app/data
+      - type: bind
+        source: ${CV_VALIDATOR_REFERENCE_DATA_DIR:-./data/geonames-build/2026-08-21}
+        target: /app/reference-data
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 10s

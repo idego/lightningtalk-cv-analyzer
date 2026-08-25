@@ -62,6 +62,10 @@ class SQLiteLocationResolver:
                 os.close(artifact_fd)
             raise
 
+    @property
+    def reference_data_version(self) -> ComponentVersion:
+        return self._reference_data_version
+
     def resolve(
         self,
         value: str,
