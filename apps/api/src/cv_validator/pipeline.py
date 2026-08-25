@@ -19,6 +19,7 @@ from cv_validator.domain import DeterministicAnalysisResult, Report
 from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.ingestion import (
     RawDocument,
+    RedactedDocument,
     RedactedDocumentIdentity,
     SourcePage,
 )
@@ -35,6 +36,8 @@ class PipelineResult:
     deterministic: DeterministicAnalysisResult
     document_identity: RedactedDocumentIdentity
     ai_outcome: AIDocumentAnalysisOutcome
+    report_language: str = "en"
+    redacted_document: RedactedDocument | None = None
 
 
 def analyze_cv_text(
@@ -64,6 +67,7 @@ def analyze_cv_text_result(
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
+    report_language: str = "en",
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = RawDocument(
@@ -77,6 +81,7 @@ def analyze_cv_text_result(
         location_resolver,
         ai_settings,
         document_analyzer,
+        report_language,
     )
 
 
@@ -110,6 +115,7 @@ def analyze_cv_bytes_result(
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
+    report_language: str = "en",
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = ingest_cv(content, filename=filename, config=ingestion_config)
@@ -119,6 +125,7 @@ def analyze_cv_bytes_result(
         location_resolver,
         ai_settings,
         document_analyzer,
+        report_language,
     )
 
 
@@ -149,6 +156,7 @@ def _analyze_raw(
     location_resolver: LocationResolver | None,
     ai_settings: AISettings | None,
     document_analyzer: DocumentAnalyzer | None,
+    report_language: str = "en",
 ) -> PipelineResult:
     redacted = redact_national_ids(parsed)
     deterministic = analyze_deterministically(
@@ -172,6 +180,7 @@ def _analyze_raw(
             document_analyzer,
             redacted,
             deterministic,
+            report_language=report_language,
         )
     else:
         ai_outcome = AIDocumentAnalysisOutcome(
@@ -182,4 +191,6 @@ def _analyze_raw(
         deterministic=deterministic,
         document_identity=redacted.identity,
         ai_outcome=ai_outcome,
+        report_language=report_language,
+        redacted_document=redacted,
     )

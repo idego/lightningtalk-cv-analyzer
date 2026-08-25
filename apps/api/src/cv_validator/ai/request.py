@@ -11,9 +11,10 @@ from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.ingestion import RedactedDocument, SourcePage
 
 
-PROMPT_VERSION = "3108"
-SCHEMA_VERSION = "document-analysis-schema-v7"
-INPUT_CONTRACT_VERSION = "document-analysis-input-v2"
+PROMPT_VERSION = "3205"
+SCHEMA_VERSION = "document-analysis-schema-v8"
+LEGACY_SCHEMA_VERSION = "document-analysis-schema-v7"
+INPUT_CONTRACT_VERSION = "document-analysis-input-v3"
 DETERMINISTIC_OBSERVATIONS_VERSION = "deterministic-observations-v1"
 
 
@@ -27,6 +28,7 @@ class DocumentAnalysisRequest:
     deterministic_observations_version: str
     timeout_seconds: float
     max_retries: int
+    report_language: str
 
     def to_openai_payload(self) -> dict[str, Any]:
         return deepcopy(self.openai_payload)
@@ -36,12 +38,15 @@ def build_document_analysis_request(
     settings: AISettings,
     document: RedactedDocument,
     deterministic: DeterministicAnalysisResult,
+    report_language: str = "en",
 ) -> DocumentAnalysisRequest:
     if not isinstance(document, RedactedDocument):
         raise TypeError("Document Analyzer requires a RedactedDocument")
 
+    if report_language not in {"en", "pl"}:
+        raise ValueError("unsupported report language")
     prompt = _contract_text("prompt.md")
-    schema = json.loads(_contract_text("document-analysis.schema.json"))
+    schema = load_document_analysis_schema()
     observations = {
         "contract_version": DETERMINISTIC_OBSERVATIONS_VERSION,
         "deterministic_ruleset_version": deterministic.ruleset_version,
@@ -50,6 +55,7 @@ def build_document_analysis_request(
     input_text = format_document_analysis_input(
         format_line_referenced_markdown(document.pages),
         observations,
+        report_language=report_language,
     )
     payload: dict[str, Any] = {
         "model": settings.model,
@@ -82,12 +88,14 @@ def build_document_analysis_request(
         deterministic_observations_version=DETERMINISTIC_OBSERVATIONS_VERSION,
         timeout_seconds=settings.timeout_seconds,
         max_retries=settings.max_retries,
+        report_language=report_language,
     )
 
 
 def format_document_analysis_input(
     page_markdown: str,
     deterministic_observations: dict[str, Any],
+    report_language: str = "en",
 ) -> str:
     observations_json = json.dumps(
         deterministic_observations,
@@ -95,6 +103,9 @@ def format_document_analysis_input(
         sort_keys=True,
     )
     return (
+        "<report_language>\n"
+        f"{report_language}\n"
+        "</report_language>\n\n"
         "<deterministic_observations>\n"
         f"{observations_json}\n"
         "</deterministic_observations>\n\n"
@@ -117,6 +128,11 @@ def format_line_referenced_markdown(pages: tuple[SourcePage, ...]) -> str:
 
 
 def load_document_analysis_schema() -> dict[str, Any]:
+    return json.loads(_contract_text("document-analysis.schema.v8.json"))
+
+
+def load_legacy_document_analysis_schema() -> dict[str, Any]:
+    """Load the v7 contract only to keep already persisted/test payloads readable."""
     return json.loads(_contract_text("document-analysis.schema.json"))
 
 

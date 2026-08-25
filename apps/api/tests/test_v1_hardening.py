@@ -35,7 +35,11 @@ def test_retention_cleanup_is_operator_visible_and_cache_expiry_is_independent(t
 
     app=create_app(db_path=tmp_path/"status.sqlite", ai_settings=AISettings(enabled=False), retention_days=90)
     status=TestClient(app).get("/operations/status").json()
-    assert status["retention"] == {"days":90, "production_approved":False}
+    assert status["retention"] == {
+        "days": 90,
+        "configurable": True,
+        "scope": "candidate_analysis_data",
+    }
 
 
 def test_request_metrics_and_correlation_id_are_exposed_without_request_content(tmp_path, caplog):
