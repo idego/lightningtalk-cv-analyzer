@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useAutoResearchState } from "@/lib/use-auto-research";
 
 export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
   const [research, setResearch] = useState<CompanyResearch | undefined>(report.company_research);
@@ -11,10 +12,14 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
     report.company_research ? "completed" : "idle",
   );
   const [error, setError] = useState<string | null>(null);
+  const automatic = useAutoResearchState(report.analysis_id, "company");
   const candidates = report.ai_analysis.research_candidates.filter(
     (candidate) => candidate.category === "company",
   );
   const enabled = report.ai_analysis.status === "succeeded" && candidates.length > 0;
+  const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
+  const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
+  const completed = state === "completed" || automatic?.status === "succeeded";
 
   async function startResearch() {
     setState("pending");
@@ -29,7 +34,7 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
         const detail = payload.detail ?? payload.error ?? "company_research_failed";
         if (response.status === 504 || detail === "company_research_timeout") {
           setState("timeout");
-          setError("Research przekroczył limit czasu. Możesz bezpiecznie spróbować ponownie.");
+          setError("Research timed out. You can safely try again.");
           return;
         }
         throw new Error(detail);
@@ -48,29 +53,31 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
         <div>
           <h3 className="font-medium">Company research</h3>
           <p className="text-xs text-muted-foreground">
-            Osobny public-web review; nie zmienia score ani bandu.
+            Separate public-web review; it does not change the score or band.
           </p>
         </div>
         <Button
           type="button"
           variant="outline"
           onClick={startResearch}
-          disabled={!enabled || state === "pending" || state === "completed"}
+          disabled={!enabled || busy || completed}
         >
-          {state === "pending" ? "Researching…" : state === "completed" ? "Completed" : "Start company research"}
+          {busy ? "Researching…" : completed ? "Completed" : "Start company research"}
         </Button>
       </div>
 
       {!enabled ? (
         <p className="text-sm text-muted-foreground">
-          Research niedostępny: analiza nie zwróciła bezpiecznych kandydatów firmowych.
+          Unavailable: the analysis did not return safe company research candidates.
         </p>
       ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {automatic ? <p className="text-xs text-muted-foreground">Automatic research: {automatic.status}.</p> : null}
+      {automatic?.message ? <p className="text-sm text-destructive">{automatic.message}</p> : null}
 
-      {research ? (
+      {visibleResearch ? (
         <div className="space-y-3">
-          {research.organizations.map((organization) => (
+          {visibleResearch.organizations.map((organization) => (
             <article key={organization.query_subject} className="rounded-md bg-muted/20 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <strong>{organization.query_subject}</strong>
@@ -82,7 +89,7 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
               </div>
               <p className="mt-2 text-muted-foreground">
                 {[organization.activity, organization.operating_dates, organization.location, organization.relationship]
-                  .filter(Boolean).join(" · ") || "Brak wystarczających danych publicznych."}
+                  .filter(Boolean).join(" · ") || "Not enough public information."}
               </p>
               {organization.limited_online_presence_reason ? (
                 <p className="mt-2 text-xs text-muted-foreground">{organization.limited_online_presence_reason}</p>
@@ -104,8 +111,8 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
           <details className="text-xs text-muted-foreground">
             <summary className="cursor-pointer">Searches and limitations</summary>
             <ul className="mt-2 space-y-1">
-              {research.searches_performed.map((search) => <li key={search}>Search: {search}</li>)}
-              {research.search_limitations.map((limit) => <li key={limit}>Limit: {limit}</li>)}
+              {visibleResearch.searches_performed.map((search) => <li key={search}>Search: {search}</li>)}
+              {visibleResearch.search_limitations.map((limit) => <li key={limit}>Limit: {limit}</li>)}
             </ul>
           </details>
         </div>

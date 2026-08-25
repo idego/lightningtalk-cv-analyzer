@@ -1,76 +1,73 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type {
   AIAnalysis,
   AnalyzeItemResult,
   ChecklistId,
   ReviewFlag,
 } from "@/lib/analyze-types";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { aiStatusMessage, partitionReviewFlags } from "@/lib/review-findings";
+import { Button } from "@/components/ui/button";
+import { aiStatusMessage, aiValidationState, partitionReviewFlags, presentReviewFlag } from "@/lib/review-findings";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
+import { useCopy } from "@/lib/app-settings";
 
-function bandBadgeClass(band: string) {
-  switch (band) {
-    case "green":
-      return "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300";
-    case "amber":
-      return "bg-amber-500/20 text-amber-700 dark:text-amber-300";
-    case "red":
-      return "bg-rose-500/20 text-rose-700 dark:text-rose-300";
-    case "gray":
-      return "bg-slate-500/20 text-slate-700 dark:text-slate-300";
-    default:
-      return "";
-  }
+function aiFactCount(analysis: AIAnalysis) {
+  return analysis.facts.contact.length
+    + analysis.facts.education.length
+    + analysis.facts.employment.length;
 }
 
-function FlagList({ flags, emptyText }: { flags: ReviewFlag[]; emptyText: string }) {
+function FlagList({ flags, emptyText, reportLanguage }: { flags: ReviewFlag[]; emptyText: string; reportLanguage: "en" | "pl" }) {
   if (!flags.length) {
     return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   }
 
   return (
     <div className="space-y-2">
-      {flags.map((flag) => (
+      {flags.map((flag) => {
+        const copy = presentReviewFlag(flag, reportLanguage);
+        return (
         <div key={flag.id} className="rounded-md border bg-muted/15 p-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{flag.observation}</span>
-            <Badge variant="outline">{flag.authority === "ai" ? "AI" : "Kod"}</Badge>
-            <Badge variant="outline">{flag.confidence}</Badge>
-          </div>
-          <p className="mt-1 text-muted-foreground">{flag.reason}</p>
+          <dl className="space-y-2">
+            <div><dt className="text-xs font-medium text-muted-foreground">What we found</dt><dd className="mt-0.5 font-medium">{copy.whatWeFound}</dd></div>
+            <div><dt className="text-xs font-medium text-muted-foreground">Why it matters</dt><dd className="mt-0.5">{copy.whyItMatters}</dd></div>
+            <div><dt className="text-xs font-medium text-muted-foreground">What to check</dt><dd className="mt-0.5">{copy.whatToCheck}</dd></div>
+          </dl>
           {flag.evidence.length ? (
             <p className="mt-2 border-l-2 pl-2 text-xs text-muted-foreground">
-              {flag.evidence[0].page_id}: „{flag.evidence[0].excerpt}”
+              Evidence: „{flag.evidence[0].excerpt}”
             </p>
           ) : null}
-          {flag.limitation ? (
-            <p className="mt-2 text-xs text-muted-foreground">Ograniczenie: {flag.limitation}</p>
-          ) : null}
         </div>
-      ))}
+      );})}
     </div>
   );
 }
 
-const CHECK_LABELS: Record<ChecklistId, string> = {
-  contact: "Dane kontaktowe",
-  education: "Edukacja",
-  employment: "Zatrudnienie",
-  timeline: "Chronologia",
-  duration_claims: "Deklarowane okresy",
-  relationships: "Relacje firma / klient / projekt",
-  document_quality: "Jakość dokumentu",
-  protected_boundaries: "Granice bezpiecznych wniosków",
+const CHECK_LABELS: Record<ChecklistId, { en: string; pl: string }> = {
+  contact: { en: "Contact details", pl: "Dane kontaktowe" },
+  education: { en: "Education", pl: "Edukacja" },
+  employment: { en: "Employment", pl: "Zatrudnienie" },
+  timeline: { en: "Timeline", pl: "Chronologia" },
+  duration_claims: { en: "Stated durations", pl: "Deklarowane okresy" },
+  relationships: { en: "Company / client / project relations", pl: "Relacje firma / klient / projekt" },
+  document_quality: { en: "Document quality", pl: "Jakość dokumentu" },
+  protected_boundaries: { en: "Safe inference boundaries", pl: "Granice bezpiecznych wniosków" },
 };
 
 function StructuredFacts({ analysis }: { analysis: AIAnalysis }) {
+  const { t } = useCopy();
+  const contactLabels = {
+    candidate_name: "Candidate name",
+    phone: "Phone",
+    stated_location: "Stated location",
+  } as const;
   const facts = [
-    ...analysis.facts.contact.map((fact) => `${fact.kind}: ${fact.value}`),
+    ...analysis.facts.contact.map((fact) => `${contactLabels[fact.kind]}: ${fact.value}`),
     ...analysis.facts.education.map((fact) =>
       [fact.institution, fact.program, fact.study_dates].filter(Boolean).join(" — "),
     ),
@@ -82,7 +79,7 @@ function StructuredFacts({ analysis }: { analysis: AIAnalysis }) {
   return (
     <details className="rounded-md border p-3">
       <summary className="cursor-pointer text-sm font-medium">
-        Dane odczytane z CV ({facts.length})
+        {t("extracted")} ({facts.length})
       </summary>
       {facts.length ? (
         <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
@@ -90,24 +87,57 @@ function StructuredFacts({ analysis }: { analysis: AIAnalysis }) {
         </ul>
       ) : (
         <p className="mt-3 text-sm text-muted-foreground">
-          Analiza AI nie dodała ustrukturyzowanych danych.
+          AI did not return structured CV data.
         </p>
       )}
     </details>
   );
 }
 
-export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
+export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void }) {
+  const { settings, t } = useCopy();
+  const reportRefs = useRef<Array<HTMLElement | null>>([]);
+  const [reportOverrides, setReportOverrides] = useState<Record<string, Extract<AnalyzeItemResult, { status: "ok" }>["report"]>>({});
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<Record<string, string>>({});
+
+  async function retryAi(report: Extract<AnalyzeItemResult, { status: "ok" }>["report"]) {
+    setRetryingId(report.analysis_id);
+    setRetryError(previous => ({ ...previous, [report.analysis_id]: "" }));
+    try {
+      const response = await fetch(`/api/analyses/${encodeURIComponent(report.analysis_id)}/ai/retry`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "AI retry failed");
+      setReportOverrides(previous => ({ ...previous, [report.analysis_id]: payload }));
+    } catch (error) {
+      setRetryError(previous => ({ ...previous, [report.analysis_id]: error instanceof Error ? error.message : "AI retry failed" }));
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!onActiveIndex) return;
+    const ratios = new Map<Element, number>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
+      let bestIndex = 0; let bestRatio = -1;
+      reportRefs.current.forEach((element, index) => { const ratio = element ? ratios.get(element) ?? 0 : 0; if (ratio > bestRatio) { bestRatio = ratio; bestIndex = index; } });
+      if (bestRatio > 0) onActiveIndex(bestIndex);
+    }, { threshold: [0, 0.2, 0.4, 0.6, 0.8, 1] });
+    reportRefs.current.forEach(element => { if (element) observer.observe(element); });
+    return () => observer.disconnect();
+  }, [items, onActiveIndex]);
   if (!items.length) {
     return null;
   }
 
   return (
     <div className="space-y-4">
-      {items.map((item) => {
+      {items.map((item, itemIndex) => {
         if (item.status === "error") {
           return (
-            <Card key={item.filename} className="border-destructive/40">
+            <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="scroll-mt-20 border-destructive/40">
               <CardHeader>
                 <CardTitle className="text-base">{item.filename}</CardTitle>
                 <CardDescription className="text-destructive">{item.error}</CardDescription>
@@ -116,61 +146,75 @@ export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
           );
         }
 
-        const report = item.report;
+        const report = reportOverrides[item.report.analysis_id] ?? item.report;
         const claimed = report.claimed_location.raw ?? report.claimed_location.country_code ?? "Unknown";
         const grouped = partitionReviewFlags(report.checklist.flags);
         const statusMessage = aiStatusMessage(
           report.ai_analysis.status,
           report.ai_analysis.failure_reason,
+          settings.uiLanguage,
         );
+        const validationState = aiValidationState(report.ai_analysis);
         const checkedCount = Object.values(report.checklist.checks).filter(
           (check) => check.checked,
         ).length;
+        const factCount = aiFactCount(report.ai_analysis);
+        const findingCount = report.ai_analysis.findings.length;
+        const reportDescription = report.ai_analysis.status === "succeeded"
+          ? (settings.uiLanguage === "pl" ? `AI odczytało ${factCount} danych i dodało ${findingCount} uwag do przejrzenia.` : `AI extracted ${factCount} facts and added ${findingCount} review notes.`)
+          : (settings.uiLanguage === "pl" ? "Analiza AI nie zwróciła pełnego wyniku." : "AI analysis did not return a complete result.");
 
         return (
-          <Card key={item.filename}>
-            <CardHeader>
+          <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="scroll-mt-20">
+            <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle className="text-base">{item.filename}</CardTitle>
-                  <CardDescription>{report.summary}</CardDescription>
+                  <CardDescription>{reportDescription}</CardDescription>
                 </div>
-                <Badge className={bandBadgeClass(report.band)}>{report.band.toUpperCase()}</Badge>
               </div>
+              <p className="mt-2 text-xs text-muted-foreground">{grouped.attention.length} {t("needsAttention").toLowerCase()} · {grouped.worthKnowing.length} {t("worthKnowing").toLowerCase()} · {checkedCount}/{Object.keys(report.checklist.checks).length} {settings.uiLanguage === "pl" ? "sprawdzono" : "checked"}</p>
             </CardHeader>
             <CardContent className="space-y-3">
               {statusMessage ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                  {statusMessage}
+                  <div className="flex flex-wrap items-center justify-between gap-3"><span>{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? (settings.uiLanguage === "pl" ? "Ponawianie…" : "Retrying…") : (settings.uiLanguage === "pl" ? "Ponów analizę AI" : "Retry AI analysis")}</Button> : null}</div>
+                  {retryError[report.analysis_id] ? <p className="mt-2 text-xs text-destructive">{retryError[report.analysis_id]}</p> : null}
+                </div>
+              ) : null}
+              {validationState.warning ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                  {validationState.warning}
                 </div>
               ) : null}
 
-              <div className="grid gap-2 text-sm sm:grid-cols-3">
-                <div>
-                  <span className="text-muted-foreground">Score:</span>{" "}
-                  {report.band === "gray"
-                    ? "Nie oceniono — za mało niezależnych danych"
-                    : report.score}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Claimed:</span> {claimed}
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Signals:</span> {report.signal_count}
-                </div>
-              </div>
-
               <section className="space-y-2 rounded-md border border-rose-500/30 p-3">
-                <h3 className="font-medium">Wymaga uwagi ({grouped.attention.length})</h3>
-                <FlagList flags={grouped.attention} emptyText="Brak sygnałów wymagających uwagi." />
+                <h3 className="font-medium">{t("needsAttention")} ({grouped.attention.length})</h3>
+                <FlagList flags={grouped.attention} emptyText={t("noAttention")} reportLanguage={report.ai_analysis.report_language} />
               </section>
 
               <section className="space-y-2 rounded-md border border-sky-500/30 p-3">
-                <h3 className="font-medium">Warto wiedzieć ({grouped.worthKnowing.length})</h3>
-                <FlagList flags={grouped.worthKnowing} emptyText="Brak dodatkowych informacji w tej grupie." />
+                <h3 className="font-medium">{t("worthKnowing")} ({grouped.worthKnowing.length})</h3>
+                <FlagList flags={grouped.worthKnowing} emptyText={t("noWorth")} reportLanguage={report.ai_analysis.report_language} />
               </section>
 
-              <StructuredFacts analysis={report.ai_analysis} />
+              {validationState.showAcceptedOutput ? (
+                <StructuredFacts analysis={report.ai_analysis} />
+              ) : null}
+
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">
+                  {t("deterministic")}: {report.band === "gray" ? "insufficient evidence" : report.band.toUpperCase()}
+                </summary>
+                <div className="mt-3 space-y-3 text-sm">
+                  <p className="text-muted-foreground">{report.summary}</p>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <div><span className="text-muted-foreground">Score:</span> {report.band === "gray" ? "Not assessed" : report.score}</div>
+                    <div><span className="text-muted-foreground">Claimed:</span> {claimed}</div>
+                    <div><span className="text-muted-foreground">Signals:</span> {report.signal_count}</div>
+                  </div>
+                </div>
+              </details>
 
               <CompanyResearchPanel report={report} />
 
@@ -179,18 +223,18 @@ export function ResultsList({ items }: { items: AnalyzeItemResult[] }) {
 
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-medium">
-                  Pozostałe sygnały ({grouped.remaining.length})
+                  {t("remaining")} ({grouped.remaining.length})
                 </summary>
                 <div className="mt-3 space-y-3">
-                  <FlagList flags={grouped.remaining} emptyText="Brak pozostałych sygnałów." />
+                  <FlagList flags={grouped.remaining} emptyText={t("noRemaining")} reportLanguage={report.ai_analysis.report_language} />
                   <div className="border-t pt-3 text-xs text-muted-foreground">
                     <p className="mb-2 font-medium">
-                      Checklista analizy AI: {checkedCount}/{Object.keys(report.checklist.checks).length} obszarów
+                      {settings.uiLanguage === "pl" ? "Checklista AI" : "AI checklist"}: {checkedCount}/{Object.keys(report.checklist.checks).length} {settings.uiLanguage === "pl" ? "obszarów" : "areas"}
                     </p>
                     <ul className="grid gap-1 sm:grid-cols-2">
                       {Object.entries(report.checklist.checks).map(([id, check]) => (
                         <li key={id}>
-                          {check.checked ? "✓" : "—"} {CHECK_LABELS[id as ChecklistId]}
+                          {check.checked ? "✓" : "—"} {CHECK_LABELS[id as ChecklistId][settings.uiLanguage]}
                           {check.issue_count ? ` (${check.issue_count})` : ""}
                         </li>
                       ))}
