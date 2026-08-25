@@ -7,10 +7,13 @@ import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { Button } from "@/components/ui/button";
 import { titleFromPathname } from "@/components/layout/sidebar-data";
+import { useCopy } from "@/lib/app-settings";
 
 export function AppHeader() {
   const pathname = usePathname();
-  const title = titleFromPathname(pathname);
+  const { t } = useCopy();
+  const fallbackTitle = titleFromPathname(pathname);
+  const title = pathname.startsWith("/settings") ? t("settings") : pathname.startsWith("/analyze") ? t("analyze") : fallbackTitle;
 
   return (
     <header className="sticky top-0 z-30 flex h-14 min-h-14 shrink-0 w-full min-w-0 items-center gap-2 border-b bg-background/85 px-4 py-0 backdrop-blur sm:gap-3 sm:px-6">

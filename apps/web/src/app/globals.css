@@ -68,6 +68,9 @@
 
   --radius: 0.75rem;
 
+  --motion-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --motion-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
   --sidebar: #081932;
   --sidebar-foreground: rgb(255 255 255 / 0.75);
   --sidebar-brand: #3cc2d9;
@@ -148,6 +151,17 @@
   z-index: 0;
 }
 
+.docx-preview-host .docx-wrapper {
+  min-height: 100%;
+  padding: 1rem;
+  background: transparent;
+}
+
+.docx-preview-host .docx {
+  margin: 0 auto 1rem;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.12);
+}
+
 [data-sidebar="sidebar"]::before {
   width: 280px;
   height: 280px;
@@ -162,4 +176,18 @@
   top: 60%;
   right: -90px;
   opacity: 0.05;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-container"] {
+    transition-duration: 1ms !important;
+  }
+
+  [data-sidebar-motion="content"] {
+    transform: none !important;
+    transition-property: opacity !important;
+    transition-duration: 120ms !important;
+    transition-timing-function: ease !important;
+  }
 }

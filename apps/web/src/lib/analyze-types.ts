@@ -37,6 +37,11 @@ export type ReviewFlag = {
   reason: string;
   limitation: string | null;
   evidence: ReviewEvidence[];
+  presentation_context?: {
+    observed: string | null;
+    claimed: string | null;
+    direction: string;
+  };
 };
 
 export type ChecklistId =
@@ -49,39 +54,63 @@ export type ChecklistId =
   | "document_quality"
   | "protected_boundaries";
 
-type AIFactBase = {
+type AICompositeFactBase = {
   status: "present" | "ambiguous";
   authority: "ai";
   source: "document_analyzer";
+};
+
+export type AIContactFact = AICompositeFactBase & {
+  kind: "candidate_name" | "phone" | "stated_location";
+  value: string;
   evidence: ReviewEvidence[];
 };
 
-export type AIContactFact = AIFactBase & {
-  kind: "phone" | "stated_location";
-  value: string;
-};
-
-export type AIEducationFact = AIFactBase & {
+export type AIEducationFact = AICompositeFactBase & {
   kind: "education";
   institution: string;
   program: string | null;
   study_dates: string | null;
+  field_evidence: {
+    institution: ReviewEvidence[];
+    program: ReviewEvidence[];
+    study_dates: ReviewEvidence[];
+  };
 };
 
-export type AIEmploymentFact = AIFactBase & {
+export type AIEmploymentFact = AICompositeFactBase & {
   kind: "employment";
   organization: string;
   role: string;
   employment_dates: string | null;
   location: string | null;
   relationship_type: string | null;
+  field_evidence: {
+    organization: ReviewEvidence[];
+    role: ReviewEvidence[];
+    employment_dates: ReviewEvidence[];
+    location: ReviewEvidence[];
+    relationship_type: ReviewEvidence[];
+  };
 };
 
 export type AIAnalysis = {
   status: "disabled" | "succeeded" | "failed";
   failure_reason: "timeout" | "refusal" | "invalid_response" | "client_error" | null;
+  failure: {
+    stage: string | null;
+    retryable: boolean | null;
+    http_status_class: string | null;
+    provider_request_id: string | null;
+    attempt_count: number;
+    latency_ms: number | null;
+  } | null;
+  manual_retry_available: boolean;
+  attempt_count: number;
+  latency_ms: number | null;
   authority: "ai";
   source: "document_analyzer";
+  report_language: "en" | "pl";
   model: {
     provider: "openai";
     configured: string;
@@ -108,6 +137,7 @@ export type AIAnalysis = {
   }>;
   checklist: Record<ChecklistId, { checked: boolean; issue_count: number }>;
   analysis_limitations: string[];
+  validation_warnings: string[];
 };
 
 export type CompanyResearch = {
@@ -306,4 +336,13 @@ export type AnalyzeItemResult =
 
 export type AnalyzeBatchResponse = {
   results: AnalyzeItemResult[];
+};
+
+export type AnalysisHistoryItem = {
+  analysis_id: string;
+  filename: string;
+  candidate_name: string | null;
+  band: Band;
+  summary: string;
+  created_at: string;
 };
