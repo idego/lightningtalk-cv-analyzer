@@ -176,12 +176,13 @@ Use the private corpus during development to create an anonymous finding taxonom
 
 Start with four CVs. Measure expected-finding recall, unsupported findings, evidence accuracy, latency, tokens, and cost. Re-run the baseline after the Document Analyzer input changes from document-only text to page-aware text plus deterministic observations. Use the full permitted corpus only for broader regression testing.
 
-Prompt `3108` is frozen as the current implementation contract while the
-remaining Slice 3 integration is built behind the disabled feature flag. Its
-four-case GPT-5.6 Luna baseline is not accepted: two responses failed the
-fail-closed evidence or checklist validation. This model-quality result does
-not weaken validation and does not enable the feature. Final prompt/model
-acceptance returns as part of the full Slice 3 gate in task 4.13.
+Prompt `3202` and schema `document-analysis-schema-v8` are the current
+implementation contract while the remaining Slice 3 integration is built
+behind the disabled feature flag. The four-case GPT-5.6 Luna baseline accepts
+at most one manually reviewed, evidence-backed, non-`attention` noise finding
+per two CVs. Unsupported findings, invalid evidence, forbidden output, and
+missed expected findings still have zero tolerance. Final prompt/model
+acceptance passed as part of the full Slice 3 gate in task 4.13.
 
 ### D12: Use a replaceable offline location resolver
 
@@ -199,6 +200,28 @@ Each built index has a manifest containing at least:
 - record counts.
 
 Reference data is refreshed quarterly through a manually started, reviewed, and approved build. The application loads the approved versioned artifact locally and never downloads or updates GeoNames data during CV analysis.
+
+The complete analyzer now treats the approved GeoNames pair as required runtime
+data. The standard development Compose stack mounts the repository-local
+approved snapshot and fails at startup if it is absent or invalid. A diagnostic
+degraded mode is explicit rather than inferred from missing environment
+variables. The health contract reports non-sensitive capability readiness so a
+missing resolver, AI configuration, or research service cannot be hidden by a
+generic HTTP 200.
+
+### D15: Keep multi-CV review dense and source-adjacent
+
+The browser submits accepted files sequentially so it can show honest per-file
+progress and render completed reports immediately. Original files remain only
+in browser memory. The review surface uses a resizable, hideable source preview
+beside compact grouped findings; report and document scroll independently. An
+intersection observer selects the dominant visible report and switches the
+preview to that report's original file. PDF uses the browser viewer and DOCX is
+rendered locally in the browser without an external document service.
+
+UI language and AI report language are separate browser settings. English is
+the default UI. Report language is passed per analysis request, recorded in AI
+audit metadata, and never changes deterministic values or scoring.
 
 ### D13: Deliver Slice 2 as two vertical stages
 
@@ -224,6 +247,81 @@ Neither stage changes signal weights, minimum evidence requirements, or band thr
 - [A requested weak signal is overinterpreted] -> Keep the signal visible, name the observed fact precisely, show its limits, and leave the conclusion to the recruiter.
 - [V1 cannot handle required volume] -> Record batch duration and failure data, then propose only the smallest approved infrastructure change supported by measurements.
 
+### D14: Keep the Slice 3 model contract lean and validation partial
+
+The base report still uses exactly one synchronous GPT-5.6 Luna call at medium
+reasoning effort with strict Structured Outputs. The model returns only
+source-grounded values, per-field source-line IDs, unknowns, limitations, and
+reviewer findings. It does not return authority/source metadata, excerpts,
+check IDs, checklist bookkeeping, or research candidates. Code owns those
+derived values, deduplication, category-to-check mapping, issue counts, and
+research candidates derived from accepted facts. Education and employment use
+independent `{value,line_ids}` evidence per field.
+
+Validation is fail-closed at the response boundary for root/schema failures,
+protected-boundary conclusions, and unusable finding evidence. Fact fields are
+validated independently: an unsupported optional field is cleared and marked
+unknown while valid fields, facts, and findings remain. The report includes a
+neutral partial-validation warning, and the UI displays it alongside accepted
+output. This does not weaken source-line, evidence-support, or protected-boundary
+checks.
+
+The offline eval grades schema validity, line-reference validity, per-field
+support, semantic finding recall/evidence, and unexpected-finding quality in
+separate dimensions. An unexpected but supported finding is manually labelled
+`useful`, `neutral`, or `noise`; it is not an automatic failure. Four anonymous
+CVs remain the regression smoke set, while held-out raw CV manifests stay
+ignored and untracked. Code observations, including possible unlabeled header
+locations, remain visible under `Pozostałe sygnały`; header matches require
+human confirmation and never become facts or scoring signals. Date ranges are
+not phone candidates.
+
+### D15: Apply HR acceptance follow-ups as bounded V1 hardening
+
+The 16-CV HR review adds a follow-up stage without rewriting completed slice
+history or closing stakeholder gates 8.7 and 8.8. Reviewer-facing text uses a
+project house style informed by Google global-audience and accessibility
+guidance and ASD-STE100 principles, without claiming full ASD-STE100
+compliance. Known categories prefer short code-owned templates with `What we
+found`, `Why it matters`, and `What to check`; internal category, importance,
+and confidence labels are not the primary explanation.
+
+AI failure handling keeps the deterministic report available. One initial
+attempt may be followed by at most one retry for a retryable transport failure
+and at most one fresh retry for an invalid model response, with an absolute
+limit of three attempts. Defaults are configurable as 1/1/3, while the existing
+120-second timeout and 4,096 output-token limit remain. Timeouts, HTTP 429, and
+5xx responses are retryable; other 4xx responses are not. Persistence and logs
+may record only safe stage, status class, provider request ID, attempt count,
+versions, and latency, never CV or model-response text. Exhaustion preserves a
+manual retry action and per-file batch isolation.
+
+Manual Retry reuses only a redacted process-memory context for the failed base
+analysis. It runs Document Analyzer without upload or research and replaces
+only the AI envelope. The context is removed after success, owner deletion,
+retention cleanup, or restart; the UI must report retry as unavailable when the
+context no longer exists. This avoids adding persisted CV text solely for retry.
+
+Settings gains a master automatic-public-research toggle and independent
+company, education, and LinkedIn discovery toggles. The upload surface states
+which categories will start. After each successful base report, the browser
+starts enabled categories with bounded concurrency and independent status.
+LinkedIn comparison still requires recruiter confirmation of a discovered
+profile. Research failures never remove the base report.
+
+DOCX remains text-extraction only. PDF keeps text-layer-first extraction; OCR
+is reserved for a later scan-only or unusable-text fallback. Phone candidate
+extraction must ignore digits contained in email addresses. A
+`document_artifact` finding is useful only when malformed source text blocks an
+important fact or materially changes meaning.
+
+The candidate name remains a neutral extracted fact. It cannot support
+nationality, origin, residence, work permission, suspicion, score, or band.
+The next 0-100 and four-band change is calibration design only in this stage:
+failed, incomplete, or insufficient analyses map to gray, and zero AI findings
+alone never establish green. No weight, threshold, or scoring logic changes
+without a separate checkpoint and approval against the acceptance set.
+
 ## Migration Plan
 
 1. Keep the current service boundaries and synchronous endpoints.
@@ -246,4 +344,6 @@ Disabling AI and research must preserve a tested deterministic-only report based
 - Which GPT-5.6 Luna snapshot and reasoning level pass the four-CV eval?
 - Which per-CV and per-batch cost limits should production enforce?
 - How long should SQLite research cache entries remain valid?
-- Which retention period should replace the 90-day development value?
+- No separate production constant is required. One runtime-configurable
+  retention value covers the complete candidate-analysis graph; development
+  defaults to 90 days and operators can change the effective value in Settings.

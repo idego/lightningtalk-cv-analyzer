@@ -58,6 +58,13 @@ AI document and research facts, associations, interpretations, and findings MUST
 - **WHEN** an AI-derived value differs from a code-owned deterministic fact
 - **THEN** the report shows the discrepancy for human review without replacing the code-owned score input
 
+### Requirement: Calibrate the next visible score before implementation
+The next visible assessment SHALL be designed as a calibratable 0-100 score with green, amber, red, and gray bands. Failed, incomplete, or insufficient analysis SHALL be gray. Zero AI findings alone MUST NOT establish green, and AI prose MUST NOT affect score or band. This follow-up stage SHALL produce a calibration proposal only and MUST NOT change weights, thresholds, or band logic without a separate project-owner checkpoint and approval.
+
+#### Scenario: Calibration design is reviewed
+- **WHEN** the 16-CV acceptance set is used to propose categories and thresholds
+- **THEN** the proposal identifies evidence requirements and expected band outcomes without changing runtime scoring
+
 ### Requirement: Requested location signals
 The report SHALL contain code-owned phone-country facts and an explicitly person-owned stated-city-or-address result when deterministic extraction can identify them without guessing. It SHALL resolve localities through versioned offline reference data without treating absence from the bounded index as proof that a place does not exist. It SHALL show separate informational observations for an aggregate explicit phone country outside the EU and a uniquely resolved stated location outside the EU. It SHALL show a combined outside-EU observation only when both distinct code-owned categories are available and non-EU, and SHALL show mixed EU/non-EU evidence separately. Without approved anonymous calibration, V1 MUST NOT classify a locality as small or atypical; for a resolved non-EU locality it SHALL instead return an informational `small_locality_not_evaluated` checklist observation that makes no positive or negative claim. Postal compatibility SHALL remain an unweighted observation until separate calibration and explicit project-owner approval authorize a change.
 

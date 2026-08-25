@@ -13,11 +13,17 @@ The system SHALL identify a candidate's claimed location only from an explicit p
 
 #### Scenario: Unlabeled header place present
 - **WHEN** an otherwise recognizable place name appears in the document header without an explicit person-location description
-- **THEN** the system records a location observation and does not use it as the scoring claim
+- **THEN** the system records a possible header-location observation that asks for human confirmation
+- **AND** it never creates a `Fact` or `ScoringSignal` from that match
 
 #### Scenario: Location ownership is unclear
 - **WHEN** the document contains plausible person, employer, office, client, project, or education locations and code cannot distinguish one explicitly person-owned location
 - **THEN** the system keeps those concepts separate and marks the scoring claim as undetermined
+
+#### Scenario: Month-year employment range is present
+- **WHEN** the source contains a range such as `04/2024 - 12/2024`
+- **THEN** code retains the date candidates but does not classify the range as
+  a phone candidate or use it as phone evidence
 
 #### Scenario: No identifiable claim
 - **WHEN** no location can be mechanically identified as an explicit person-location claim
@@ -101,6 +107,10 @@ The system SHALL extract versioned deterministic candidates, facts, and observat
 - **WHEN** dates use a consistent DD/MM or MM/DD convention
 - **THEN** the system may record the literal convention as a non-scoring observation but does not infer the candidate's country or locale from it
 
+#### Scenario: Digits occur inside an email address
+- **WHEN** a source span is part of a syntactically extracted email address
+- **THEN** digits in that span do not create a phone candidate, phone fact, observation, or scoring signal
+
 #### Scenario: Right-to-work statement surfaced
 - **WHEN** the CV contains a right-to-work or visa statement
 - **THEN** the system may surface the exact statement for human review without treating it as location or eligibility proof and without scoring it
@@ -109,6 +119,12 @@ The system SHALL extract versioned deterministic candidates, facts, and observat
 
 ### Requirement: Version and update the offline GeoNames index
 Each V1 GeoNames index SHALL have a manifest containing the source file names and URLs, snapshot date, SHA-256 of every input file and the built index, index schema version, filtering rules, and record counts. The project SHALL refresh the snapshot quarterly through a manually started, reviewed, and approved process. CV analysis MUST NOT download or update GeoNames data.
+
+The full development and production analyzer SHALL require a valid approved
+GeoNames index and manifest at application startup. It MUST NOT silently start
+the complete analyzer with location resolution disabled. An intentionally
+reduced diagnostic mode MAY omit the resolver only when enabled by an explicit
+configuration flag and exposed as degraded by health status.
 
 #### Scenario: Index built for release
 - **WHEN** the approved GeoNames inputs are transformed into the offline index
@@ -121,6 +137,14 @@ Each V1 GeoNames index SHALL have a manifest containing the source file names an
 #### Scenario: CV analyzed
 - **WHEN** deterministic location resolution runs for a CV
 - **THEN** it reads only the configured local versioned index and makes no reference-data network request
+
+#### Scenario: Full analyzer starts without reference data
+- **WHEN** the complete analyzer is started without a readable valid GeoNames pair
+- **THEN** startup fails with a configuration error before accepting CVs
+
+#### Scenario: Diagnostic degraded mode is explicitly enabled
+- **WHEN** an operator explicitly starts the diagnostic mode without GeoNames
+- **THEN** health status reports location resolution as unavailable and the UI does not present the analyzer as fully ready
 
 ### Requirement: Separate deterministic result types
 The deterministic core SHALL represent mechanically detected source values as `Candidate`, validated code-owned values as `Fact`, unresolved or non-scoring outcomes as `Observation`, and weighted rule outputs as `ScoringSignal`. It SHALL return these values through one `DeterministicAnalysisResult`.

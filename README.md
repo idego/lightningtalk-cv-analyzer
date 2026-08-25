@@ -59,30 +59,47 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
 - `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis and recruiter-triggered company research; defaults to `false`
+- `CV_VALIDATOR_AI_TRANSPORT_RETRY_LIMIT` — retryable timeout/network/429/5xx retries per AI analysis (default `1`)
+- `CV_VALIDATOR_AI_INVALID_RESPONSE_RETRY_LIMIT` — fresh retries after invalid model output (default `1`)
+- `CV_VALIDATOR_AI_ABSOLUTE_ATTEMPT_LIMIT` — absolute attempts including the initial AI call (default `3`)
 - `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
 - `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` — public, cited count-completeness threshold (default `500`; unknown counts are never negative evidence)
 - `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` — reusable public research-fact cache TTL (development default `30`)
 
-Production retention and cost limits are intentionally not approved yet. See
+Retention is runtime-configurable and applies to the complete candidate-analysis
+graph. Production cost limits are intentionally not approved yet. See
 [`docs/operations.md`](docs/operations.md),
 [`docs/v1-measurements.md`](docs/v1-measurements.md), and the external
 [`acceptance checklist`](docs/v1-acceptance-checklist.md).
 
 The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
-request timeout, zero automatic retries, `store=false`, no tools, and a 4,096
+request timeout, zero provider-SDK retries, `store=false`, no tools, and a 4,096
 output-token ceiling. The feature is disabled by default. Enabling it without
 `OPENAI_API_KEY` fails during application startup. When enabled, each CV uses
 an independent synchronous Responses API request. A refused, timed-out, or
 invalid AI response fails closed and leaves the deterministic report available.
+Application-owned retries default to one retryable transport retry, one invalid
+response retry, and three attempts in total. Other 4xx responses are not
+retried. A failed result can be retried manually while its redacted, process-local
+retry context remains available; this does not repeat upload or research.
 The API stores the validated AI result, model and contract versions, token
 usage, and audit payload under one stable analysis ID. AI findings are review
 notes and never change the deterministic score, band, facts, or rule findings.
+Reviewer-facing copy follows [`docs/report-writing-style.md`](docs/report-writing-style.md).
+The neutral-name boundary is documented in
+[`docs/candidate-name-boundary.md`](docs/candidate-name-boundary.md). The next
+score/band design is calibration-only and lives in
+[`docs/scoring-calibration-proposal.md`](docs/scoring-calibration-proposal.md).
 
 The tracked Document Analyzer prompt and strict output schema live in
 `apps/api/src/cv_validator/ai/contracts/`. Runtime request construction and the
-private eval harness read those same bundled files.
+private eval harness read those same bundled files. The current base-report
+contract is prompt `3202` with `document-analysis-schema-v8`: the model cites
+line IDs and code materializes excerpts, owns bookkeeping, and may yield a
+partial result with a neutral validation warning while preserving supported
+output.
 
 GeoNames runtime data is optional and is never baked into the image. See
 [`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for the

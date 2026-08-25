@@ -58,3 +58,44 @@ The API SHALL let an authenticated user request company, education/certification
 #### Scenario: Research request times out
 - **WHEN** the category exceeds its configured request timeout
 - **THEN** the API returns a retryable error and does not store a partial category result as complete
+
+### Requirement: Capability health status
+The API SHALL expose a non-sensitive health response that reports whether the
+database, approved GeoNames resolver, AI document analysis, company research,
+education research, and LinkedIn research are ready. Overall readiness SHALL be
+false when any capability required by the full analyzer is unavailable. The
+response MUST NOT expose secrets or host filesystem paths.
+
+#### Scenario: Full analyzer is ready
+- **WHEN** every required dependency is configured and initialized
+- **THEN** health reports overall `ready` and identifies the active GeoNames reference version
+
+#### Scenario: Required capability is missing
+- **WHEN** a required capability is unavailable
+- **THEN** health reports overall `degraded` with the affected capability and a safe recovery hint
+
+### Requirement: Configurable report language
+Each analysis request SHALL accept one supported AI report language independently
+from the UI language. The selected report language SHALL be included in the
+versioned AI request and stored audit metadata without changing deterministic
+facts or scoring.
+
+#### Scenario: Polish report requested from English UI
+- **WHEN** the recruiter selects English UI and Polish AI report language
+- **THEN** controls remain English and newly generated AI explanations use Polish
+
+### Requirement: Complete owner-scoped retention and reopen state
+Every retention purge path SHALL identify the concrete expired analysis IDs and delete the complete SQLite candidate-analysis graph together with process-local retry context, lock, and in-flight registry state. Persist-triggered and retention-setting-triggered purge SHALL use the same cleanup contract. Reading an owned stored analysis SHALL hydrate completed company, education, LinkedIn discovery, and LinkedIn comparison results from their separate tables without returning access-token hashes, capability tokens, secrets, or another owner's data.
+
+#### Scenario: Persist triggers retention cleanup
+- **WHEN** persisting a new analysis purges an expired analysis
+- **THEN** the purge returns the expired analysis ID and removes its database rows and process-local retry state
+
+#### Scenario: Retention setting becomes shorter
+- **WHEN** a retention update makes an existing analysis expired
+- **THEN** the same complete database and process-local cleanup occurs before the update returns
+
+#### Scenario: Recruiter reopens a completed researched analysis
+- **WHEN** the owner reads a stored analysis after refresh or reopen
+- **THEN** completed company, education, and LinkedIn results are hydrated from their category tables
+- **AND** an absent or wrong owner token receives no analysis or research data

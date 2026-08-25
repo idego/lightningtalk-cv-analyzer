@@ -71,10 +71,10 @@ SQLite file in immutable read-only mode.
 
 ## Runtime configuration
 
-The base stack deliberately starts without GeoNames reference data. In that
-mode location resolution is disabled: explicit location candidates remain
-unresolved observations and cannot become a claimed-location fact or scoring
-signal. The application does not fall back to the legacy gazetteer.
+The standard stack requires approved GeoNames reference data. It does not start
+the complete analyzer without a readable, valid index and manifest; missing
+location resolution must never degrade silently. The application does not fall
+back to the legacy gazetteer.
 
 For an approved snapshot, prepare one versioned host directory containing
 exactly the promoted pair under these runtime names:
@@ -85,7 +85,15 @@ exactly the promoted pair under these runtime names:
 └── locations.manifest.json
 ```
 
-Start Compose with the optional overlay and an explicit absolute host path:
+The repository-local development default is
+`data/geonames-build/2026-08-21`. Start Compose normally when that approved
+snapshot is present:
+
+```bash
+docker compose up --build
+```
+
+Override it with an explicit absolute host path when needed:
 
 ```bash
 CV_VALIDATOR_REFERENCE_DATA_DIR=/absolute/operator/path/geonames-2026-08-21-f45689909bd1 \
