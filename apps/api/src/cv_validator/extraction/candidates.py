@@ -37,9 +37,14 @@ _PHONE = re.compile(
     r"(?:[ \t]*(?:ext\.?|x)[ \t]*\d{1,6})?(?!\w)",
     re.IGNORECASE,
 )
+_DATE_RANGE = re.compile(
+    r"\b(?:\d{4}|\d{1,2}[/.]\d{4}|\d{4}[/.]\d{1,2})"
+    r"\s*[-–—]\s*(?:\d{4}|\d{1,2}[/.]\d{4}|\d{4}[/.]\d{1,2})\b"
+)
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _URL = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>]+")
 _DATE_PATTERNS = (
+    re.compile(r"\b\d{1,2}[/.]\d{4}\b"),
     re.compile(r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"),
     re.compile(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"),
     re.compile(
@@ -120,11 +125,19 @@ def extract_candidates(document: RedactedDocument) -> tuple[Candidate, ...]:
     seen: set[tuple[CandidateKind, str, int, int]] = set()
 
     for page in document.pages:
+        email_matches = tuple(_EMAIL.finditer(page.text))
+        email_spans = tuple(match.span() for match in email_matches)
         candidates.extend(
-            _from_matches(page, CandidateKind.PHONE, _PHONE.finditer(page.text), seen)
+            _from_matches(
+                page,
+                CandidateKind.PHONE,
+                _PHONE.finditer(page.text),
+                seen,
+                excluded_spans=email_spans,
+            )
         )
         candidates.extend(
-            _from_matches(page, CandidateKind.EMAIL, _EMAIL.finditer(page.text), seen)
+            _from_matches(page, CandidateKind.EMAIL, email_matches, seen)
         )
         candidates.extend(
             _from_matches(page, CandidateKind.URL, _URL.finditer(page.text), seen)
@@ -208,12 +221,24 @@ def _from_matches(
     matches: Iterable[re.Match[str]],
     seen: set[tuple[CandidateKind, str, int, int]],
     group: int | str = 0,
+    excluded_spans: tuple[tuple[int, int], ...] = (),
 ) -> list[Candidate]:
     candidates: list[Candidate] = []
     for match in matches:
         start_offset, end_offset = match.span(group)
         value = match.group(group)
+        if any(
+            start_offset < excluded_end and excluded_start < end_offset
+            for excluded_start, excluded_end in excluded_spans
+        ):
+            continue
         if kind is CandidateKind.PHONE:
+            explicitly_labeled = _phone_subject(page.text, start_offset) is Subject.PERSON
+            has_international_prefix = bool(re.match(r"\s*(?:\+|00)", value))
+            if _DATE_RANGE.search(value) and not (
+                explicitly_labeled and has_international_prefix
+            ):
+                continue
             core = re.split(r"(?i)[ \t]*(?:ext\.?|x)[ \t]*", value, maxsplit=1)[0]
             digit_count = len(re.sub(r"\D", "", core))
             if not 7 <= digit_count <= 15:
@@ -249,9 +274,11 @@ def _phone_subject(page_text: str, start_offset: int) -> Subject:
     prefix = page_text[line_start:start_offset]
     if _NON_PERSON_PHONE_LABEL.search(prefix):
         return Subject.UNKNOWN
-    if _PERSON_PHONE_LABEL.search(prefix):
-        return Subject.PERSON
-    return Subject.UNKNOWN
+    # A phone number in a candidate's CV is candidate-owned by default. Only an
+    # explicit reference, company, office or fax label overrides that ownership.
+    # This keeps ordinary unlabeled contact blocks useful while still failing
+    # closed when the document names a different owner.
+    return Subject.PERSON
 
 
 def _candidate_id(

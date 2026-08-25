@@ -76,7 +76,7 @@ def classify_and_aggregate_phones(
                 status=ObservationStatus.AMBIGUOUS,
                 subject_ids=tuple(str(candidate.id) for candidate in phone_candidates),
                 values=tuple(candidate.value for candidate in phone_candidates),
-                reason="No phone is explicitly labelled as belonging to the candidate",
+                reason="Every detected phone is explicitly attributed to another owner",
                 provenance=Provenance(
                     authority=Authority.CODE,
                     evidence=aggregate_evidence,

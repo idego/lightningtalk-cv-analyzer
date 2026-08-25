@@ -8,7 +8,10 @@ import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 
-from cv_validator.ai.application import DocumentAnalyzerTimeoutError
+from cv_validator.ai.application import (
+    DocumentAnalyzerClientError,
+    DocumentAnalyzerTimeoutError,
+)
 from cv_validator.ai.config import AISettings
 from cv_validator.ai.domain import (
     AIAnalysisStatus,
@@ -26,25 +29,11 @@ from cv_validator.serialization import serialize_report_payload
 
 
 def _empty_response() -> dict:
-    checks = (
-        "contact",
-        "education",
-        "employment",
-        "timeline",
-        "duration_claims",
-        "relationships",
-        "document_quality",
-        "protected_boundaries",
-    )
     return {
-        "schema_version": "document-analysis-schema-v7",
+        "schema_version": "document-analysis-schema-v8",
         "facts": {"contact": [], "education": [], "employment": []},
         "findings": [],
         "unknowns": [],
-        "research_candidates": [],
-        "checklist": {
-            check: {"checked": True, "issue_count": 0} for check in checks
-        },
         "analysis_limitations": [],
     }
 
@@ -160,6 +149,88 @@ def test_responses_analyzer_maps_timeout_and_refusal_without_payload_text() -> N
     assert refusal.usage == {"input_tokens": 12, "output_tokens": 4}
 
 
+def test_invalid_json_reaches_validation_without_exposing_model_text() -> None:
+    settings, request = _request()
+    analyzer = OpenAIResponsesDocumentAnalyzer(
+        settings,
+        client=SimpleNamespace(
+            responses=_Responses(
+                SimpleNamespace(
+                    output_text="PRIVATE INVALID MODEL OUTPUT",
+                    model="gpt-5.6-luna-runtime",
+                    usage=_Usage(),
+                    output=[],
+                )
+            )
+        ),
+    )
+
+    response = analyzer.analyze(request)
+
+    assert response.payload == "invalid_json"
+    assert "PRIVATE" not in repr(response)
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable", "status_class"),
+    (
+        (
+            openai.APIConnectionError(request=httpx.Request("POST", "https://example.test")),
+            True,
+            None,
+        ),
+        (
+            openai.RateLimitError(
+                "limited",
+                response=httpx.Response(
+                    429,
+                    request=httpx.Request("POST", "https://example.test"),
+                    headers={"x-request-id": "req-rate"},
+                ),
+                body=None,
+            ),
+            True,
+            "4xx",
+        ),
+        (
+            openai.InternalServerError(
+                "server",
+                response=httpx.Response(503, request=httpx.Request("POST", "https://example.test")),
+                body=None,
+            ),
+            True,
+            "5xx",
+        ),
+        (
+            openai.BadRequestError(
+                "bad request",
+                response=httpx.Response(400, request=httpx.Request("POST", "https://example.test")),
+                body=None,
+            ),
+            False,
+            "4xx",
+        ),
+    ),
+)
+def test_responses_analyzer_classifies_transport_failures_safely(
+    error, retryable, status_class
+) -> None:
+    settings, request = _request()
+    analyzer = OpenAIResponsesDocumentAnalyzer(
+        settings,
+        client=SimpleNamespace(responses=_Responses(error=error)),
+    )
+
+    with pytest.raises(DocumentAnalyzerClientError) as captured:
+        analyzer.analyze(request)
+
+    assert captured.value.retryable is retryable
+    assert captured.value.http_status_class == status_class
+    if isinstance(error, openai.RateLimitError):
+        assert captured.value.provider_request_id == "req-rate"
+    assert "example.test" not in repr(captured.value)
+
+
 def test_pipeline_runs_each_enabled_cv_in_an_independent_ai_context() -> None:
     settings = AISettings(enabled=True, api_key="test-key")
     analyzer = _Analyzer(
@@ -270,56 +341,23 @@ def test_pipeline_keeps_code_contact_authority_separate_from_ai_semantic_facts()
     )
     payload = _empty_response()
     payload["facts"]["education"] = [
-        {
-            "kind": "education",
-            "institution": "Example University",
-            "program": "Computer Science",
-            "study_dates": None,
+                {
+                    "kind": "education",
+            "institution": {"value": "Example University", "line_ids": ["page-0001-line-0005"]},
+            "program": {"value": "Computer Science", "line_ids": ["page-0001-line-0006"]},
+            "study_dates": {"value": None, "line_ids": []},
             "status": "present",
-            "authority": "ai",
-            "source": "document_analyzer",
-            "evidence": [
-                {
-                    "page_id": "page-0001",
-                    "line_id": "page-0001-line-0005",
-                    "excerpt": None,
-                },
-                {
-                    "page_id": "page-0001",
-                    "line_id": "page-0001-line-0006",
-                    "excerpt": None,
-                },
-            ],
         }
     ]
     payload["facts"]["employment"] = [
         {
             "kind": "employment",
-            "organization": "Example Company",
-            "role": "Engineer",
-            "employment_dates": "2020 - 2022",
-            "location": None,
-            "relationship_type": "unknown",
+            "organization": {"value": "Example Company", "line_ids": ["page-0001-line-0008"]},
+            "role": {"value": "Engineer", "line_ids": ["page-0001-line-0009"]},
+            "employment_dates": {"value": "2020 - 2022", "line_ids": ["page-0001-line-0010"]},
+            "location": {"value": None, "line_ids": []},
+            "relationship_type": {"value": "unknown", "line_ids": ["page-0001-line-0009"]},
             "status": "present",
-            "authority": "ai",
-            "source": "document_analyzer",
-            "evidence": [
-                {
-                    "page_id": "page-0001",
-                    "line_id": "page-0001-line-0008",
-                    "excerpt": None,
-                },
-                {
-                    "page_id": "page-0001",
-                    "line_id": "page-0001-line-0009",
-                    "excerpt": None,
-                },
-                {
-                    "page_id": "page-0001",
-                    "line_id": "page-0001-line-0010",
-                    "excerpt": None,
-                },
-            ],
         }
     ]
     result = analyze_cv_text_result(

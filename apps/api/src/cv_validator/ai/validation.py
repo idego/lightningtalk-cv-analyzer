@@ -29,6 +29,10 @@ REQUIRED_CHECK_IDS = frozenset(
         "protected_boundaries",
     }
 )
+PARTIAL_VALIDATION_WARNING = (
+    "Część danych nie została pokazana, ponieważ nie udało się potwierdzić "
+    "ich w tekście CV."
+)
 _CATEGORY_CHECK_IDS = {
     "contact_conflict": "contact",
     "missing_contact_data": "contact",
@@ -37,6 +41,8 @@ _CATEGORY_CHECK_IDS = {
     "duration_claim_conflict": "duration_claims",
     "relationship_ambiguity": "relationships",
     "document_artifact": "document_quality",
+    "semantic_outlier": "employment",
+    "internal_fact_conflict": "contact",
 }
 _FORBIDDEN_AUTHORED_PATTERNS = (
     re.compile(
@@ -60,6 +66,12 @@ _FORBIDDEN_AUTHORED_PATTERNS = (
         r"recommend(?:ation)?\s+(?:to\s+)?(?:hire|reject|advance))\b",
         re.IGNORECASE,
     ),
+)
+_SOURCE_CORRUPTION_PATTERNS = (
+    re.compile(r"\ufffd"),
+    re.compile(r"\?{2,}"),
+    re.compile(r"(?:\{\{|\}\}|<[^>]{1,80}>|&(?:#\d+|[A-Za-z]+);)"),
+    re.compile(r"(?:\\x[0-9A-Fa-f]{2}){2,}"),
 )
 
 
@@ -87,7 +99,14 @@ def validate_document_analysis_payload(
     pages: Mapping[str, str],
     deterministic_observations_version: str,
 ) -> ValidatedDocumentAnalysis:
-    """Canonical pure validation shared by runtime and offline eval."""
+    """Validate/materialize the v8 model-only response.
+
+    A bad root, protected-boundary violation, or unusable finding evidence is
+    a response failure.  Individual fact fields are different: an unsupported
+    optional field is discarded while independently supported fields remain.
+    The model supplies only values, line IDs, and reviewer prose; code owns
+    excerpts, metadata, checklist counts, and research candidates.
+    """
     if (
         deterministic_observations_version != DETERMINISTIC_OBSERVATIONS_VERSION
         or not pages
@@ -103,85 +122,610 @@ def validate_document_analysis_payload(
         )
 
     validator = Draft202012Validator(load_document_analysis_schema())
-    if any(validator.iter_errors(payload)):
+    if not isinstance(payload, dict) or any(validator.iter_errors(payload)):
         raise DocumentAnalysisValidationError(
             "AI document analysis response failed validation: schema"
         )
 
-    failure_kinds: list[str] = []
     source_lines = _source_line_index(pages)
     if any(
-        evidence.get("excerpt") is not None
-        for evidence in _iter_evidence(payload)
-    ):
-        failure_kinds.append("model evidence")
-    if any(
-        evidence.get("line_id") not in source_lines
-        or source_lines.get(evidence.get("line_id"), (None, None))[0]
-        != evidence.get("page_id")
-        or not source_lines.get(evidence.get("line_id"), (None, ""))[1]
-        for evidence in _iter_evidence(payload)
-    ):
-        failure_kinds.append("source line")
-    elif _has_duplicate_item_evidence(payload) or not _literal_evidence_is_supported(
-        payload,
-        source_lines,
-    ):
-        failure_kinds.append("evidence support")
-
-    checklist = payload.get("checklist")
-    if not isinstance(checklist, dict) or set(checklist) != REQUIRED_CHECK_IDS:
-        failure_kinds.append("checklist completeness")
-    else:
-        finding_counts = Counter(
-            finding["check_id"] for finding in payload["findings"]
-        )
-        if any(
-            checklist[check_id]["issue_count"] != finding_counts[check_id]
-            for check_id in REQUIRED_CHECK_IDS
-        ) or any(
-            expected_check_id is not None
-            and finding["check_id"] != expected_check_id
-            for finding in payload["findings"]
-            for expected_check_id in (
-                _CATEGORY_CHECK_IDS.get(finding["category"]),
-            )
-        ):
-            failure_kinds.append("checklist completeness")
-
-    if any(
         pattern.search(text)
-        for text in _iter_model_authored_conclusions(payload)
+        for text in _iter_model_authored_conclusions_lean(payload)
         for pattern in _FORBIDDEN_AUTHORED_PATTERNS
     ):
-        failure_kinds.append("protected boundary")
-
-    if failure_kinds:
-        kinds = ", ".join(dict.fromkeys(failure_kinds))
         raise DocumentAnalysisValidationError(
-            f"AI document analysis response failed validation: {kinds}"
+            "AI document analysis response failed validation: protected boundary"
         )
 
-    materialized = deepcopy(payload)
-    for evidence in _iter_evidence(materialized):
-        _, excerpt = source_lines[evidence["line_id"]]
-        evidence["excerpt"] = excerpt
+    # Findings are reviewer-facing claims.  An unusable finding citation
+    # cannot be safely shown, so it fails closed at the response boundary.
+    findings: list[dict[str, Any]] = []
+    for finding in payload["findings"]:
+        if not _finding_classification_is_valid(finding):
+            raise DocumentAnalysisValidationError(
+                "AI document analysis response failed validation: finding classification"
+            )
+        evidence = _materialize_evidence(
+            finding["evidence"],
+            source_lines,
+            require_support=False,
+        )
+        if evidence is None:
+            raise DocumentAnalysisValidationError(
+                "AI document analysis response failed validation: finding evidence"
+            )
+        item = deepcopy(finding)
+        item["evidence"] = evidence
+        if (
+            finding["category"] == "document_artifact"
+            and not _material_document_artifact(finding, evidence)
+        ):
+            continue
+        item["check_id"] = _check_id_for_category(finding["category"])
+        _add_code_owned_metadata(item)
+        findings.append(item)
 
-    return ValidatedDocumentAnalysis(
-        schema_version=SCHEMA_VERSION,
-        payload=materialized,
+    materialized_facts: dict[str, list[dict[str, Any]]] = {
+        "contact": [],
+        "education": [],
+        "employment": [],
+    }
+    partial = False
+    rejected_values: set[str] = set()
+    generated_unknowns = deepcopy(payload["unknowns"])
+
+    for contact in payload["facts"]["contact"]:
+        evidence = _materialize_evidence(
+            contact["evidence"],
+            source_lines,
+            require_support=True,
+            value=contact["value"],
+        )
+        if evidence is None:
+            # Contact has one required value, so an invalid item cannot be
+            # retained as a partially supported fact.
+            partial = True
+            rejected_values.add(contact["value"])
+            continue
+        item = deepcopy(contact)
+        item["evidence"] = evidence
+        _add_code_owned_metadata(item)
+        materialized_facts["contact"].append(item)
+
+    composite_contracts = (
+        (
+            "education",
+            ("institution", "program", "study_dates"),
+            ("institution",),
+        ),
+        (
+            "employment",
+            (
+                "organization",
+                "role",
+                "employment_dates",
+                "location",
+                "relationship_type",
+            ),
+            ("organization", "role"),
+        ),
+    )
+    for kind, fields, required_fields in composite_contracts:
+        for fact in payload["facts"][kind]:
+            item, item_partial, item_unknowns, item_rejected_values = (
+                _materialize_composite_fact(
+                    fact,
+                    source_lines,
+                    fields=fields,
+                    required_fields=required_fields,
+                    field_evidence_key="field_evidence",
+                    kind=kind,
+                )
+            )
+            partial = partial or item_partial
+            rejected_values.update(item_rejected_values)
+            generated_unknowns.extend(item_unknowns)
+            if item is not None:
+                materialized_facts[kind].append(item)
+
+    materialized_facts = {
+        group: _dedupe_facts(items)
+        for group, items in materialized_facts.items()
+    }
+    if rejected_values:
+        # Fact fields have already been validated independently above.  Do
+        # not scrub accepted facts by literal value: a supported value may be
+        # shared by another fact whose citation was rejected.
+        filtered_facts = materialized_facts
+        filtered_findings = [
+            finding
+            for finding in findings
+            if not _finding_mentions_unsupported_rejected_text(
+                finding, rejected_values
+            )
+        ]
+        filtered_unknowns = [
+            unknown
+            for unknown in generated_unknowns
+            if not _contains_rejected_text(unknown, rejected_values)
+        ]
+        filtered_limitations = [
+            limitation
+            for limitation in payload["analysis_limitations"]
+            if not _contains_rejected_text(limitation, rejected_values)
+        ]
+        partial = partial or (
+            filtered_facts != materialized_facts
+            or filtered_findings != findings
+            or filtered_unknowns != generated_unknowns
+            or filtered_limitations != payload["analysis_limitations"]
+        )
+        materialized_facts = filtered_facts
+        findings = filtered_findings
+        generated_unknowns = filtered_unknowns
+        analysis_limitations = filtered_limitations
+    else:
+        analysis_limitations = deepcopy(payload["analysis_limitations"])
+    findings = _dedupe_findings(findings)
+    research_candidates = _derive_research_candidates(materialized_facts)
+    checklist = _build_checklist(findings)
+    result: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "facts": materialized_facts,
+        "findings": findings,
+        "unknowns": _dedupe_unknowns(generated_unknowns),
+        "research_candidates": research_candidates,
+        "checklist": checklist,
+        "analysis_limitations": analysis_limitations,
+    }
+    if partial:
+        # This is code-owned presentation metadata; it is intentionally not
+        # accepted from the model schema.
+        result["validation_warnings"] = [PARTIAL_VALIDATION_WARNING]
+    return ValidatedDocumentAnalysis(schema_version=SCHEMA_VERSION, payload=result)
+
+
+def _material_document_artifact(
+    finding: Mapping[str, Any],
+    evidence: list[dict[str, str]],
+) -> bool:
+    if finding.get("material_effect") not in {
+        "important_fact_unreadable",
+        "meaning_changed",
+    }:
+        return False
+    if finding.get("affected_fact") not in {
+        "candidate_name",
+        "phone",
+        "stated_location",
+        "education",
+        "employment",
+        "employment_dates",
+        "timeline",
+        "relationship",
+        "document_meaning",
+        "other_material_fact",
+    }:
+        return False
+    source_text = "\n".join(
+        item["excerpt"] for item in evidence
+    )
+    return any(
+        pattern.search(source_text)
+        for pattern in _SOURCE_CORRUPTION_PATTERNS
     )
 
 
-def _iter_evidence(value: Any) -> Iterator[dict[str, Any]]:
+def _finding_classification_is_valid(finding: Mapping[str, Any]) -> bool:
+    if finding.get("category") != "document_artifact":
+        return (
+            finding.get("material_effect") == "none"
+            and finding.get("affected_fact") == "not_applicable"
+        )
+    return (
+        finding.get("material_effect")
+        in {"important_fact_unreadable", "meaning_changed"}
+        and finding.get("affected_fact") != "not_applicable"
+    )
+
+
+def _materialize_evidence(
+    evidence: Any,
+    source_lines: Mapping[str, tuple[str, str]],
+    *,
+    require_support: bool,
+    value: str | None = None,
+) -> list[dict[str, str]] | None:
+    """Resolve line references and optionally prove one field value.
+
+    Duplicate line references are a model formatting issue, not a reason to
+    discard otherwise valid evidence.  They are removed while preserving the
+    first occurrence.  Unknown or cross-page references remain fail-closed.
+    """
+    if not isinstance(evidence, list):
+        return None
+    materialized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in evidence:
+        if not isinstance(entry, dict):
+            return None
+        page_id = entry.get("page_id")
+        line_id = entry.get("line_id")
+        if (
+            not isinstance(page_id, str)
+            or not isinstance(line_id, str)
+            or line_id in seen
+            or line_id not in source_lines
+            or source_lines[line_id][0] != page_id
+            or not source_lines[line_id][1]
+        ):
+            if line_id in seen:
+                continue
+            return None
+        seen.add(line_id)
+        materialized.append(
+            {
+                "page_id": page_id,
+                "line_id": line_id,
+                "excerpt": source_lines[line_id][1],
+            }
+        )
+    if not materialized:
+        return None
+    if require_support and (
+        not isinstance(value, str)
+        or not _value_is_supported(value, materialized, source_lines)
+    ):
+        return None
+    return materialized
+
+
+def _value_is_supported(
+    value: str,
+    evidence: list[dict[str, str]],
+    source_lines: Mapping[str, tuple[str, str]],
+) -> bool:
+    normalized = _normalize_literal(value)
+    if not normalized:
+        return False
+    lines = [
+        (
+            item["line_id"],
+            item["page_id"],
+            int(item["line_id"].rsplit("-line-", 1)[1]),
+            source_lines[item["line_id"]][1],
+        )
+        for item in evidence
+    ]
+    if any(normalized in _normalize_literal(line) for *_, line in lines):
+        return True
+    return _semantic_value_is_supported_by_local_window(value, lines)
+
+
+def _materialize_composite_fact(
+    fact: dict[str, Any],
+    source_lines: Mapping[str, tuple[str, str]],
+    *,
+    fields: tuple[str, ...],
+    required_fields: tuple[str, ...],
+    field_evidence_key: str,
+    kind: str,
+) -> tuple[dict[str, Any] | None, bool, list[dict[str, str]], set[str]]:
+    item = deepcopy(fact)
+    field_evidence: dict[str, list[dict[str, str]]] = {}
+    partial = False
+    unknowns: list[dict[str, str]] = []
+    rejected_values: set[str] = set()
+    for field in fields:
+        field_value = item.get(field)
+        if not isinstance(field_value, dict):
+            return None, True, unknowns, rejected_values
+        value = field_value.get("value")
+        refs = _line_ids_to_evidence(field_value.get("line_ids"), source_lines)
+        if value is None and refs == []:
+            if field in required_fields:
+                return None, True, unknowns, rejected_values
+            item[field] = None
+            field_evidence[field] = []
+            continue
+        materialized = _materialize_evidence(
+            refs,
+            source_lines,
+            require_support=True,
+            value=value,
+        )
+        if materialized is None:
+            if isinstance(value, str) and value.strip():
+                rejected_values.add(value)
+            if field in required_fields:
+                # The remaining fields cannot safely be represented as this
+                # composite entry without its identity-bearing value.
+                return None, True, unknowns, rejected_values
+            item[field] = None
+            field_evidence[field] = []
+            partial = True
+            unknowns.append(
+                {
+                    "field": _unknown_field_name(kind, field),
+                    "reason": "The CV text does not support this field.",
+                }
+            )
+            continue
+        item[field] = value
+        field_evidence[field] = materialized
+    item[field_evidence_key] = field_evidence
+    _add_code_owned_metadata(item)
+    return item, partial, unknowns, rejected_values
+
+
+def _line_ids_to_evidence(
+    line_ids: Any,
+    source_lines: Mapping[str, tuple[str, str]],
+) -> list[dict[str, str]] | None:
+    if not isinstance(line_ids, list):
+        return None
+    evidence: list[dict[str, str]] = []
+    for line_id in line_ids:
+        if not isinstance(line_id, str) or line_id not in source_lines:
+            return None
+        evidence.append(
+            {"page_id": source_lines[line_id][0], "line_id": line_id}
+        )
+    return evidence
+
+
+def _unknown_field_name(kind: str, field: str) -> str:
+    if kind == "education":
+        return {
+            "institution": "education_institution",
+            "program": "education_program",
+            "study_dates": "education_dates",
+        }[field]
+    return {
+        "organization": "employment_organization",
+        "role": "employment_role",
+        "employment_dates": "employment_dates",
+        "location": "employment_location",
+        "relationship_type": "relationship_type",
+    }[field]
+
+
+def _contains_rejected_text(value: Any, rejected_values: set[str]) -> bool:
+    if isinstance(value, str):
+        normalized = _normalize_literal(value)
+        return any(
+            normalized_value
+            and re.search(
+                rf"(?<!\w){re.escape(normalized_value)}(?!\w)",
+                normalized,
+            )
+            for normalized_value in (
+                _normalize_literal(rejected) for rejected in rejected_values
+            )
+        )
     if isinstance(value, dict):
-        if "page_id" in value or "line_id" in value or "excerpt" in value:
-            yield value
-        for child in value.values():
-            yield from _iter_evidence(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _iter_evidence(child)
+        return any(
+            _contains_rejected_text(child, rejected_values)
+            for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(
+            _contains_rejected_text(child, rejected_values) for child in value
+        )
+    return False
+
+
+def _finding_mentions_unsupported_rejected_text(
+    finding: Mapping[str, Any],
+    rejected_values: set[str],
+) -> bool:
+    evidence_text = " ".join(
+        evidence.get("excerpt", "")
+        for evidence in finding.get("evidence", [])
+        if isinstance(evidence, dict) and isinstance(evidence.get("excerpt"), str)
+    )
+    if not evidence_text:
+        return any(
+            _contains_rejected_text(finding.get(field), rejected_values)
+            for field in ("observation", "reason", "limitation")
+        )
+    return any(
+        _contains_rejected_text(finding.get(field), rejected_values)
+        and not _contains_rejected_text(evidence_text, rejected_values)
+        for field in ("observation", "reason", "limitation")
+    )
+
+
+def value_is_supported_by_source(
+    value: str,
+    evidence: list[dict[str, Any]],
+    pages: Mapping[str, str],
+) -> bool:
+    """Expose the runtime field-support predicate to the offline evaluator."""
+    source_lines = _source_line_index(pages)
+    return _value_is_supported(value, evidence, source_lines)
+
+
+def _add_code_owned_metadata(item: dict[str, Any]) -> None:
+    # These values are deliberately assigned after schema validation.  The
+    # model contract does not get to claim authority or provenance.
+    item["authority"] = "ai"
+    item["source"] = "document_analyzer"
+
+
+def _check_id_for_category(category: str) -> str:
+    return _CATEGORY_CHECK_IDS.get(category, "document_quality")
+
+
+def _build_checklist(findings: list[dict[str, Any]]) -> dict[str, dict[str, int | bool]]:
+    counts = Counter(finding["check_id"] for finding in findings)
+    return {
+        check_id: {"checked": True, "issue_count": counts[check_id]}
+        for check_id in sorted(REQUIRED_CHECK_IDS)
+    }
+
+
+def _derive_research_candidates(
+    facts: Mapping[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Build optional research inputs only from accepted, evidenced facts."""
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(category: str, subject: Any, evidence: list[dict[str, Any]], question: str) -> None:
+        if not isinstance(subject, str) or not subject.strip() or not evidence:
+            return
+        key = (category, subject.strip().casefold())
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(
+            {
+                "category": category,
+                "query_subject": subject.strip(),
+                "question": question,
+                "authority": "ai",
+                "source": "document_analyzer",
+                # Research services accept one source anchor.  The accepted
+                # fact remains the authority for the candidate itself.
+                "evidence": deepcopy(evidence[0]),
+            }
+        )
+
+    for contact in facts.get("contact", []):
+        if contact.get("kind") == "candidate_name":
+            add(
+                "linkedin",
+                contact.get("value"),
+                contact.get("evidence", []),
+                "Look for possible public professional profiles; do not claim identity.",
+            )
+    for education in facts.get("education", []):
+        evidence = education.get("field_evidence", {})
+        add(
+            "education_or_certification",
+            education.get("institution"),
+            evidence.get("institution", []),
+            "Check the public institution and credential details.",
+        )
+        add(
+            "education_or_certification",
+            education.get("program"),
+            evidence.get("program", []),
+            "Check the public program or credential details.",
+        )
+    for employment in facts.get("employment", []):
+        evidence = employment.get("field_evidence", {})
+        add(
+            "company",
+            employment.get("organization"),
+            evidence.get("organization", []),
+            "Check the public organization details without inferring a person relationship.",
+        )
+    return candidates
+
+
+def _dedupe_facts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in items:
+        key = tuple(
+            item.get(field)
+            for field in (
+                "kind",
+                "value",
+                "institution",
+                "program",
+                "study_dates",
+                "organization",
+                "role",
+                "employment_dates",
+                "location",
+                "relationship_type",
+            )
+        )
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = item
+            result.append(item)
+            continue
+        _merge_evidence(existing, item)
+    return result
+
+
+def _merge_evidence(target: dict[str, Any], source: dict[str, Any]) -> None:
+    if isinstance(target.get("evidence"), list) and isinstance(
+        source.get("evidence"), list
+    ):
+        target["evidence"] = _dedupe_evidence(
+            [*target["evidence"], *source["evidence"]]
+        )
+    for field in ("field_evidence",):
+        target_fields = target.get(field)
+        source_fields = source.get(field)
+        if not isinstance(target_fields, dict) or not isinstance(source_fields, dict):
+            continue
+        for name, source_evidence in source_fields.items():
+            if not isinstance(source_evidence, list):
+                continue
+            target_fields[name] = _dedupe_evidence(
+                [*(target_fields.get(name) or []), *source_evidence]
+            )
+
+
+def _dedupe_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any]] = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("page_id"), item.get("line_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
+
+
+def _dedupe_findings(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for item in items:
+        key = tuple(
+            item.get(field)
+            for field in ("category", "status", "observation", "reason")
+        )
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = item
+            result.append(item)
+        else:
+            _merge_evidence(existing, item)
+    return result
+
+
+def _dedupe_unknowns(unknowns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any]] = set()
+    for unknown in unknowns:
+        if not isinstance(unknown, dict):
+            continue
+        key = (unknown.get("field"), unknown.get("reason"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(unknown)
+    return result
+
+
+def _iter_model_authored_conclusions_lean(payload: dict[str, Any]) -> Iterator[str]:
+    for finding in payload["findings"]:
+        yield finding["observation"]
+        yield finding["reason"]
+        yield finding["limitation"]
+    for unknown in payload["unknowns"]:
+        yield unknown["reason"]
+    yield from payload["analysis_limitations"]
 
 
 def _source_line_index(
@@ -193,105 +737,6 @@ def _source_line_index(
         for line in page.lines:
             index[line.line_id] = (page_id, line.text)
     return index
-
-
-def _has_duplicate_item_evidence(payload: dict[str, Any]) -> bool:
-    facts = payload["facts"]
-    items = [
-        *facts["contact"],
-        *facts["education"],
-        *facts["employment"],
-        *payload["findings"],
-    ]
-    for item in items:
-        evidence = item["evidence"]
-        line_ids = [entry["line_id"] for entry in evidence]
-        if len(line_ids) != len(set(line_ids)):
-            return True
-    return False
-
-
-def _literal_evidence_is_supported(
-    payload: dict[str, Any],
-    source_lines: Mapping[str, tuple[str, str]],
-) -> bool:
-    facts = payload["facts"]
-    for fact in facts["contact"]:
-        if not _fields_appear_in_evidence(fact, ("value",), source_lines):
-            return False
-    for fact in facts["education"]:
-        if not _fields_appear_in_evidence(
-            fact,
-            ("institution",),
-            source_lines,
-        ) or not _fields_appear_in_evidence(
-            fact,
-            ("program", "study_dates"),
-            source_lines,
-            allow_source_ordered_join=True,
-        ):
-            return False
-    for fact in facts["employment"]:
-        if not _fields_appear_in_evidence(
-            fact,
-            ("organization",),
-            source_lines,
-        ) or not _fields_appear_in_evidence(
-            fact,
-            ("role", "employment_dates", "location"),
-            source_lines,
-            allow_source_ordered_join=True,
-        ):
-            return False
-    for candidate in payload["research_candidates"]:
-        if not _fields_appear_in_evidence(
-            candidate,
-            ("query_subject",),
-            source_lines,
-        ):
-            return False
-    return True
-
-
-def _fields_appear_in_evidence(
-    item: Mapping[str, Any],
-    field_names: tuple[str, ...],
-    source_lines: Mapping[str, tuple[str, str]],
-    *,
-    allow_source_ordered_join: bool = False,
-) -> bool:
-    evidence_lines = [
-        (
-            evidence["line_id"],
-            evidence["page_id"],
-            int(evidence["line_id"].rsplit("-line-", 1)[1]),
-            source_lines[evidence["line_id"]][1],
-        )
-        for evidence in (
-            item["evidence"]
-            if isinstance(item["evidence"], list)
-            else [item["evidence"]]
-        )
-    ]
-    for field_name in field_names:
-        value = item.get(field_name)
-        if value is None:
-            continue
-        normalized = _normalize_literal(value)
-        supported_by_one_line = any(
-            normalized in _normalize_literal(line)
-            for _, _, _, line in evidence_lines
-        )
-        supported_by_join = (
-            allow_source_ordered_join
-            and _semantic_value_is_supported_by_local_window(
-                value,
-                evidence_lines,
-            )
-        )
-        if not normalized or not (supported_by_one_line or supported_by_join):
-            return False
-    return True
 
 
 def _normalize_literal(value: str) -> str:
@@ -345,15 +790,3 @@ def _semantic_value_is_supported_by_local_window(
                 if _tokens_are_subsequence(expected_tokens, source_tokens):
                     return True
     return False
-
-
-def _iter_model_authored_conclusions(payload: dict[str, Any]) -> Iterator[str]:
-    for finding in payload["findings"]:
-        yield finding["observation"]
-        yield finding["reason"]
-        yield finding["limitation"]
-    for unknown in payload["unknowns"]:
-        yield unknown["reason"]
-    for candidate in payload["research_candidates"]:
-        yield candidate["question"]
-    yield from payload["analysis_limitations"]

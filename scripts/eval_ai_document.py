@@ -25,22 +25,43 @@ from cv_validator.ai.request import (  # noqa: E402
     SCHEMA_VERSION,
     format_document_analysis_input,
     format_line_referenced_markdown,
+    load_document_analysis_schema,
 )
 from cv_validator.ai.validation import (  # noqa: E402
     DocumentAnalysisValidationError,
     REQUIRED_CHECK_IDS,
     validate_document_analysis_payload,
+    value_is_supported_by_source,
 )
 from cv_validator.ingestion import SourcePage  # noqa: E402
 
 PRIVATE_EVAL_ROOT = (ROOT / "data/ai-eval").resolve()
 CONTRACT_ROOT = ROOT / "apps/api/src/cv_validator/ai/contracts"
 PROMPT_PATH = CONTRACT_ROOT / "prompt.md"
-SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.json"
+SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.v8.json"
 CHECK_IDS = set(REQUIRED_CHECK_IDS)
-MANUAL_LABELS = {"true positive", "przydatne „warto wiedzieć”", "duplikat", "nadinterpretacja", "artefakt parsowania/flatteningu"}
-ACCEPTED_ADDITIONAL_LABELS = {"true positive", "przydatne „warto wiedzieć”"}
+MANUAL_LABELS = {
+    "useful",
+    "neutral",
+    "noise",
+    # Keep old private review manifests readable while the canonical labels
+    # become language-neutral and easier to aggregate.
+    "true positive",
+    "przydatne „warto wiedzieć”",
+    "duplikat",
+    "nadinterpretacja",
+    "artefakt parsowania/flatteningu",
+}
+CLASSIFICATION_ALIASES = {
+    "true positive": "useful",
+    "przydatne „warto wiedzieć”": "useful",
+    "duplikat": "noise",
+    "nadinterpretacja": "noise",
+    "artefakt parsowania/flatteningu": "noise",
+}
+ACCEPTED_ADDITIONAL_LABELS = {"useful", "neutral", "noise"}
 MAX_EVAL_CASES = 4
+MAX_REVIEWED_NOISE_PER_CASE = 0.5
 
 
 class EvalCaseInput(NamedTuple):
@@ -161,21 +182,53 @@ def validate_and_materialize_result(
     result: Any,
     pages: dict[str, str],
 ) -> tuple[Any, list[str]]:
+    existing_diagnostics = result.get("_eval_diagnostics") if isinstance(result, dict) else None
+    existing_field_support = (
+        existing_diagnostics.get("fact_field_support")
+        if isinstance(existing_diagnostics, dict)
+        else None
+    )
+    raw_field_support = existing_field_support or (
+        _field_support_metrics(result, pages)
+        if isinstance(result, dict)
+        else None
+    )
+    validation_input = deepcopy(result)
+    if isinstance(validation_input, dict):
+        validation_input.pop("_eval_diagnostics", None)
     try:
         validated = validate_document_analysis_payload(
-            result,
+            validation_input,
             pages=pages,
             deterministic_observations_version=DETERMINISTIC_OBSERVATIONS_VERSION,
         )
     except DocumentAnalysisValidationError as error:
-        return result, [str(error)]
-    return validated.payload, []
+        if not isinstance(result, dict) or raw_field_support is None:
+            return result, [str(error)]
+        diagnostic_result = deepcopy(result)
+        diagnostic_result["_eval_diagnostics"] = {
+            "fact_field_support": raw_field_support,
+        }
+        return diagnostic_result, [str(error)]
+    materialized = deepcopy(validated.payload)
+    if raw_field_support is not None:
+        materialized["_eval_diagnostics"] = {
+            "fact_field_support": raw_field_support,
+        }
+    return materialized, []
 
 
-def evidence_is_exact(evidence: dict[str, Any], pages: dict[str, str]) -> bool:
+def evidence_is_exact(
+    evidence: dict[str, Any],
+    pages: dict[str, str],
+    *,
+    allow_unmaterialized_line: bool = False,
+) -> bool:
     source_line = source_line_for_evidence(evidence, pages)
     excerpt = evidence.get("excerpt")
     if source_line is not None:
+        if allow_unmaterialized_line and excerpt is None:
+            return True
         return isinstance(excerpt, str) and excerpt == source_line
     page_id = evidence.get("page_id")
     return (
@@ -222,15 +275,48 @@ def line_reference_is_valid(
 def evidence_items_by_section(
     result: dict[str, Any],
 ) -> dict[str, list[dict[str, Any]]]:
-    fact_evidence = [
-        evidence
-        for fact_group in result.get("facts", {}).values()
-        if isinstance(fact_group, list)
-        for fact in fact_group
-        if isinstance(fact, dict)
-        for evidence in fact.get("evidence", [])
-        if isinstance(evidence, dict)
-    ]
+    fact_evidence: list[dict[str, Any]] = []
+    facts = result.get("facts")
+    for fact_group in (facts.values() if isinstance(facts, dict) else ()):
+        if not isinstance(fact_group, list):
+            continue
+        for fact in fact_group:
+            if not isinstance(fact, dict):
+                continue
+            evidence = fact.get("evidence", [])
+            if isinstance(evidence, list):
+                fact_evidence.extend(
+                    item for item in evidence if isinstance(item, dict)
+                )
+            field_evidence = fact.get("field_evidence", {})
+            if isinstance(field_evidence, dict):
+                for items in field_evidence.values():
+                    if isinstance(items, list):
+                        fact_evidence.extend(
+                            item for item in items if isinstance(item, dict)
+                        )
+            for field_name in (
+                "institution",
+                "program",
+                "study_dates",
+                "organization",
+                "role",
+                "employment_dates",
+                "location",
+                "relationship_type",
+            ):
+                field = fact.get(field_name)
+                if not isinstance(field, dict):
+                    continue
+                for line_id in field.get("line_ids", []):
+                    if isinstance(line_id, str):
+                        fact_evidence.append(
+                            {
+                                "page_id": line_id.split("-line-", 1)[0],
+                                "line_id": line_id,
+                                "excerpt": None,
+                            }
+                        )
     finding_evidence = [
         evidence
         for finding in result.get("findings", [])
@@ -256,6 +342,8 @@ def dematerialize_code_owned_excerpts(
     pages: dict[str, str],
 ) -> dict[str, Any]:
     candidate = deepcopy(result)
+    if candidate.get("schema_version") == SCHEMA_VERSION:
+        _dematerialize_v8_envelope(candidate)
     source_lines = {
         line.line_id: (page.page_id, line.text)
         for page_number, (page_id, text) in enumerate(pages.items(), start=1)
@@ -270,8 +358,48 @@ def dematerialize_code_owned_excerpts(
                 and source[0] == evidence.get("page_id")
                 and source[1] == evidence.get("excerpt")
             ):
-                evidence["excerpt"] = None
+                if candidate.get("schema_version") == SCHEMA_VERSION:
+                    evidence.pop("excerpt", None)
+                else:
+                    evidence["excerpt"] = None
     return candidate
+
+
+def _dematerialize_v8_envelope(result: dict[str, Any]) -> None:
+    """Turn a stored code-owned report back into the lean model contract."""
+    facts = result.get("facts")
+    for fact_group in (facts.values() if isinstance(facts, dict) else ()):
+        if not isinstance(fact_group, list):
+            continue
+        for fact in fact_group:
+            if not isinstance(fact, dict):
+                continue
+            field_evidence = fact.pop("field_evidence", {})
+            if isinstance(field_evidence, dict):
+                for field, evidence in field_evidence.items():
+                    if not isinstance(evidence, list):
+                        continue
+                    value = fact.get(field)
+                    fact[field] = {
+                        "value": value,
+                        "line_ids": [
+                            item["line_id"]
+                            for item in evidence
+                            if isinstance(item, dict)
+                            and isinstance(item.get("line_id"), str)
+                        ],
+                    }
+            fact.pop("authority", None)
+            fact.pop("source", None)
+    findings = result.get("findings")
+    for finding in findings if isinstance(findings, list) else []:
+        if isinstance(finding, dict):
+            finding.pop("check_id", None)
+            finding.pop("authority", None)
+            finding.pop("source", None)
+    result.pop("research_candidates", None)
+    result.pop("checklist", None)
+    result.pop("validation_warnings", None)
 
 
 def call_responses(model: str, reasoning: str, instructions: str, document: str, schema: dict[str, Any], max_output_tokens: int) -> tuple[dict[str, Any], dict[str, Any], str]:
@@ -320,7 +448,11 @@ def call_codex(model: str, reasoning: str, prompt: str, schema_path: Path) -> tu
     return json.loads(message), usage
 
 
-def matches(expected: dict[str, Any], finding: dict[str, Any]) -> bool:
+def matches(
+    expected: dict[str, Any],
+    finding: dict[str, Any],
+    pages: dict[str, str] | None = None,
+) -> bool:
     if expected["category"] != finding.get("category"):
         return False
     expected_status = expected.get("status")
@@ -328,7 +460,9 @@ def matches(expected: dict[str, Any], finding: dict[str, Any]) -> bool:
         return False
     needle = expected.get("evidence_contains", "").casefold()
     excerpts = " ".join(
-        item.get("excerpt") or "" for item in finding.get("evidence", [])
+        _evidence_text(item, pages) or ""
+        for item in finding.get("evidence", [])
+        if isinstance(item, dict)
     ).casefold()
     return not needle or needle in excerpts
 
@@ -336,13 +470,16 @@ def matches(expected: dict[str, Any], finding: dict[str, Any]) -> bool:
 def _maximum_expected_finding_matches(
     expected: list[dict[str, Any]],
     findings: list[dict[str, Any]],
+    pages: dict[str, str] | None = None,
 ) -> dict[int, int]:
     """Return a one-to-one expected-index to finding-index matching."""
     finding_to_expected: dict[int, int] = {}
 
     def assign(expected_index: int, seen: set[int]) -> bool:
         for finding_index, finding in enumerate(findings):
-            if finding_index in seen or not matches(expected[expected_index], finding):
+            if finding_index in seen or not matches(
+                expected[expected_index], finding, pages
+            ):
                 continue
             seen.add(finding_index)
             previous = finding_to_expected.get(finding_index)
@@ -359,10 +496,108 @@ def _maximum_expected_finding_matches(
     }
 
 
-def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -> dict[str, Any]:
+def _evidence_text(
+    evidence: dict[str, Any],
+    pages: dict[str, str] | None,
+) -> str | None:
+    excerpt = evidence.get("excerpt")
+    if isinstance(excerpt, str) and excerpt:
+        return excerpt
+    if pages is None:
+        return None
+    return source_line_for_evidence(evidence, pages)
+
+
+def _field_support_metrics(
+    result: dict[str, Any],
+    pages: dict[str, str],
+) -> dict[str, int | float]:
+    """Grade each composite fact field independently of findings.
+
+    An invalid education or employment field must not erase the semantic
+    finding score.  This section therefore has its own denominator and is
+    intentionally not used to decide whether finding recall is correct.
+    """
+    supported = 0
+    total = 0
+    facts = result.get("facts")
+    if not isinstance(facts, dict):
+        return {
+            "fact_field_supported_count": 0,
+            "fact_field_count": 0,
+            "fact_field_support": 1.0,
+        }
+    for group_name in ("education", "employment"):
+        for fact in (facts.get(group_name, []) or []):
+            if not isinstance(fact, dict):
+                continue
+            field_evidence = fact.get("field_evidence", {})
+            if not isinstance(field_evidence, dict):
+                field_evidence = {}
+            fields = (
+                ("institution", "education_institution"),
+                ("program", "education_program"),
+                ("study_dates", "education_dates"),
+            ) if group_name == "education" else (
+                ("organization", "employment_organization"),
+                ("role", "employment_role"),
+                ("employment_dates", "employment_dates"),
+                ("location", "employment_location"),
+                ("relationship_type", "relationship_type"),
+            )
+            for field, _ in fields:
+                field_value = fact.get(field)
+                if isinstance(field_value, dict):
+                    value = field_value.get("value")
+                    refs = [
+                        {
+                            "page_id": line_id.split("-line-", 1)[0],
+                            "line_id": line_id,
+                            "excerpt": None,
+                        }
+                        for line_id in field_value.get("line_ids", [])
+                        if isinstance(line_id, str)
+                    ]
+                else:
+                    value = field_value
+                    refs = field_evidence.get(field, [])
+                if value is None:
+                    continue
+                total += 1
+                ref_items = (
+                    [item for item in refs if isinstance(item, dict)]
+                    if isinstance(refs, list)
+                    else []
+                )
+                if (
+                    ref_items
+                    and len(ref_items) == len(refs)
+                    and all(
+                        line_reference_is_valid(item, pages)
+                        and _evidence_text(item, pages) is not None
+                        for item in ref_items
+                    )
+                    and value_is_supported_by_source(value, ref_items, pages)
+                ):
+                    supported += 1
+    return {
+        "fact_field_supported_count": supported,
+        "fact_field_count": total,
+        "fact_field_support": supported / total if total else 1.0,
+    }
+
+
+def score(
+    case: dict[str, Any],
+    result: dict[str, Any],
+    pages: dict[str, str],
+    validation_errors: list[str] | None = None,
+) -> dict[str, Any]:
     expected = case["expected_findings"]
     findings = result.get("findings", [])
-    matching = _maximum_expected_finding_matches(expected, findings)
+    if not isinstance(findings, list):
+        findings = []
+    matching = _maximum_expected_finding_matches(expected, findings, pages)
     matched_expected = set(matching)
     matched_findings = set(matching.values())
     unexpected_finding_indices = [
@@ -370,18 +605,34 @@ def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -
     ]
     evidence_sections = evidence_items_by_section(result)
     evidence_items = evidence_sections["findings"]
-    accurate = sum(evidence_is_exact(evidence, pages) for evidence in evidence_items)
+    allow_unmaterialized_line = result.get("schema_version") == SCHEMA_VERSION
+    accurate = sum(
+        evidence_is_exact(
+            evidence,
+            pages,
+            allow_unmaterialized_line=allow_unmaterialized_line,
+        )
+        for evidence in evidence_items
+    )
     all_evidence_items = [
         evidence
         for section in evidence_sections.values()
         for evidence in section
     ]
     all_accurate = sum(
-        evidence_is_exact(evidence, pages) for evidence in all_evidence_items
+        evidence_is_exact(
+            evidence,
+            pages,
+            allow_unmaterialized_line=allow_unmaterialized_line,
+        )
+        for evidence in all_evidence_items
     )
     valid_line_references = sum(
         line_reference_is_valid(evidence, pages)
         for evidence in all_evidence_items
+    )
+    finding_line_references = sum(
+        line_reference_is_valid(evidence, pages) for evidence in evidence_items
     )
     unsupported_findings = sum(
         not finding.get("evidence")
@@ -393,6 +644,16 @@ def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -
     )
     serialized = json.dumps(result, ensure_ascii=False).casefold()
     forbidden_hits = [term for term in case.get("forbidden_output_terms", []) if term.casefold() in serialized]
+    field_support = _field_support_metrics(result, pages)
+    eval_diagnostics = result.get("_eval_diagnostics")
+    if isinstance(eval_diagnostics, dict):
+        raw_field_support = eval_diagnostics.get("fact_field_support")
+        if isinstance(raw_field_support, dict):
+            field_support = raw_field_support
+    schema_valid = not any(
+        error.endswith(": schema")
+        for error in validation_errors or []
+    )
     return {
         "expected_count": len(expected),
         "matched_expected_count": len(matched_expected),
@@ -411,27 +672,44 @@ def score(case: dict[str, Any], result: dict[str, Any], pages: dict[str, str]) -
         "line_reference_valid_count": valid_line_references,
         "line_reference_item_count": len(all_evidence_items),
         "line_reference_validity": valid_line_references / len(all_evidence_items) if all_evidence_items else 1.0,
+        "finding_line_reference_valid_count": finding_line_references,
+        "finding_line_reference_item_count": len(evidence_items),
+        "finding_line_reference_validity": (
+            finding_line_references / len(evidence_items)
+            if evidence_items
+            else 1.0
+        ),
+        "schema_valid": schema_valid,
+        "schema_validity": 1.0 if schema_valid else 0.0,
+        **field_support,
         "forbidden_output_hits": forbidden_hits,
     }
 
 
 def baseline_is_acceptable(reports: list[dict[str, Any]]) -> bool:
-    """Apply the agreed strict gate without treating recall as precision."""
+    """Apply the agreed gate without treating recall as precision."""
+    reviewed_noise_count = 0
     for report in reports:
         metrics = report["metrics"]
         if (
             report["validation_errors"]
+            or not metrics.get("schema_valid", True)
             or metrics["recall"] < 1.0
             or metrics["unsupported_finding_count"] != 0
             or metrics.get("invalid_evidence_item_count", 1) != 0
-            or metrics.get("line_reference_validity", 0.0) < 1.0
+            or metrics.get(
+                "finding_line_reference_validity",
+                metrics.get("line_reference_validity", 0.0),
+            ) < 1.0
             or metrics["finding_evidence_exact_match_accuracy_page_aware"] < 1.0
             or metrics["forbidden_output_hits"]
         ):
             return False
         unexpected = set(metrics.get("unexpected_finding_indices", []))
         reviews = {
-            review["finding_index"]: review["classification"]
+            review["finding_index"]: _canonical_classification(
+                review["classification"]
+            )
             for review in report.get("manual_review", [])
         }
         if set(reviews) != unexpected or any(
@@ -439,7 +717,24 @@ def baseline_is_acceptable(reports: list[dict[str, Any]]) -> bool:
             for index in unexpected
         ):
             return False
-    return True
+        noise_indices = [
+            index for index in unexpected if reviews[index] == "noise"
+        ]
+        findings = report.get("result", {}).get("findings", [])
+        if any(
+            index >= len(findings)
+            or findings[index].get("importance") == "attention"
+            for index in noise_indices
+        ):
+            return False
+        reviewed_noise_count += len(noise_indices)
+    return reviewed_noise_count <= int(
+        len(reports) * MAX_REVIEWED_NOISE_PER_CASE
+    )
+
+
+def _canonical_classification(value: str) -> str:
+    return CLASSIFICATION_ALIASES.get(value, value)
 
 
 def parse_manual_review(path: Path) -> list[dict[str, Any]]:
@@ -532,10 +827,35 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
         )
         for report in reports
     )
+    finding_line_reference_count = sum(
+        report["metrics"].get(
+            "finding_line_reference_item_count",
+            report["metrics"]["finding_evidence_item_count"],
+        )
+        for report in reports
+    )
+    valid_finding_line_reference_count = sum(
+        report["metrics"].get(
+            "finding_line_reference_valid_count",
+            report["metrics"]["finding_evidence_exact_match_count"],
+        )
+        for report in reports
+    )
     summary: dict[str, Any] = {
         "case_count": len(reports),
         "valid_case_count": len(valid),
+        "schema_valid_case_count": sum(
+            bool(report["metrics"].get("schema_valid", not report["validation_errors"]))
+            for report in reports
+        ),
+        "schema_validity": (
+            sum(bool(report["metrics"].get("schema_valid", True)) for report in reports)
+            / len(reports)
+            if reports
+            else 1.0
+        ),
         "macro_recall": sum(report["metrics"]["recall"] for report in reports) / len(reports),
+        "semantic_finding_recall": matched_expected_count / expected_count if expected_count else 1.0,
         "expected_finding_micro_recall": matched_expected_count / expected_count if expected_count else 1.0,
         "accepted_expected_finding_micro_recall": accepted_matched_expected_count / expected_count if expected_count else 1.0,
         "recall_is_not_precision": True,
@@ -545,13 +865,36 @@ def summarize(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "all_evidence_exact_match_accuracy_page_aware": all_evidence_exact_count / all_evidence_count if all_evidence_count else 1.0,
         "invalid_evidence_item_count": all_evidence_count - all_evidence_exact_count,
         "line_reference_validity": valid_line_reference_count / line_reference_count if line_reference_count else 1.0,
+        "finding_line_reference_validity": (
+            valid_finding_line_reference_count / finding_line_reference_count
+            if finding_line_reference_count
+            else 1.0
+        ),
+        "fact_field_support": (
+            sum(
+                report["metrics"].get("fact_field_supported_count", 0)
+                for report in reports
+            )
+            / sum(report["metrics"].get("fact_field_count", 0) for report in reports)
+            if sum(report["metrics"].get("fact_field_count", 0) for report in reports)
+            else 1.0
+        ),
         "total_latency_seconds": sum(report["latency_seconds"] for report in reports),
         "estimated_cost_usd": None if any(report["estimated_cost_usd"] is None for report in reports) else sum(report["estimated_cost_usd"] for report in reports),
     }
     manual = [review for report in reports for review in report.get("manual_review", [])]
     if manual:
-        counts = Counter(review["classification"] for review in manual)
-        summary["manual_review"] = {"reviewed_additional_finding_count": len(manual), "classification_counts": dict(sorted(counts.items()))}
+        counts = Counter(
+            _canonical_classification(review["classification"])
+            for review in manual
+        )
+        summary["manual_review"] = {
+            "reviewed_additional_finding_count": len(manual),
+            "classification_counts": dict(sorted(counts.items())),
+            "max_reviewed_noise_count": int(
+                len(reports) * MAX_REVIEWED_NOISE_PER_CASE
+            ),
+        }
     summary["accepted"] = baseline_is_acceptable(reports)
     return summary
 
@@ -594,7 +937,12 @@ def rescore_report(report: dict[str, Any], manifest: dict[str, Any], manifest_pa
         )
         case_report["result"] = materialized
         case_report["validation_errors"] = errors
-        case_report["metrics"] = score(case, case_report["result"], case_input.pages)
+        case_report["metrics"] = score(
+            case,
+            case_report["result"],
+            case_input.pages,
+            errors,
+        )
     if reviews is not None:
         attach_manual_review(report, reviews)
     report["summary"] = summarize(report["cases"])
@@ -632,7 +980,7 @@ def main() -> int:
         print(json.dumps(report["summary"], indent=2, ensure_ascii=False))
         return 0 if report["summary"]["accepted"] else 1
 
-    schema = load_json(SCHEMA_PATH)
+    schema = load_document_analysis_schema()
     instructions = PROMPT_PATH.read_text(encoding="utf-8")
     output_limit_metadata = backend_output_limit_metadata(
         args.backend,
@@ -668,7 +1016,7 @@ def main() -> int:
         result, validation_errors = validate_and_materialize_result(
             result, case_input.pages
         )
-        metrics = score(case, result, case_input.pages)
+        metrics = score(case, result, case_input.pages, validation_errors)
         input_tokens = token_value(usage, "input_tokens", "input_token_count")
         output_tokens = token_value(usage, "output_tokens", "output_token_count")
         estimated_cost = None

@@ -24,24 +24,19 @@ def evidence(excerpt="source evidence", page_id="page-0001"):
 
 
 def model_evidence(page_id="page-0001", line_id="page-0001-line-0001"):
-    return {"page_id": page_id, "line_id": line_id, "excerpt": None}
+    return {"page_id": page_id, "line_id": line_id}
 
 
 def valid_result():
     return {
-        "schema_version": "document-analysis-schema-v7",
+        "schema_version": "document-analysis-schema-v8",
         "facts": {
-            "contact": [{"kind": "phone", "value": "source evidence", "status": "present", "authority": "ai", "source": "document_analyzer", "evidence": [model_evidence()]}],
+            "contact": [{"kind": "phone", "value": "source evidence", "status": "present", "evidence": [model_evidence()]}],
             "education": [],
             "employment": [],
         },
         "findings": [],
         "unknowns": [],
-        "research_candidates": [],
-        "checklist": {
-            item: {"checked": True, "issue_count": 0}
-            for item in sorted(MODULE.CHECK_IDS)
-        },
         "analysis_limitations": ["Flattened input."],
     }
 
@@ -53,6 +48,25 @@ def test_validate_result_uses_full_json_schema():
     errors = MODULE.validate_result(result, {"page-0001": "source evidence"})
 
     assert errors == ["AI document analysis response failed validation: schema"]
+
+
+def test_schema_invalid_fact_shape_fails_closed_without_eval_crash():
+    result = valid_result()
+    result["facts"] = ["malformed"]
+
+    materialized, errors = MODULE.validate_and_materialize_result(
+        result,
+        {"page-0001": "source evidence"},
+    )
+    metrics = MODULE.score(
+        {"expected_findings": [], "forbidden_output_terms": []},
+        materialized,
+        {"page-0001": "source evidence"},
+        errors,
+    )
+
+    assert errors == ["AI document analysis response failed validation: schema"]
+    assert metrics["schema_validity"] == 0.0
 
 
 def test_present_fact_requires_value_and_evidence():
@@ -83,9 +97,13 @@ def test_validate_result_rejects_unknown_source_line():
 
     errors = MODULE.validate_result(result, {"page-0001": "source evidence"})
 
-    assert errors == [
-        "AI document analysis response failed validation: source line"
-    ]
+    assert errors == []
+    materialized, errors = MODULE.validate_and_materialize_result(
+        result,
+        {"page-0001": "source evidence"},
+    )
+    assert errors == []
+    assert materialized["validation_warnings"]
 
 
 @pytest.mark.parametrize("protected_conclusion", (None, "Do not interview this candidate."))
@@ -238,8 +256,8 @@ def test_raw_model_line_reference_is_valid_but_not_exact_before_materialization(
 
     assert metrics["line_reference_valid_count"] == 1
     assert metrics["line_reference_item_count"] == 1
-    assert metrics["all_evidence_exact_match_count"] == 0
-    assert metrics["invalid_evidence_item_count"] == 1
+    assert metrics["all_evidence_exact_match_count"] == 1
+    assert metrics["invalid_evidence_item_count"] == 0
 
 
 def test_raw_model_line_reference_must_belong_to_the_cited_page():
@@ -256,6 +274,112 @@ def test_raw_model_line_reference_must_belong_to_the_cited_page():
     assert metrics["all_evidence_exact_match_count"] == 0
     assert metrics["line_reference_valid_count"] == 0
     assert metrics["invalid_evidence_item_count"] == 1
+
+
+def test_finding_metrics_are_independent_of_invalid_fact_field_support():
+    case = {
+        "expected_findings": [
+            {"category": "timeline_overlap", "evidence_contains": "2020"}
+        ],
+        "forbidden_output_terms": [],
+    }
+    result = valid_result()
+    result["facts"]["education"] = [
+        {
+            "kind": "education",
+            "institution": {
+                "value": "Example University",
+                "line_ids": ["page-0001-line-0001"],
+            },
+            "program": {
+                "value": "Unsupported program",
+                "line_ids": ["page-0001-line-0002"],
+            },
+            "study_dates": {"value": None, "line_ids": []},
+            "status": "present",
+        }
+    ]
+    result["findings"] = [
+        {
+            "category": "timeline_overlap",
+            "status": "conflicting",
+            "evidence": [model_evidence(line_id="page-0001-line-0002")],
+        }
+    ]
+
+    metrics = MODULE.score(
+        case,
+        result,
+        {"page-0001": "Example University\n2020-2021"},
+    )
+
+    assert metrics["recall"] == 1.0
+    assert metrics["finding_line_reference_validity"] == 1.0
+    assert metrics["fact_field_support"] == 0.5
+
+
+def test_validate_then_score_preserves_raw_field_denominator():
+    pages = {"page-0001": "Example University\n2020 overlap"}
+    result = valid_result()
+    result["facts"]["contact"] = []
+    result["facts"]["education"] = [
+        {
+            "kind": "education",
+            "institution": {
+                "value": "Example University",
+                "line_ids": ["page-0001-line-0001"],
+            },
+            "program": {
+                "value": "Unsupported program",
+                "line_ids": ["page-0001-line-9999"],
+            },
+            "study_dates": {"value": None, "line_ids": []},
+            "status": "present",
+        }
+    ]
+    result["findings"] = [
+        {
+            "category": "timeline_overlap",
+            "status": "conflicting",
+            "observation": "A timeline overlap is present.",
+            "reason": "The cited entries overlap.",
+            "importance": "attention",
+                "confidence": "high",
+                "limitation": "Only the supplied CV was analyzed.",
+                "material_effect": "none",
+                "affected_fact": "not_applicable",
+                "evidence": [model_evidence(line_id="page-0001-line-0002")],
+        }
+    ]
+    case = {
+        "expected_findings": [
+            {"category": "timeline_overlap", "evidence_contains": "2020"}
+        ],
+        "forbidden_output_terms": [],
+    }
+
+    materialized, errors = MODULE.validate_and_materialize_result(result, pages)
+    metrics = MODULE.score(case, materialized, pages, errors)
+
+    assert errors == []
+    assert materialized["_eval_diagnostics"]["fact_field_support"] == {
+        "fact_field_supported_count": 1,
+        "fact_field_count": 2,
+        "fact_field_support": 0.5,
+    }
+    assert metrics["fact_field_support"] == 0.5
+    assert metrics["recall"] == 1.0
+    assert metrics["finding_line_reference_validity"] == 1.0
+
+    rescored_input = MODULE.dematerialize_code_owned_excerpts(materialized, pages)
+    rescored, rescore_errors = MODULE.validate_and_materialize_result(
+        rescored_input,
+        pages,
+    )
+    assert rescore_errors == []
+    assert rescored["_eval_diagnostics"]["fact_field_support"][
+        "fact_field_support"
+    ] == 0.5
 
 
 def test_baseline_gate_rejects_unreviewed_additions_and_bad_metrics():
@@ -315,6 +439,55 @@ def test_baseline_gate_rejects_low_quality_reviewed_additions(classification):
     }
 
     assert MODULE.baseline_is_acceptable([report]) is False
+
+
+def test_baseline_gate_accepts_only_bounded_non_attention_noise():
+    def report_with_noise(case_id, finding_index=None, importance="worth_knowing"):
+        unexpected = [] if finding_index is None else [finding_index]
+        report = {
+            "validation_errors": [],
+            "metrics": {
+                "recall": 1.0,
+                "unsupported_finding_count": 0,
+                "unexpected_finding_count": len(unexpected),
+                "unexpected_finding_indices": unexpected,
+                "finding_evidence_exact_match_accuracy_page_aware": 1.0,
+                "invalid_evidence_item_count": 0,
+                "line_reference_validity": 1.0,
+                "forbidden_output_hits": [],
+            },
+            "result": {
+                "findings": [
+                    {"importance": importance}
+                    for _ in range((finding_index or 0) + 1)
+                ]
+            },
+        }
+        if finding_index is not None:
+            report["manual_review"] = [
+                {
+                    "case_id": case_id,
+                    "finding_index": finding_index,
+                    "classification": "noise",
+                }
+            ]
+        return report
+
+    accepted = [
+        report_with_noise("case-1", 0),
+        report_with_noise("case-2", 0),
+        report_with_noise("case-3"),
+        report_with_noise("case-4"),
+    ]
+    assert MODULE.baseline_is_acceptable(accepted) is True
+
+    over_budget = accepted.copy()
+    over_budget[2] = report_with_noise("case-3", 0)
+    assert MODULE.baseline_is_acceptable(over_budget) is False
+
+    attention_noise = accepted.copy()
+    attention_noise[0] = report_with_noise("case-1", 0, "attention")
+    assert MODULE.baseline_is_acceptable(attention_noise) is False
 
 
 def test_summary_uses_micro_recall_and_micro_evidence_accuracy():
@@ -477,7 +650,7 @@ def test_rescore_does_not_trust_a_tampered_materialized_excerpt(
     rescored = MODULE.rescore_report(report, manifest, manifest_path)
 
     assert rescored["cases"][0]["validation_errors"] == [
-        "AI document analysis response failed validation: model evidence"
+        "AI document analysis response failed validation: schema"
     ]
 
 

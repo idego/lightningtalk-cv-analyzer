@@ -43,6 +43,12 @@ class AIDocumentAnalysisOutcome:
     failure_reason: AIFailureReason | None = None
     response_model: str | None = None
     usage: dict[str, Any] | None = None
+    failure_stage: str | None = None
+    retryable: bool | None = None
+    http_status_class: str | None = None
+    provider_request_id: str | None = None
+    attempt_count: int = 0
+    latency_ms: float | None = None
 
     def __post_init__(self) -> None:
         if self.status is AIAnalysisStatus.SUCCEEDED and self.analysis is None:
@@ -51,6 +57,8 @@ class AIDocumentAnalysisOutcome:
             raise ValueError("non-successful AI outcome cannot carry analysis")
         if self.status is AIAnalysisStatus.FAILED and self.failure_reason is None:
             raise ValueError("failed AI outcome requires a safe failure reason")
+        if self.attempt_count < 0:
+            raise ValueError("AI attempt count must not be negative")
 
 
 @dataclass(frozen=True)

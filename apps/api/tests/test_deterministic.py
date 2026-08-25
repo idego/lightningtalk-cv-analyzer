@@ -44,6 +44,61 @@ def test_extracts_all_candidate_kinds_with_exact_page_evidence():
             assert evidence.excerpt
 
 
+def test_date_ranges_are_not_phone_candidates():
+    for date_range in ("04/2024 - 12/2024", "2020 - 2022"):
+        result = _analyze(
+            "Jane Example\n"
+            f"Employment: {date_range}\n"
+            "Experience software engineer"
+        )
+
+        assert not any(
+            candidate.kind is CandidateKind.PHONE for candidate in result.candidates
+        )
+
+    assert any(
+        candidate.kind is CandidateKind.DATE
+        for candidate in _analyze(
+            "Jane Example\nEmployment: 04/2024 - 12/2024\n"
+            "Experience software engineer"
+        ).candidates
+    )
+
+
+def test_digits_inside_email_address_never_become_phone_evidence():
+    result = _analyze(
+        "Jane Example\n"
+        "Email: candidate.1234567@example.com\n"
+        "Experienced software engineer profile"
+    )
+
+    assert any(
+        candidate.kind is CandidateKind.EMAIL for candidate in result.candidates
+    )
+    assert not any(
+        candidate.kind is CandidateKind.PHONE for candidate in result.candidates
+    )
+    assert not result.facts
+    assert not result.observations
+    assert not result.scoring_signals
+
+
+def test_explicit_phone_label_preserves_valid_german_number_with_year_like_digits():
+    result = _analyze(
+        "Jane Example\n"
+        "Phone: +49 2020-2022\n"
+        "Experienced software engineer profile"
+    )
+
+    phone_candidates = [
+        candidate
+        for candidate in result.candidates
+        if candidate.kind is CandidateKind.PHONE
+    ]
+    assert [candidate.value for candidate in phone_candidates] == ["+49 2020-2022"]
+    assert any(fact.value == "DE" for fact in result.facts)
+
+
 def test_possible_phone_remains_observation_and_blocks_aggregate_signal():
     result = _analyze(
         "Jane Example\n"
@@ -99,7 +154,7 @@ def test_conflicting_resolved_person_phones_are_ambiguous_and_non_scoring():
     assert result.scoring_signals == ()
 
 
-def test_unlabelled_valid_phone_is_preserved_as_unknown_fact_but_not_scored():
+def test_unlabelled_valid_phone_defaults_to_candidate_and_is_scored():
     result = _analyze(
         "Jane Example\n"
         "+48 22 123 45 67\n"
@@ -107,12 +162,9 @@ def test_unlabelled_valid_phone_is_preserved_as_unknown_fact_but_not_scored():
     )
 
     assert len(result.facts) == 1
-    assert result.facts[0].subject is Subject.UNKNOWN
-    assert result.scoring_signals == ()
-    assert any(
-        observation.kind is ObservationKind.PHONE_COUNTRY_AGGREGATE
-        for observation in result.observations
-    )
+    assert result.facts[0].subject is Subject.PERSON
+    assert len(result.scoring_signals) == 1
+    assert result.scoring_signals[0].value == "PL"
 
 
 def test_local_phone_is_unresolved_without_default_country():

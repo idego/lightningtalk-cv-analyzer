@@ -53,7 +53,11 @@ def serialize_analysis_payload(
             "ai_analysis": ai_payload,
             "checklist": {
                 "checks": deepcopy(ai_payload["checklist"]),
-                "flags": _serialize_flags(payload["findings"], ai_payload["findings"]),
+                "flags": _serialize_flags(
+                    payload["findings"],
+                    ai_payload["findings"],
+                    payload.get("deterministic", {}).get("observations", []),
+                ),
             },
         }
     )
@@ -82,8 +86,24 @@ def _serialize_ai_outcome(
         "failure_reason": (
             outcome.failure_reason.value if outcome.failure_reason is not None else None
         ),
+        "failure": (
+            {
+                "stage": outcome.failure_stage,
+                "retryable": outcome.retryable,
+                "http_status_class": outcome.http_status_class,
+                "provider_request_id": outcome.provider_request_id,
+                "attempt_count": outcome.attempt_count,
+                "latency_ms": outcome.latency_ms,
+            }
+            if outcome.status is AIAnalysisStatus.FAILED
+            else None
+        ),
+        "manual_retry_available": outcome.status is AIAnalysisStatus.FAILED,
+        "attempt_count": outcome.attempt_count,
+        "latency_ms": outcome.latency_ms,
         "authority": "ai",
         "source": "document_analyzer",
+        "report_language": result.report_language,
         "model": {
             "provider": "openai",
             "configured": settings.model,
@@ -109,12 +129,18 @@ def _serialize_ai_outcome(
         "analysis_limitations": (
             deepcopy(analysis["analysis_limitations"]) if analysis is not None else []
         ),
+        "validation_warnings": (
+            deepcopy(analysis.get("validation_warnings", []))
+            if analysis is not None
+            else []
+        ),
     }
 
 
 def _serialize_flags(
     deterministic_findings: list[dict[str, Any]],
     ai_findings: list[dict[str, Any]],
+    deterministic_observations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
     for index, finding in enumerate(deterministic_findings, start=1):
@@ -129,6 +155,11 @@ def _serialize_flags(
                 "confidence": "deterministic",
                 "observation": finding["observed"],
                 "reason": finding["rationale"],
+                "presentation_context": {
+                    "observed": finding["observed"],
+                    "claimed": finding["claimed"],
+                    "direction": finding["direction"],
+                },
                 "limitation": None,
                 "evidence": deepcopy(finding.get("evidence", [])),
             }
@@ -147,6 +178,22 @@ def _serialize_flags(
                 "reason": finding["reason"],
                 "limitation": finding["limitation"],
                 "evidence": deepcopy(finding["evidence"]),
+            }
+        )
+    for index, observation in enumerate(deterministic_observations, start=1):
+        flags.append(
+            {
+                "id": f"code-observation-{index:04d}",
+                "source": "code",
+                "authority": "code",
+                "category": observation["kind"],
+                "status": observation["status"],
+                "importance": "remaining",
+                "confidence": "deterministic",
+                "observation": ", ".join(observation["values"]) or observation["kind"],
+                "reason": observation["reason"],
+                "limitation": None,
+                "evidence": deepcopy(observation.get("evidence", [])),
             }
         )
     return flags
