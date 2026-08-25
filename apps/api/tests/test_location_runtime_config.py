@@ -54,6 +54,13 @@ def test_no_location_paths_disables_the_runtime_resolver(monkeypatch) -> None:
     assert load_location_resolver() is None
 
 
+def test_required_location_resolver_fails_loudly_without_paths(monkeypatch) -> None:
+    _clear_location_env(monkeypatch)
+
+    with pytest.raises(LocationConfigurationError, match="required"):
+        load_location_resolver(required=True)
+
+
 @pytest.mark.parametrize("configured", [INDEX_ENV, MANIFEST_ENV])
 def test_exactly_one_location_path_is_a_configuration_error(
     monkeypatch,
@@ -139,14 +146,17 @@ def test_api_and_audit_expose_version_but_not_host_paths(monkeypatch, tmp_path) 
     assert str(tmp_path) not in audit_json
 
 
-def test_base_compose_and_image_do_not_require_or_copy_reference_data() -> None:
+def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
     root = Path(__file__).resolve().parents[3]
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     dockerfile = (root / "apps/api/Dockerfile").read_text(encoding="utf-8")
     dockerignore = (root / "apps/api/.dockerignore").read_text(encoding="utf-8")
     gitignore = (root / ".gitignore").read_text(encoding="utf-8")
 
-    assert "CV_VALIDATOR_LOCATION_INDEX_PATH" not in compose
+    assert "CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: \"true\"" in compose
+    assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3" in compose
+    assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json" in compose
+    assert "create_host_path: false" in compose
     assert "reference-data" not in dockerfile
     assert "data" in dockerignore.splitlines()
     assert "data/" in gitignore.splitlines()
@@ -159,7 +169,6 @@ def test_optional_compose_overlay_requires_read_only_operator_directory() -> Non
     )
 
     assert "CV_VALIDATOR_REFERENCE_DATA_DIR:?" in overlay
-    assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3" in overlay
-    assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json" in overlay
+    assert "Compatibility overlay" in overlay
     assert "read_only: true" in overlay
     assert "create_host_path: false" in overlay

@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from cv_validator.domain import Report
@@ -33,8 +33,16 @@ class PersistenceConfig:
 class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
+        self._purge_listener: Callable[[tuple[str, ...]], None] | None = None
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self.config.retention_days = self.get_retention_days()
+
+    def set_purge_listener(
+        self,
+        listener: Callable[[tuple[str, ...]], None] | None,
+    ) -> None:
+        self._purge_listener = listener
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.config.db_path)
@@ -54,7 +62,8 @@ class PersistenceStore:
                     findings_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     analysis_id TEXT,
-                    access_token_hash TEXT
+                    access_token_hash TEXT,
+                    source_filename TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,10 +147,16 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS runtime_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
             _ensure_column(conn, "reports", "access_token_hash", "TEXT")
+            _ensure_column(conn, "reports", "source_filename", "TEXT")
             _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
             conn.execute(
                 "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
@@ -165,6 +180,7 @@ class PersistenceStore:
         analysis_id: str | None = None,
         ai_analysis: dict[str, Any] | None = None,
         access_token: str | None = None,
+        source_filename: str | None = None,
     ) -> str:
         selected_analysis_id = analysis_id or str(uuid4())
         payload = (
@@ -182,9 +198,9 @@ class PersistenceStore:
                     """
                     INSERT INTO reports (
                         input_hash, ruleset_version, score, band, findings_json,
-                        created_at, analysis_id, access_token_hash
+                        created_at, analysis_id, access_token_hash, source_filename
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -195,6 +211,7 @@ class PersistenceStore:
                         now,
                         selected_analysis_id,
                         _token_hash(access_token) if access_token else None,
+                        source_filename,
                     ),
                 )
                 conn.execute(
@@ -246,12 +263,142 @@ class PersistenceStore:
             ).fetchone()
         return None if row is None else json.loads(row["output_json"])
 
+    def replace_ai_analysis(
+        self,
+        analysis_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        ai_analysis = payload["ai_analysis"]
+        now = _utc_now()
+        try:
+            with self._connect() as conn:
+                report = conn.execute(
+                    "SELECT input_hash FROM reports WHERE analysis_id = ?",
+                    (analysis_id,),
+                ).fetchone()
+                if report is None:
+                    raise PersistenceError("analysis not found")
+                conn.execute(
+                    "UPDATE audit_log SET output_json = ? WHERE analysis_id = ?",
+                    (json.dumps(_sanitize_findings(payload)), analysis_id),
+                )
+                conn.execute("DELETE FROM ai_analyses WHERE analysis_id = ?", (analysis_id,))
+                _insert_ai_analysis(
+                    conn,
+                    analysis_id=analysis_id,
+                    input_hash=report["input_hash"],
+                    ai_analysis=ai_analysis,
+                    created_at=now,
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("AI analysis persistence failed") from exc
+
+    def list_analyses(self, access_token: str | None) -> list[dict[str, Any]]:
+        if not access_token:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT reports.analysis_id, reports.source_filename,
+                          reports.band, reports.created_at, audit_log.output_json
+                   FROM reports
+                   JOIN audit_log USING (analysis_id)
+                   WHERE reports.access_token_hash = ?
+                   ORDER BY reports.created_at DESC""",
+                (_token_hash(access_token),),
+            ).fetchall()
+        history: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row["output_json"])
+            history.append(
+                {
+                    "analysis_id": row["analysis_id"],
+                    "filename": row["source_filename"] or "CV",
+                    "candidate_name": _candidate_name(payload),
+                    "band": row["band"],
+                    "summary": payload.get("summary", ""),
+                    "created_at": row["created_at"],
+                }
+            )
+        return history
+
     def analysis_access_allowed(self, analysis_id: str, access_token: str | None) -> bool:
         if not access_token:
             return False
         with self._connect() as conn:
             row = conn.execute("SELECT access_token_hash FROM reports WHERE analysis_id = ?", (analysis_id,)).fetchone()
         return row is not None and isinstance(row["access_token_hash"], str) and hmac.compare_digest(row["access_token_hash"], _token_hash(access_token))
+
+    def delete_analysis(self, analysis_id: str, access_token: str | None) -> bool:
+        if not self.analysis_access_allowed(analysis_id, access_token):
+            return False
+        self._delete_analysis_ids([analysis_id])
+        return True
+
+    def delete_all_analyses(self, access_token: str | None) -> int:
+        if not access_token:
+            return 0
+        with self._connect() as conn:
+            analysis_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT analysis_id FROM reports WHERE access_token_hash = ?",
+                    (_token_hash(access_token),),
+                ).fetchall()
+            ]
+        self._delete_analysis_ids(analysis_ids)
+        return len(analysis_ids)
+
+    def _delete_analysis_ids(self, analysis_ids: list[str]) -> None:
+        if not analysis_ids:
+            return
+        placeholders = ",".join("?" for _ in analysis_ids)
+        with self._connect() as conn:
+            for table in (
+                "research_cache_audit",
+                "ai_analyses",
+                "company_research",
+                "education_research",
+                "linkedin_discovery",
+                "linkedin_comparison",
+                "linkedin_confirmation",
+                "audit_log",
+            ):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})",
+                    analysis_ids,
+                )
+            conn.execute(
+                f"DELETE FROM reports WHERE analysis_id IN ({placeholders})",
+                analysis_ids,
+            )
+
+    def get_retention_days(self) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM runtime_settings WHERE key = 'retention_days'"
+            ).fetchone()
+        if row is None:
+            return self.config.retention_days
+        try:
+            value = int(row["value"])
+        except (TypeError, ValueError):
+            return self.config.retention_days
+        return value if 1 <= value <= 3650 else self.config.retention_days
+
+    def set_retention_days(self, days: int) -> dict[str, int | tuple[str, ...]]:
+        if not 1 <= days <= 3650:
+            raise ValueError("retention_days_out_of_range")
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO runtime_settings (key, value, updated_at)
+                   VALUES ('retention_days', ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET
+                     value = excluded.value,
+                     updated_at = excluded.updated_at""",
+                (str(days), _utc_now()),
+            )
+        self.config.retention_days = days
+        return self.purge_expired()
 
     def get_company_research(self, analysis_id: str) -> dict[str, Any] | None:
         from cv_validator.research.company import RESEARCH_VERSION
@@ -432,24 +579,42 @@ class PersistenceStore:
                 ("test-redacted-hash", "test-rules", json.dumps(payload), now, analysis_id),
             )
 
-    def purge_expired(self) -> dict[str, int]:
+    def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
         cutoff_iso = cutoff.isoformat()
-        deleted: dict[str, int] = {}
+        deleted: dict[str, int | tuple[str, ...]] = {}
         with self._connect() as conn:
-            expired_ids = [row[0] for row in conn.execute("SELECT analysis_id FROM reports WHERE created_at < ?", (cutoff_iso,)).fetchall()]
+            expired_ids_set: set[str] = set()
+            for table, column in (
+                ("reports", "created_at"),
+                ("research_cache_audit", "created_at"),
+                ("ai_analyses", "created_at"),
+                ("company_research", "created_at"),
+                ("education_research", "created_at"),
+                ("linkedin_discovery", "created_at"),
+                ("linkedin_comparison", "created_at"),
+                ("linkedin_confirmation", "confirmed_at"),
+                ("audit_log", "created_at"),
+            ):
+                expired_ids_set.update(
+                    row[0]
+                    for row in conn.execute(
+                        f"SELECT analysis_id FROM {table} WHERE {column} < ?",
+                        (cutoff_iso,),
+                    ).fetchall()
+                    if isinstance(row[0], str)
+                )
+            expired_ids = sorted(expired_ids_set)
             if expired_ids:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in ("research_cache_audit", "ai_analyses", "company_research", "education_research",
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation", "audit_log"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
-            for table, column in (("research_cache_audit", "created_at"), ("ai_analyses", "created_at"),
-                                  ("company_research", "created_at"), ("education_research", "created_at"),
-                                  ("linkedin_discovery", "created_at"), ("linkedin_comparison", "created_at"),
-                                  ("linkedin_confirmation", "confirmed_at"), ("audit_log", "created_at")):
-                deleted[table] = deleted.get(table, 0) + conn.execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff_iso,)).rowcount
             deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
+            deleted["analysis_ids"] = tuple(expired_ids)
+            if expired_ids and self._purge_listener is not None:
+                self._purge_listener(tuple(expired_ids))
         return deleted
 
 
@@ -459,6 +624,16 @@ def _utc_now() -> str:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _candidate_name(payload: dict[str, Any]) -> str | None:
+    contact = payload.get("ai_analysis", {}).get("facts", {}).get("contact", [])
+    for fact in contact:
+        if fact.get("kind") == "candidate_name" and isinstance(fact.get("value"), str):
+            value = fact["value"].strip()
+            if value:
+                return value
+    return None
 
 
 def _ensure_column(

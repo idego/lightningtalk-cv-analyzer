@@ -100,6 +100,31 @@ def test_single_analyze_success(client):
     assert phone_finding["supporting_fact_ids"]
 
 
+def test_single_analyze_does_not_report_email_digits_as_phone(client):
+    content = _docx_bytes(
+        "Jane Example\n"
+        "Email: candidate.1234567@example.com\n"
+        "Experienced software engineer profile"
+    )
+
+    response = client.post(
+        "/analyze",
+        files={"file": ("cv.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+
+    assert response.status_code == 200
+    deterministic = response.json()["deterministic"]
+    assert not [
+        candidate for candidate in deterministic["candidates"]
+        if candidate["kind"] == "phone"
+    ]
+    assert not [fact for fact in deterministic["facts"] if fact["kind"] == "phone_country"]
+    assert not [
+        observation for observation in deterministic["observations"]
+        if observation["kind"] in {"phone", "phone_country_aggregate"}
+    ]
+
+
 def test_rejected_upload(client):
     response = client.post(
         "/analyze",
@@ -278,6 +303,45 @@ def test_audit_entry_written(client):
         output["ruleset_version"]["scoring_policy_version"]
         == "deterministic-phone-comparison-v1"
     )
+
+
+def test_analysis_history_is_private_reopenable_and_deletable(client):
+    content = _docx_bytes((FIXTURES / "consistent_berlin.txt").read_text())
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    response = client.post(
+        "/analyze",
+        headers=owner_headers,
+        files={"file": ("candidate.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    analysis_id = response.json()["analysis_id"]
+
+    history = client.get("/analyses", headers=owner_headers)
+    assert history.status_code == 200
+    assert history.json()["analyses"][0]["analysis_id"] == analysis_id
+    assert history.json()["analyses"][0]["filename"] == "candidate.docx"
+    assert client.get(
+        "/analyses", headers={"X-Analysis-Access-Token": "another-owner"}
+    ).json() == {"analyses": []}
+
+    reopened = client.get(f"/analyses/{analysis_id}", headers=owner_headers)
+    assert reopened.status_code == 200
+    assert reopened.json() == response.json()
+    assert client.delete(
+        f"/analyses/{analysis_id}",
+        headers={"X-Analysis-Access-Token": "another-owner"},
+    ).status_code == 404
+    assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).json() == {"deleted": True}
+    assert client.get(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 404
+
+
+def test_retention_setting_is_validated_and_persists(client):
+    assert client.get("/settings/retention").json() == {"days": 30}
+    assert client.put("/settings/retention", json={"days": 120}).json() == {"days": 120}
+    assert client.put("/settings/retention", json={"days": 0}).status_code == 422
+
+    reopened = create_app(db_path=client.app.state.store.config.db_path, retention_days=30)
+    with TestClient(reopened) as reopened_client:
+        assert reopened_client.get("/settings/retention").json() == {"days": 120}
 
 
 def test_national_id_audit_payload_exactly_matches_api_response(client) -> None:

@@ -291,6 +291,7 @@ def test_unlabeled_place_in_document_start_block_is_unknown_and_non_scoring() ->
     assert candidate.provenance.evidence[0].excerpt == "Munich"
     assert observation.relation is LocationRelation.UNKNOWN
     assert observation.status is ObservationStatus.INFORMATIONAL
+    assert "confirmation" in observation.reason.casefold()
     assert not any(fact.kind is FactKind.CLAIMED_LOCATION for fact in result.facts)
 
 

@@ -4,6 +4,8 @@ import os
 import json
 import threading
 import secrets
+from concurrent.futures import Future
+from dataclasses import replace
 from time import perf_counter
 from copy import deepcopy
 from contextlib import asynccontextmanager
@@ -16,14 +18,16 @@ from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 
 from cv_validator.ai.application import DocumentAnalyzer
+from cv_validator.ai.application import run_document_analysis
 from cv_validator.ai.config import AISettings, load_ai_settings
 from cv_validator.ai.openai_client import OpenAIResponsesDocumentAnalyzer
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.config import load_ingestion_config, load_location_resolver
 from cv_validator.ingestion import IngestionError
-from cv_validator.pipeline import analyze_cv_bytes_result
+from cv_validator.pipeline import PipelineResult, analyze_cv_bytes_result
+from cv_validator.ai.domain import AIAnalysisStatus
 from cv_validator.location import LocationResolver, SQLiteLocationResolver
-from cv_validator.errors import AnalysisRuntimeError, UploadReadError
+from cv_validator.errors import AnalysisRuntimeError, PersistenceError, UploadReadError
 from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.research.company import CompanyResearchService, build_company_research_request
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
@@ -49,11 +53,21 @@ class _LinkedInConfirmation(BaseModel):
     profile_url: str
 
 
+class _RetentionUpdate(BaseModel):
+    days: int
+
+
 @dataclass(frozen=True)
 class _PreparedUpload:
     upload: UploadFile
     content: bytes | None
     error: str | None = None
+
+
+@dataclass
+class _RetryFlight:
+    future: Future[dict]
+    waiters: int = 1
 
 
 def _db_path_from_env() -> Path:
@@ -71,6 +85,13 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _report_language(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {"en", "pl"}:
+        raise HTTPException(status_code=400, detail="unsupported_report_language")
+    return normalized
+
+
 def create_app(
     db_path: Path | None = None,
     retention_days: int | None = None,
@@ -84,6 +105,7 @@ def create_app(
     linkedin_researcher=None,
     linkedin_connection_threshold: int | None = None,
     research_cache_ttl_days: int | None = None,
+    require_location_resolver: bool = False,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_ai_settings = ai_settings or load_ai_settings()
@@ -108,7 +130,9 @@ def create_app(
     if selected_ai_settings.enabled and selected_linkedin_researcher is None:
         selected_linkedin_researcher = OpenAIResponsesLinkedInResearcher(api_key=selected_ai_settings.api_key, timeout_seconds=selected_ai_settings.timeout_seconds)
     selected_linkedin_threshold = linkedin_connection_threshold if linkedin_connection_threshold is not None else _positive_int_env("CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD", 500)
-    resolver = location_resolver or load_location_resolver()
+    resolver = location_resolver or load_location_resolver(
+        required=require_location_resolver,
+    )
     store = PersistenceStore(
         PersistenceConfig(
             db_path=db_path or _db_path_from_env(),
@@ -133,6 +157,10 @@ def create_app(
         try:
             yield
         finally:
+            retry_contexts.clear()
+            retry_locks.clear()
+            retry_flights.clear()
+            retry_invalidated.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
 
@@ -142,6 +170,22 @@ def create_app(
         lifespan=lifespan,
     )
     telemetry = OperationsTelemetry()
+    retry_contexts: dict[str, PipelineResult] = {}
+    retry_contexts_guard = threading.Lock()
+    retry_locks: dict[str, threading.Lock] = {}
+    retry_flights: dict[str, _RetryFlight] = {}
+    retry_invalidated: set[str] = set()
+
+    def remove_retry_state(analysis_ids: tuple[str, ...]) -> None:
+        with retry_contexts_guard:
+            for analysis_id in analysis_ids:
+                if isinstance(retry_flights.get(analysis_id), _RetryFlight):
+                    retry_invalidated.add(analysis_id)
+                retry_contexts.pop(analysis_id, None)
+                retry_locks.pop(analysis_id, None)
+                retry_flights.pop(analysis_id, None)
+
+    store.set_purge_listener(remove_retry_state)
 
     @app.middleware("http")
     async def observe_request(request, call_next):
@@ -167,8 +211,30 @@ def create_app(
         return response
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health() -> dict:
+        location_ready = resolver is not None
+        capabilities = {
+            "database": {"ready": True},
+            "geonames": {
+                "ready": location_ready,
+                "version": (
+                    resolver.reference_data_version.version
+                    if isinstance(resolver, SQLiteLocationResolver)
+                    else None
+                ),
+                "recovery": None if location_ready else "Configure the approved GeoNames index and manifest.",
+            },
+            "document_ai": {"ready": selected_document_analyzer is not None},
+            "company_research": {"ready": selected_company_researcher is not None},
+            "education_research": {"ready": selected_education_researcher is not None},
+            "linkedin_research": {"ready": selected_linkedin_researcher is not None},
+        }
+        ready = all(item["ready"] for item in capabilities.values())
+        return {
+            "status": "ready" if ready else "degraded",
+            "ready": ready,
+            "capabilities": capabilities,
+        }
 
     @app.get("/operations/metrics")
     def operations_metrics() -> dict:
@@ -178,13 +244,28 @@ def create_app(
     def operations_status() -> dict:
         return {
             "ai_enabled": selected_ai_settings.enabled,
-            "retention": {"days": store.config.retention_days, "production_approved": False},
+            "retention": {
+                "days": store.config.retention_days,
+                "configurable": True,
+                "scope": "candidate_analysis_data",
+            },
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
             "batch": {"max_files": selected_batch_max_files, "max_bytes": selected_batch_max_bytes},
+            "document_ai": {
+                "timeout_seconds": selected_ai_settings.timeout_seconds,
+                "max_output_tokens": selected_ai_settings.max_output_tokens,
+                "transport_retry_limit": selected_ai_settings.transport_retry_limit,
+                "invalid_response_retry_limit": selected_ai_settings.invalid_response_retry_limit,
+                "absolute_attempt_limit": selected_ai_settings.absolute_attempt_limit,
+            },
         }
 
     @app.post("/analyze")
-    async def analyze_single(file: UploadFile = File(...), x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    async def analyze_single(
+        file: UploadFile = File(...),
+        x_analysis_access_token: str | None = Header(default=None),
+        x_report_language: str = Header(default="en"),
+    ) -> JSONResponse:
         filename = file.filename or "upload.pdf"
         try:
             content = await _read_upload(file)
@@ -195,6 +276,7 @@ def create_app(
                 location_resolver=resolver,
                 ai_settings=selected_ai_settings,
                 document_analyzer=selected_document_analyzer,
+                report_language=_report_language(x_report_language),
             )
             analysis_id = str(uuid4())
             access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -210,7 +292,11 @@ def create_app(
                 analysis_id=analysis_id,
                 ai_analysis=payload["ai_analysis"],
                 access_token=access_token,
+                source_filename=filename,
             )
+            if result.redacted_document is not None and result.ai_outcome.status is AIAnalysisStatus.FAILED:
+                with retry_contexts_guard:
+                    retry_contexts[analysis_id] = result
         except IngestionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except AnalysisRuntimeError as exc:
@@ -222,7 +308,11 @@ def create_app(
         return JSONResponse(payload)
 
     @app.post("/analyze/batch")
-    async def analyze_batch(files: list[UploadFile] = File(...), x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    async def analyze_batch(
+        files: list[UploadFile] = File(...),
+        x_analysis_access_token: str | None = Header(default=None),
+        x_report_language: str = Header(default="en"),
+    ) -> JSONResponse:
         prepared = await _prepare_batch(
             files,
             max_files=selected_batch_max_files,
@@ -250,6 +340,7 @@ def create_app(
                     location_resolver=resolver,
                     ai_settings=selected_ai_settings,
                     document_analyzer=selected_document_analyzer,
+                    report_language=_report_language(x_report_language),
                 )
                 analysis_id = str(uuid4())
                 access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -265,7 +356,11 @@ def create_app(
                     analysis_id=analysis_id,
                     ai_analysis=payload["ai_analysis"],
                     access_token=access_token,
+                    source_filename=filename,
                 )
+                if result.redacted_document is not None and result.ai_outcome.status is AIAnalysisStatus.FAILED:
+                    with retry_contexts_guard:
+                        retry_contexts[analysis_id] = result
                 results.append(
                     {
                         "filename": filename,
@@ -284,6 +379,155 @@ def create_app(
                     }
                 )
         return JSONResponse({"results": results})
+
+    @app.get("/analyses")
+    def list_analyses(
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        store.purge_expired()
+        return JSONResponse({"analyses": store.list_analyses(x_analysis_access_token)})
+
+    @app.delete("/analyses")
+    def delete_all_analyses(
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        owned_ids = {
+            item["analysis_id"]
+            for item in store.list_analyses(x_analysis_access_token)
+        }
+        deleted = store.delete_all_analyses(x_analysis_access_token)
+        remove_retry_state(tuple(sorted(owned_ids)))
+        return JSONResponse({"deleted": deleted})
+
+    @app.get("/analyses/{analysis_id}")
+    def get_analysis(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        with retry_contexts_guard:
+            payload["ai_analysis"]["manual_retry_available"] = (
+                analysis_id in retry_contexts
+                and selected_ai_settings.enabled
+                and selected_document_analyzer is not None
+            )
+        return JSONResponse(payload)
+
+    @app.post("/analyses/{analysis_id}/ai/retry")
+    def retry_ai_analysis(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        if not selected_ai_settings.enabled or selected_document_analyzer is None:
+            raise HTTPException(status_code=409, detail="ai_unavailable")
+        with retry_contexts_guard:
+            flight = retry_flights.get(analysis_id)
+            if flight is None:
+                context = retry_contexts.get(analysis_id)
+                if context is None or context.redacted_document is None:
+                    raise HTTPException(status_code=409, detail="ai_retry_context_unavailable")
+                flight = _RetryFlight(Future())
+                retry_flights[analysis_id] = flight
+                leader = True
+            else:
+                flight.waiters += 1
+                leader = False
+        if leader:
+            try:
+                with retry_contexts_guard:
+                    context = retry_contexts.get(analysis_id)
+                if context is None or context.redacted_document is None:
+                    raise HTTPException(status_code=409, detail="ai_retry_context_unavailable")
+                outcome = run_document_analysis(
+                    selected_ai_settings,
+                    selected_document_analyzer,
+                    context.redacted_document,
+                    context.deterministic,
+                    report_language=context.report_language,
+                )
+                with retry_contexts_guard:
+                    if analysis_id in retry_invalidated:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="ai_retry_context_unavailable",
+                        )
+                updated_result = replace(context, ai_outcome=outcome)
+                payload = serialize_analysis_payload(
+                    updated_result,
+                    selected_ai_settings,
+                    analysis_id=analysis_id,
+                )
+                for key in (
+                    "company_research",
+                    "education_research",
+                    "linkedin_discovery",
+                    "linkedin_comparison",
+                ):
+                    if key in stored_payload:
+                        payload[key] = stored_payload[key]
+                try:
+                    store.replace_ai_analysis(analysis_id, payload)
+                except PersistenceError:
+                    with retry_contexts_guard:
+                        invalidated = analysis_id in retry_invalidated
+                    if invalidated or not store.analysis_access_allowed(
+                        analysis_id, x_analysis_access_token
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="ai_retry_context_unavailable",
+                        ) from None
+                    raise
+                with retry_contexts_guard:
+                    if analysis_id in retry_invalidated:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="ai_retry_context_unavailable",
+                        )
+                    if outcome.status is AIAnalysisStatus.FAILED:
+                        retry_contexts[analysis_id] = updated_result
+                    else:
+                        retry_contexts.pop(analysis_id, None)
+                        retry_locks.pop(analysis_id, None)
+                    flight.future.set_result(payload)
+            except BaseException as exc:
+                flight.future.set_exception(exc)
+        try:
+            payload = flight.future.result()
+            return JSONResponse(deepcopy(payload))
+        finally:
+            with retry_contexts_guard:
+                flight.waiters -= 1
+                if flight.waiters == 0 and retry_flights.get(analysis_id) is flight:
+                    retry_flights.pop(analysis_id, None)
+                if flight.waiters == 0:
+                    retry_invalidated.discard(analysis_id)
+
+    @app.delete("/analyses/{analysis_id}")
+    def delete_analysis(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not store.delete_analysis(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        remove_retry_state((analysis_id,))
+        return JSONResponse({"deleted": True})
+
+    @app.get("/settings/retention")
+    def get_retention() -> JSONResponse:
+        return JSONResponse({"days": store.config.retention_days})
+
+    @app.put("/settings/retention")
+    def update_retention(update: _RetentionUpdate) -> JSONResponse:
+        try:
+            store.set_retention_days(update.days)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="retention_days_out_of_range",
+            ) from exc
+        return JSONResponse({"days": store.config.retention_days})
 
     research_locks: dict[str, threading.Lock] = {}
     research_locks_guard = threading.Lock()
@@ -474,6 +718,10 @@ def create_app(
     app.state.linkedin_connection_threshold = selected_linkedin_threshold
     app.state.research_cache_ttl_days = store.config.research_cache_ttl_days
     app.state.telemetry = telemetry
+    app.state.ai_retry_contexts = retry_contexts
+    app.state.ai_retry_locks = retry_locks
+    app.state.ai_retry_flights = retry_flights
+    app.state.ai_retry_invalidated = retry_invalidated
     return app
 
 
@@ -523,7 +771,10 @@ async def _prepare_batch(
 
 
 def _default_app() -> FastAPI:
-    return create_app()
+    require_location_resolver = os.environ.get(
+        "CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER", "false"
+    ).lower() in {"1", "true", "yes"}
+    return create_app(require_location_resolver=require_location_resolver)
 
 
 app = _default_app()
@@ -533,4 +784,13 @@ def _owned_payload(store: PersistenceStore, analysis_id: str, access_token: str 
     if not store.analysis_access_allowed(analysis_id, access_token): raise HTTPException(status_code=404, detail="analysis_not_found")
     payload = store.get_analysis_payload(analysis_id)
     if payload is None: raise HTTPException(status_code=404, detail="analysis_not_found")
+    completed_rows = (
+        ("company_research", store.get_company_research(analysis_id)),
+        ("education_research", store.get_education_research(analysis_id)),
+        ("linkedin_discovery", store.get_linkedin_discovery(analysis_id)),
+        ("linkedin_comparison", store.get_linkedin_comparison(analysis_id)),
+    )
+    for key, row in completed_rows:
+        if row is not None:
+            payload[key] = json.loads(row["result_json"])
     return payload
