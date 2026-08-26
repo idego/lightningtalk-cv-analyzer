@@ -1,22 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 
-export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
+export function CompanyResearchPanel({
+  report,
+  onResearchChange,
+}: {
+  report: AnalysisReport;
+  onResearchChange?: (research: CompanyResearch) => void;
+}) {
   const [research, setResearch] = useState<CompanyResearch | undefined>(report.company_research);
   const [state, setState] = useState<"idle" | "pending" | "error" | "timeout" | "completed">(
     report.company_research ? "completed" : "idle",
   );
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(true);
   const automatic = useAutoResearchState(report.analysis_id, "company");
+  const notifiedAutomatic = useRef<CompanyResearch | null>(null);
+  const onResearchChangeRef = useRef(onResearchChange);
   const candidates = report.ai_analysis.research_candidates.filter(
     (candidate) => candidate.category === "company",
   );
@@ -24,6 +31,20 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
   const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
   const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
   const completed = state === "completed" || automatic?.status === "succeeded";
+  const hasContent = Boolean(visibleResearch || error || automatic?.message || !enabled);
+
+  useEffect(() => {
+    onResearchChangeRef.current = onResearchChange;
+  }, [onResearchChange]);
+
+  useEffect(() => {
+    const result = automatic?.status === "succeeded"
+      ? automatic.result as CompanyResearch | undefined
+      : undefined;
+    if (!result || notifiedAutomatic.current === result) return;
+    notifiedAutomatic.current = result;
+    onResearchChangeRef.current?.(result);
+  }, [automatic?.result, automatic?.status]);
 
   async function startResearch() {
     setState("pending");
@@ -44,6 +65,7 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
         throw new Error(detail);
       }
       setResearch(payload.company_research);
+      onResearchChange?.(payload.company_research);
       setState("completed");
     } catch (cause) {
       setState("error");
@@ -52,27 +74,14 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
   }
 
   return (
-    <section className="space-y-3 rounded-md border border-violet-500/30 p-3">
-      {completed && visibleResearch ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          aria-expanded={expanded}
-          className="flex w-full items-center justify-between gap-3 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <h3 className="font-medium">Company research</h3>
-          <span className="flex items-center gap-2 text-xs font-medium">
-            {expanded ? "Collapse" : "Expand"}
-            <ChevronDown
-              aria-hidden="true"
-              className={`size-4 transition-transform ${expanded ? "rotate-180" : ""}`}
-            />
-          </span>
-        </button>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="font-medium">Company research</h3>
-          <Button
+    <HoverDisclosure
+      className="rounded-md border border-violet-500/30 p-3"
+      triggerClassName="font-medium"
+      title="Company research"
+      collapsible={hasContent}
+      contentClassName="space-y-3 pt-3"
+      action={completed ? undefined : (
+        <Button
             type="button"
             variant="outline"
             onClick={startResearch}
@@ -83,37 +92,40 @@ export function CompanyResearchPanel({ report }: { report: AnalysisReport }) {
               <ThinkingOrb state="working" size={20} theme="auto" aria-label="Company research in progress" />
               Researching…
             </span>
-            ) : "Start company research"}
+            ) : "Start"}
           </Button>
-        </div>
       )}
+    >
 
       {!enabled ? (
         <p className="text-sm text-muted-foreground">
-          Unavailable: the analysis did not return safe company research candidates.
+          No companies available to research.
         </p>
       ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {automatic ? <p className="text-xs text-muted-foreground">Automatic research: {automatic.status}.</p> : null}
       {automatic?.message ? <p className="text-sm text-destructive">{automatic.message}</p> : null}
 
-      {visibleResearch && expanded ? (
+      {visibleResearch ? (
         <div className="divide-y">
           {visibleResearch.organizations.map((organization) => (
             <CompanyResult key={organization.query_subject} organization={organization} />
           ))}
-          <details className="py-3 text-xs text-muted-foreground">
-            <summary className="w-fit cursor-pointer font-medium text-foreground">
-              Search details
-            </summary>
-            <ul className="mt-2 space-y-1">
-              {visibleResearch.searches_performed.map((search) => <li key={search}>Search: {search}</li>)}
-              {visibleResearch.search_limitations.map((limit) => <li key={limit}>Limit: {limit}</li>)}
-            </ul>
-          </details>
+          {visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? (
+            <HoverDisclosure
+              className="py-3 text-xs text-muted-foreground"
+              triggerClassName="w-fit flex-none font-medium text-foreground"
+              title="Search details"
+              contentClassName="pt-2"
+            >
+              <ul className="space-y-1">
+                {visibleResearch.searches_performed.map((search) => <li key={search}>Search: {search}</li>)}
+                {visibleResearch.search_limitations.map((limit) => <li key={limit}>Limit: {limit}</li>)}
+              </ul>
+            </HoverDisclosure>
+          ) : null}
         </div>
       ) : null}
-    </section>
+    </HoverDisclosure>
   );
 }
 
@@ -133,21 +145,23 @@ function CompanyResult({ organization }: { organization: Organization }) {
   }[organization.existence];
 
   return (
-    <details className="group py-3 text-sm">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <HoverDisclosure
+      className="py-3 text-sm"
+      title={
         <div className="min-w-0">
           <strong className="block truncate">{organization.query_subject}</strong>
           <span className="text-xs text-muted-foreground">{existence}</span>
         </div>
+      }
+      action={
         <div className="flex shrink-0 items-center gap-2">
           <Badge variant="outline">{organization.confidence} confidence</Badge>
-          <ChevronDown aria-hidden="true" className="size-4 transition-transform group-open:rotate-180" />
         </div>
-      </summary>
-
-      <div className="mt-3 space-y-3 pl-0 sm:pl-2">
+      }
+      contentClassName="pt-3"
+    >
+      <div className="space-y-3 pl-0 sm:pl-2">
         <dl className="divide-y rounded-md border">
-          <FactRow label="Company existence" value={existence} />
           <FactRow
             label="Reported office or location"
             value={organization.location ?? "Not confirmed"}
@@ -166,9 +180,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
               <p key={`${finding.kind}-${index}`}>{finding.summary}</p>
             ))}
           </div>
-        ) : (
-          <p className="text-muted-foreground">No sourced fact-check findings were retained.</p>
-        )}
+        ) : null}
 
         {organization.limited_online_presence_reason ? (
           <p className="text-xs text-muted-foreground">{organization.limited_online_presence_reason}</p>
@@ -176,7 +188,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
 
         <ResearchSources urls={sources} />
       </div>
-    </details>
+    </HoverDisclosure>
   );
 }
 

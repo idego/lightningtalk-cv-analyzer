@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, CircleAlert, Clock3 } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Clock3 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalyzeBatchResponse, AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
@@ -22,8 +22,8 @@ function formatElapsed(seconds: number) {
 
 const researchLabels: Record<AutoResearchKind, string> = { company: "company", education: "education", linkedin: "LinkedIn discovery" };
 function ResearchNotice({ kinds }: { kinds: AutoResearchKind[] }) {
-  if (!kinds.length) return <p className="text-xs text-muted-foreground">Automatic research is off. You can start research manually from each result.</p>;
-  return <p className="text-xs text-muted-foreground">After each successful base analysis, automatic research will run: {kinds.map((kind) => researchLabels[kind]).join(", ")}. LinkedIn comparison still requires your confirmation.</p>;
+  if (!kinds.length) return null;
+  return <p className="text-xs text-muted-foreground">Auto research: {kinds.map((kind) => researchLabels[kind]).join(", ")}.</p>;
 }
 
 function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, researchKinds }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; researchKinds: AutoResearchKind[] }) {
@@ -31,7 +31,7 @@ function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, rese
   const estimatedRemaining = files.length * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="mx-auto max-w-3xl"><CardContent className="py-8">
     <div className="flex flex-col items-center gap-4 text-center"><ThinkingOrb state="working" size={64} theme="auto" aria-label={`Analyzing CV ${currentIndex + 1} of ${files.length}`} /><div><h2 className="text-lg font-semibold">Analyzing {currentIndex + 1} of {files.length}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{files[currentIndex]?.name}</p></div><div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {estimatedRemaining > 0 ? `Estimated remaining about ${formatElapsed(estimatedRemaining)}` : "Taking longer than usual"}</div></div>
-    <div className="mt-5 rounded-md bg-muted/30 p-3"><ResearchNotice kinds={researchKinds} /></div>
+    {researchKinds.length ? <div className="mt-5 rounded-md bg-muted/30 p-3"><ResearchNotice kinds={researchKinds} /></div> : null}
     <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? "Completed" : "Failed") : active ? "Analyzing" : "Waiting"}</span></li>; })}</ol>
   </CardContent></Card>;
 }
@@ -126,11 +126,11 @@ export function UploadPanel() {
     setEntries([{ file: null, result: { filename, status: "ok", report } }]);
   }
   if (loading) return <div className="space-y-6"><AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} />{entries.length ? <AnalysisWorkspace entries={entries} compact /> : null}</div>;
-  if (entries.length) return <div className="space-y-4"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4"><p className="text-sm text-muted-foreground">{entries.filter(({ result }) => result.status === "ok").length}/{entries.length} {t("completed")}</p><Button variant="outline" onClick={reset}>{t("analyzeMore")}</Button></div><AnalysisWorkspace entries={entries} /></div>;
+  if (entries.length) return <div className="space-y-4"><div className="mx-auto flex max-w-7xl items-center gap-4"><Button variant="outline" onClick={reset}><ArrowLeft data-icon="inline-start" />{t("back")}</Button>{entries.length > 1 ? <p className="ml-auto text-sm text-muted-foreground">{entries.filter(({ result }) => result.status === "ok").length} of {entries.length} analyzed</p> : null}</div><AnalysisWorkspace entries={entries} /></div>;
 
   return <div className="mx-auto max-w-5xl space-y-6">
     <Card>
-      <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle><CardDescription>{t("uploadDescription")}</CardDescription></CardHeader>
+      <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <ResearchNotice kinds={researchKinds} />
         <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-6 text-center" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}>

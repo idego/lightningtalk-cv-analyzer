@@ -1,4 +1,57 @@
-import type { AIAnalysis, AnalysisReport, ReviewFlag } from "@/lib/analyze-types";
+import type {
+  AIAnalysis,
+  AnalysisReport,
+  Band,
+  ReviewFlag,
+} from "@/lib/analyze-types";
+
+type CompletedResearchPatch = Partial<Pick<
+  AnalysisReport,
+  "company_research" | "education_research" | "linkedin_discovery"
+>>;
+
+export function mergeCompletedResearch<T extends AnalysisReport>(
+  report: T,
+  patch: CompletedResearchPatch,
+): T {
+  return { ...report, ...patch };
+}
+
+type LocationConsistencyInput = Pick<
+  AnalysisReport,
+  "band" | "score" | "signal_count" | "supporting_count" | "conflicting_count"
+>;
+
+export function locationConsistencyPresentation(
+  report: LocationConsistencyInput,
+) {
+  if (report.signal_count === 0 || report.band === "gray") {
+    return {
+      status: "Insufficient evidence",
+      description: "Not enough independent details. This does not verify the candidate's location.",
+    };
+  }
+  if (report.conflicting_count > 0) {
+    return {
+      status: "Some details conflict",
+      description: "At least one detail points to another country. This does not verify the candidate's location.",
+    };
+  }
+  return {
+    status: "Details agree",
+    description: "The available details point to the same country. This does not verify the candidate's location.",
+  };
+}
+
+export function historyLocationSummary(band: Band) {
+  if (band === "gray") {
+    return null;
+  }
+  if (band === "green") {
+    return "Location consistency check: available details agree.";
+  }
+  return "Location consistency check: some details conflict.";
+}
 
 function countryLabel(countryCode: string) {
   const code = countryCode.toUpperCase();
@@ -98,6 +151,263 @@ export function partitionReviewFlags(flags: ReviewFlag[]) {
   };
 }
 
+export type ResearchChecklistItem = {
+  id: string;
+  importance: "attention" | "worth_knowing";
+  title: string;
+  reason: string;
+  source: "company" | "education" | "linkedin";
+};
+
+export function researchChecklistItems(
+  report: Pick<
+    AnalysisReport,
+    "company_research" | "education_research" | "linkedin_discovery"
+  >,
+): ResearchChecklistItem[] {
+  const items: ResearchChecklistItem[] = [];
+
+  for (const organization of report.company_research?.organizations ?? []) {
+    const companyName = organization.query_subject;
+    if (organization.existence === "supported") {
+      items.push({
+        id: `company:${companyName}:exists`,
+        importance: "worth_knowing",
+        title: `Public sources support that ${companyName} exists.`,
+        reason: organization.official_website
+          ? "An official website or other sourced company record was found."
+          : "The completed company research retained public evidence for this organization.",
+        source: "company",
+      });
+    } else {
+      items.push({
+        id: `company:${companyName}:existence-review`,
+        importance: "attention",
+        title: organization.existence === "conflicting"
+          ? `Public information about ${companyName} conflicts.`
+          : `${companyName} was not confirmed by the completed searches.`,
+        reason: organization.uncertainty,
+        source: "company",
+      });
+    }
+    if (organization.limited_online_presence) {
+      items.push({
+        id: `company:${companyName}:limited-presence`,
+        importance: "attention",
+        title: `${companyName} has limited confirmed online presence.`,
+        reason: organization.limited_online_presence_reason
+          ?? "The bounded public searches retained too little evidence to confirm a normal online presence.",
+        source: "company",
+      });
+    }
+  }
+
+  for (const [credentialIndex, credential] of (report.education_research?.credentials ?? []).entries()) {
+    const institution = credential.institution ?? credential.program ?? "An education entry";
+    const addEducationField = (
+      field: "institution" | "program" | "degree" | "certificate",
+      value: string | null,
+      status: "supported" | "mismatch" | "evidence_unavailable",
+    ) => {
+      if (!value) return;
+      const label = field === "institution" ? "institution" : field;
+      const supported = status === "supported";
+      items.push({
+        id: `education:${credentialIndex}:${field}`,
+        importance: supported ? "worth_knowing" : "attention",
+        title: supported
+          ? field === "institution"
+            ? `Public sources support that ${value} exists.`
+            : `Public sources support the ${label} ${value}.`
+          : status === "mismatch"
+            ? `The ${label} ${value} does not match the retained public evidence.`
+            : `The completed searches did not confirm the ${label} ${value}.`,
+        reason: field === "institution" && supported
+          && [credential.city, credential.country].filter(Boolean).length
+          ? `The institution was located in ${[credential.city, credential.country].filter(Boolean).join(", ")}.`
+          : credential.uncertainty,
+        source: "education",
+      });
+    };
+    addEducationField("institution", credential.institution, credential.institution_exists);
+    addEducationField("program", credential.program, credential.program_exists);
+    addEducationField("degree", credential.degree, credential.degree_exists);
+    addEducationField("certificate", credential.certificate, credential.certificate_exists);
+    if (credential.dates) {
+      items.push({
+        id: `education:${credentialIndex}:dates`,
+        importance: "worth_knowing",
+        title: `Public sources show education dates: ${credential.dates}.`,
+        reason: credential.uncertainty,
+        source: "education",
+      });
+    }
+    if (credential.accreditation_status) {
+      items.push({
+        id: `education:${credentialIndex}:accreditation`,
+        importance: credential.accreditation_status === "established"
+          ? "worth_knowing"
+          : "attention",
+        title: credential.accreditation_status === "established"
+          ? `Public sources establish accreditation for ${institution}.`
+          : credential.accreditation_status === "not_established"
+            ? `The completed searches did not establish accreditation for ${institution}.`
+            : `Accreditation for ${institution} could not be confirmed.`,
+        reason: credential.uncertainty,
+        source: "education",
+      });
+    }
+    if (credential.location_difference_for_review) {
+      items.push({
+        id: `education:${credentialIndex}:location`,
+        importance: "attention",
+        title: `The location of ${institution} needs review.`,
+        reason: credential.location_difference_for_review,
+        source: "education",
+      });
+    }
+  }
+
+  const discovery = report.linkedin_discovery;
+  if (discovery?.linkedin_not_found) {
+    items.push({
+      id: "linkedin:not-found",
+      importance: "attention",
+      title: "The completed searches did not retain a matching LinkedIn profile.",
+      reason: discovery.not_found_caveat,
+      source: "linkedin",
+    });
+  }
+  const possibleProfiles = discovery?.possible_profiles ?? [];
+  if (possibleProfiles.length > 0) {
+    const [firstProfile] = possibleProfiles;
+    items.push({
+      id: possibleProfiles.length === 1
+        ? `linkedin:profile:${firstProfile.profile_url}`
+        : "linkedin:profiles-found",
+      importance: "worth_knowing",
+      title: possibleProfiles.length === 1
+        ? "Possible LinkedIn profile 1 was found."
+        : `${possibleProfiles.length} possible LinkedIn profiles were found.`,
+      reason: possibleProfiles.length === 1
+        ? firstProfile.uncertainty
+        : "These links are possible matches only.",
+      source: "linkedin",
+    });
+  }
+  for (const [index, profile] of possibleProfiles.entries()) {
+    if (profile.photo_visible === "false") {
+      items.push({
+        id: `linkedin:profile:${profile.profile_url}:photo`,
+        importance: "attention",
+        title: `Possible LinkedIn profile ${index + 1} has no publicly visible photo.`,
+        reason: "This is a profile-completeness detail only. It says nothing about identity, suitability, or authenticity.",
+        source: "linkedin",
+      });
+    }
+    if (profile.connection_completeness_flag) {
+      items.push({
+        id: `linkedin:profile:${profile.profile_url}:connections`,
+        importance: "attention",
+        title: `Possible LinkedIn profile ${index + 1} has a low public connection count.`,
+        reason: "This is a profile-completeness detail only. Connection counts do not establish identity, suitability, or authenticity.",
+        source: "linkedin",
+      });
+    }
+  }
+  return items;
+}
+
+const OUTSIDE_EU_CATEGORIES = new Set([
+  "phone_outside_eu",
+  "stated_location_outside_eu",
+  "combined_location_outside_eu",
+  "education_outside_eu",
+]);
+
+function joinList(items: string[]) {
+  if (items.length < 2) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
+function groupOutsideEuFlags(flags: ReviewFlag[]): ReviewFlag[] {
+  const outsideEu = flags.filter((flag) => OUTSIDE_EU_CATEGORIES.has(flag.category));
+  const combinedLocation = outsideEu.some((flag) => flag.category === "combined_location_outside_eu");
+  const sources = [
+    outsideEu.some((flag) => flag.category === "stated_location_outside_eu") || combinedLocation
+      ? "stated location"
+      : null,
+    outsideEu.some((flag) => flag.category === "phone_outside_eu") || combinedLocation
+      ? "phone number"
+      : null,
+    outsideEu.some((flag) => flag.category === "education_outside_eu")
+      ? "education"
+      : null,
+  ].filter((source): source is string => Boolean(source));
+
+  if (sources.length < 2) return flags;
+
+  const evidence = outsideEu.flatMap((flag) => flag.evidence).filter((item, index, all) =>
+    all.findIndex((candidate) =>
+      candidate.page_id === item.page_id
+      && candidate.line_id === item.line_id
+      && candidate.excerpt === item.excerpt
+    ) === index,
+  );
+  const summary: ReviewFlag = {
+    id: "outside-eu:summary",
+    source: "code",
+    authority: "code",
+    category: "outside_eu_summary",
+    status: "observed",
+    importance: "worth_knowing",
+    confidence: "combined",
+    observation: `The ${joinList(sources)} ${sources.length === 2 ? "both" : "all"} point outside the EU.`,
+    reason: "These details agree. They do not show nationality, residence, or work permission.",
+    limitation: "Confirm the current location and work permission only when the role requires it.",
+    evidence,
+  };
+  const duplicateIds = new Set(outsideEu.map((flag) => flag.id));
+  if (combinedLocation) {
+    for (const flag of flags) {
+      if (flag.category === "phone_country" && flag.importance === "worth_knowing") {
+        duplicateIds.add(flag.id);
+      }
+    }
+  }
+  const firstDuplicateIndex = flags.findIndex((flag) => duplicateIds.has(flag.id));
+  return flags.flatMap((flag, index) => {
+    if (index === firstDuplicateIndex) return [summary];
+    return duplicateIds.has(flag.id) ? [] : [flag];
+  });
+}
+
+export function recruiterReviewFlags(
+  report: Pick<AnalysisReport, "checklist" | "company_research" | "education_research" | "linkedin_discovery">,
+): ReviewFlag[] {
+  const researchFlags: ReviewFlag[] = researchChecklistItems(report).map((item) => ({
+    id: item.id,
+    source: "research",
+    authority: "ai",
+    category: `${item.source}_research`,
+    status: item.importance === "attention" ? "review" : "informational",
+    importance: item.importance,
+    confidence: "research",
+    observation: item.title,
+    reason: item.reason,
+    limitation: "Review the cited public sources and confirm relevant details with the candidate.",
+    evidence: [],
+  }));
+  const seen = new Set<string>();
+  const flags = [...report.checklist.flags, ...researchFlags].filter((flag) => {
+    if (seen.has(flag.id)) return false;
+    seen.add(flag.id);
+    return true;
+  });
+  return groupOutsideEuFlags(flags);
+}
+
 export type ReviewCopy = {
   whatWeFound: string;
   whyItMatters: string;
@@ -117,6 +427,20 @@ const deterministicTemplates: Record<string, (flag: ReviewFlag) => ReviewCopy> =
         ? "These details point to different countries. This does not prove where the candidate lives."
         : "These details point to the same country. This does not verify the candidate's location.",
       whatToCheck: "Confirm the phone number and the candidate's current location.",
+    };
+  },
+  address_postal: (flag) => {
+    const observed = flag.presentation_context?.observed ?? flag.observation;
+    const claimed = flag.presentation_context?.claimed;
+    const conflicts = flag.presentation_context?.direction === "conflicts";
+    return {
+      whatWeFound: claimed
+        ? `The postal code format points to ${observed}. The stated location is ${claimed}.`
+        : `The postal code format points to ${observed}.`,
+      whyItMatters: conflicts
+        ? "These details point to different countries. Postal formats can be shared, so this is only a consistency check."
+        : "These details point to the same country. Postal formats can be shared, so this is only a consistency check.",
+      whatToCheck: "Confirm the full address only when it is relevant to the role.",
     };
   },
   possible_email_domain_typo: (flag) => ({
@@ -139,10 +463,20 @@ const deterministicTemplates: Record<string, (flag: ReviewFlag) => ReviewCopy> =
     whyItMatters: "A stated location does not show nationality or work permission.",
     whatToCheck: "Confirm the candidate's current location.",
   }),
+  small_locality_outside_eu: (flag) => ({
+    whatWeFound: `The stated location is a small locality outside the EU: ${flag.presentation_context?.observed ?? flag.observation}.`,
+    whyItMatters: "This is useful context for manual review. Locality size does not show nationality, residence, work permission, or fraud.",
+    whatToCheck: "Confirm the current location when it is relevant to the role.",
+  }),
   combined_location_outside_eu: () => ({
     whatWeFound: "The stated location and phone both point outside the EU.",
     whyItMatters: "These details do not prove nationality, residence, or work permission.",
     whatToCheck: "Confirm the current location and collect work-permission facts directly when needed.",
+  }),
+  outside_eu_summary: (flag) => ({
+    whatWeFound: flag.observation,
+    whyItMatters: flag.reason,
+    whatToCheck: flag.limitation ?? "Confirm the current location only when it is relevant to the role.",
   }),
   combined_location_inside_eu: () => ({
     whatWeFound: "The stated location and phone both point to countries in the EU.",
@@ -240,19 +574,4 @@ export function aiStatusMessage(
       : "AI analysis failed. Try again or check System health.";
   }
   return null;
-}
-
-export function aiValidationWarning(analysis: Pick<AIAnalysis, "validation_warnings">) {
-  return analysis.validation_warnings.length
-    ? analysis.validation_warnings[0]
-    : null;
-}
-
-export function aiValidationState(
-  analysis: Pick<AIAnalysis, "status" | "validation_warnings">,
-) {
-  return {
-    warning: aiValidationWarning(analysis),
-    showAcceptedOutput: analysis.status === "succeeded",
-  };
 }

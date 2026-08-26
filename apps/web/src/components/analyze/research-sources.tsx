@@ -1,15 +1,18 @@
 import { ExternalLink } from "lucide-react";
+import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 
 export function ResearchSources({ urls }: { urls: Array<string | null | undefined> }) {
   const sources = Array.from(new Set(urls.filter((url): url is string => Boolean(url))));
   if (!sources.length) return null;
 
   return (
-    <details className="text-xs">
-      <summary className="w-fit cursor-pointer font-medium text-foreground">
-        View sources ({sources.length})
-      </summary>
-      <ul className="mt-2 space-y-1.5">
+    <HoverDisclosure
+      className="text-xs"
+      triggerClassName="w-fit flex-none font-medium text-foreground"
+      title={`View sources (${sources.length})`}
+      contentClassName="pt-2"
+    >
+      <ul className="space-y-1.5">
         {sources.map((url, index) => (
           <li key={url}>
             <a
@@ -24,6 +27,6 @@ export function ResearchSources({ urls }: { urls: Array<string | null | undefine
           </li>
         ))}
       </ul>
-    </details>
+    </HoverDisclosure>
   );
 }

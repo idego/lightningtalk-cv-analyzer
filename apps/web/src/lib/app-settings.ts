@@ -11,6 +11,7 @@ export type AppSettings = {
   autoCompanyResearch: boolean;
   autoEducationResearch: boolean;
   autoLinkedinDiscovery: boolean;
+  previewFindingsOnHover: boolean;
 };
 
 const STORAGE_KEY = "cv-analyzer-settings-v1";
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   uiLanguage: "en", reportLanguage: "en",
   autoResearchEnabled: false, autoCompanyResearch: false,
   autoEducationResearch: false, autoLinkedinDiscovery: false,
+  previewFindingsOnHover: false,
 };
 
 function readSettings(): AppSettings {
@@ -32,6 +34,7 @@ function readSettings(): AppSettings {
       autoCompanyResearch: value.autoCompanyResearch === true,
       autoEducationResearch: value.autoEducationResearch === true,
       autoLinkedinDiscovery: value.autoLinkedinDiscovery === true,
+      previewFindingsOnHover: value.previewFindingsOnHover === true,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -76,37 +79,37 @@ export function useAppSettings() {
 const copy = {
   en: {
     analysis: "Analysis", analyze: "Analyze", settings: "Settings",
-    uploadTitle: "Upload CV files", uploadDescription: "Upload one or more PDF or DOCX files for analysis.",
+    uploadTitle: "Upload CV files",
     drop: "Drag and drop files here, or click to select", accepted: "Accepted: PDF, DOCX",
     queued: "Queued files", valid: "valid", analyzeFiles: "Analyze files", reset: "Reset",
-    results: "Analysis results", analyzeMore: "Analyze more CVs", completed: "completed",
+    results: "Analysis results", back: "Back",
     needsAttention: "Needs attention", worthKnowing: "Worth knowing", remaining: "Remaining signals",
     extracted: "CV overview", deterministic: "Deterministic assessment",
-    noAttention: "No findings require attention.", noWorth: "No additional information in this group.",
-    noRemaining: "No remaining signals.", showCv: "Show CV", hideCv: "Hide CV",
+    showCv: "Show CV", hideCv: "Hide CV",
     recentAnalyses: "Recent analyses", noHistory: "No saved analyses yet.",
     originalNotRetained: "The original CV was not retained.", deleteAnalysis: "Delete analysis",
     dataRetention: "Data retention", keepFor: "Keep completed analyses for", days: "days", save: "Save",
     deleteAll: "Delete all analyses", confirmDeleteAll: "Confirm delete all", deleting: "Deleting...",
     health: "System health", refresh: "Refresh status", refreshing: "Refreshing...", updated: "Updated", ready: "Ready", degraded: "Needs attention",
     uiLanguage: "UI language", reportLanguage: "AI report language",
+    previewFindingsOnHover: "Preview finding details on hover",
   },
   pl: {
     analysis: "Analiza", analyze: "Analizuj", settings: "Ustawienia",
-    uploadTitle: "Dodaj pliki CV", uploadDescription: "Dodaj jeden lub więcej plików PDF albo DOCX do analizy.",
+    uploadTitle: "Dodaj pliki CV",
     drop: "Przeciągnij pliki tutaj lub kliknij, aby je wybrać", accepted: "Obsługiwane: PDF, DOCX",
     queued: "Pliki w kolejce", valid: "poprawnych", analyzeFiles: "Analizuj pliki", reset: "Wyczyść",
-    results: "Wyniki analizy", analyzeMore: "Analizuj kolejne CV", completed: "ukończono",
+    results: "Wyniki analizy", back: "Wróć",
     needsAttention: "Wymaga uwagi", worthKnowing: "Warto wiedzieć", remaining: "Pozostałe sygnały",
     extracted: "Podsumowanie CV", deterministic: "Ocena deterministyczna",
-    noAttention: "Brak findingów wymagających uwagi.", noWorth: "Brak dodatkowych informacji w tej grupie.",
-    noRemaining: "Brak pozostałych sygnałów.", showCv: "Pokaż CV", hideCv: "Ukryj CV",
+    showCv: "Pokaż CV", hideCv: "Ukryj CV",
     recentAnalyses: "Ostatnie analizy", noHistory: "Brak zapisanych analiz.",
     originalNotRetained: "Oryginalny plik CV nie został zachowany.", deleteAnalysis: "Usuń analizę",
     dataRetention: "Retencja danych", keepFor: "Przechowuj ukończone analizy przez", days: "dni", save: "Zapisz",
     deleteAll: "Usuń wszystkie analizy", confirmDeleteAll: "Potwierdź usunięcie", deleting: "Usuwanie...",
     health: "Stan systemu", refresh: "Odśwież status", refreshing: "Odświeżanie...", updated: "Zaktualizowano", ready: "Gotowe", degraded: "Wymaga uwagi",
     uiLanguage: "Język interfejsu", reportLanguage: "Język raportu AI",
+    previewFindingsOnHover: "Pokazuj szczegóły findingów po najechaniu",
   },
 } as const;
 
