@@ -178,7 +178,42 @@
   opacity: 0.05;
 }
 
+.report-enter,
+.report-enrichment-enter {
+  animation: report-content-enter 200ms var(--motion-ease-out) both;
+}
+
+@keyframes report-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .report-enter,
+  .report-enrichment-enter {
+    animation-duration: 120ms;
+    animation-timing-function: ease;
+  }
+
+  @keyframes report-content-enter {
+    from {
+      opacity: 0;
+      transform: none;
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   [data-slot="sidebar-gap"],
   [data-slot="sidebar-container"] {
     transition-duration: 1ms !important;

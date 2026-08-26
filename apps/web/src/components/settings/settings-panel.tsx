@@ -116,8 +116,9 @@ export function SettingsPanel() {
     </section>
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">Analysis settings</h3>
-      <p className="mt-1 text-sm text-muted-foreground">Choose optional public-web research to start after a successful CV analysis. All options are off by default.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Choose which public searches run after analysis.</p>
       <div className="mt-3 divide-y">
+        {toggle("preview-findings-on-hover", t("previewFindingsOnHover"), settings.previewFindingsOnHover, previewFindingsOnHover => updateAppSettings({ previewFindingsOnHover }))}
         {toggle("auto-research", "Run research automatically", settings.autoResearchEnabled, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }))}
         <div className="pl-4">
           {toggle("auto-company", "Company research", settings.autoCompanyResearch, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled)}
@@ -125,7 +126,7 @@ export function SettingsPanel() {
           {toggle("auto-linkedin", "LinkedIn discovery", settings.autoLinkedinDiscovery, autoLinkedinDiscovery => updateAppSettings({ autoLinkedinDiscovery }), !settings.autoResearchEnabled)}
         </div>
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">LinkedIn discovery only suggests profiles. You must confirm a profile before comparison can start.</p>
+      <p className="mt-3 text-xs text-muted-foreground">LinkedIn discovery suggests possible public profiles only.</p>
     </section>
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
@@ -139,7 +140,7 @@ export function SettingsPanel() {
       {retentionMessage ? <p className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
     </section>
     <section className="rounded-xl border bg-card p-5">
-      <div className="mb-4 flex items-center justify-between gap-4"><div><h3 className="font-medium">{t("health")}</h3><p className="text-sm text-muted-foreground">Everything required for a complete analysis must be ready.</p></div><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>
+      <div className="mb-4 flex items-center justify-between gap-4"><h3 className="font-medium">{t("health")}</h3><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>
       <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{health?.ready ? t("ready") : t("degraded")}</div>
       <div className="divide-y">
         {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ?? name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}

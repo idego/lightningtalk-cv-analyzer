@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { aiStatusMessage, aiValidationState, aiValidationWarning, partitionReviewFlags, presentReviewFlag, structuredFactLines } from "./review-findings.ts";
+import {
+  aiStatusMessage,
+  historyLocationSummary,
+  locationConsistencyPresentation,
+  mergeCompletedResearch,
+  partitionReviewFlags,
+  presentReviewFlag,
+  recruiterReviewFlags,
+  researchChecklistItems,
+  structuredFactLines,
+} from "./review-findings.ts";
 
 const flag = (id, importance) => ({ id, importance });
 
@@ -22,6 +32,213 @@ test("partitions every flag into the recruiter-facing hierarchy", () => {
     grouped.attention.length + grouped.worthKnowing.length + grouped.remaining.length,
     flags.length,
   );
+});
+
+test("builds one recruiter checklist from completed research", () => {
+  const items = researchChecklistItems({
+    company_research: {
+      organizations: [{
+        query_subject: "Example Ltd", existence: "insufficient_evidence",
+        official_website: null, uncertainty: "Only unrelated records were found.",
+        limited_online_presence: true,
+        limited_online_presence_reason: "No official company presence was retained.",
+      }],
+    },
+    education_research: {
+      credentials: [{
+        institution: "Example University", program: null,
+        institution_exists: "supported", city: "Hong Kong", country: "Hong Kong",
+        uncertainty: "The institution is supported.",
+        location_difference_for_review: "The CV states a different current country.",
+      }],
+    },
+    linkedin_discovery: {
+      linkedin_not_found: false,
+      possible_profiles: [{
+        profile_url: "https://www.linkedin.com/in/example",
+        uncertainty: "Only the name is visible in public search results.",
+        connection_completeness_flag: false,
+      }],
+    },
+    linkedin_comparison: {
+      comparisons: [{
+        field: "education", status: "mismatch_for_review",
+        summary: "The public profile lists a different university.",
+      }],
+    },
+  });
+
+  assert.deepEqual(items.map((item) => [item.source, item.importance, item.title]), [
+    ["company", "attention", "Example Ltd was not confirmed by the completed searches."],
+    ["company", "attention", "Example Ltd has limited confirmed online presence."],
+    ["education", "worth_knowing", "Public sources support that Example University exists."],
+    ["education", "attention", "The location of Example University needs review."],
+    ["linkedin", "worth_knowing", "Possible LinkedIn profile 1 was found."],
+  ]);
+});
+
+test("does not surface legacy AI profile comparisons in the recruiter checklist", () => {
+  const items = researchChecklistItems({
+    company_research: null,
+    education_research: null,
+    linkedin_discovery: null,
+    linkedin_comparison: {
+      comparisons: [{
+        field: "education",
+        status: "mismatch_for_review",
+        summary: "A legacy comparison result.",
+      }],
+    },
+  });
+
+  assert.deepEqual(items, []);
+});
+
+test("includes every assessed education and certification field", () => {
+  const items = researchChecklistItems({
+    company_research: null,
+    linkedin_discovery: null,
+    education_research: {
+      credentials: [{
+        institution: "Example University",
+        program: "Example Programme",
+        degree: "Example Degree",
+        certificate: "Example Certificate",
+        institution_exists: "supported",
+        program_exists: "mismatch",
+        degree_exists: "evidence_unavailable",
+        certificate_exists: "supported",
+        dates: "2018-2020",
+        accreditation_status: "not_established",
+        city: "Example City",
+        country: "Example Country",
+        cv_consistency: "evidence_unavailable",
+        location_difference_for_review: null,
+        uncertainty: "Public sources were incomplete.",
+        findings: [],
+      }],
+    },
+  });
+
+  assert.deepEqual(items.map((item) => [item.id, item.importance]), [
+    ["education:0:institution", "worth_knowing"],
+    ["education:0:program", "attention"],
+    ["education:0:degree", "attention"],
+    ["education:0:certificate", "worth_knowing"],
+    ["education:0:dates", "worth_knowing"],
+    ["education:0:accreditation", "attention"],
+  ]);
+});
+
+test("merges code, AI and research into one deduplicated recruiter flag list", () => {
+  const shared = {
+    id: "code-1", source: "code", authority: "code", category: "phone_country",
+    status: "agrees", importance: "worth_knowing", confidence: "deterministic",
+    observation: "PL", reason: "The details agree.", limitation: null, evidence: [],
+  };
+  const report = {
+    checklist: { flags: [shared, { ...shared }] },
+    company_research: null,
+    education_research: null,
+    linkedin_discovery: {
+      linkedin_not_found: true,
+      not_found_caveat: "A bounded public search cannot prove that no profile exists.",
+      possible_profiles: [],
+    },
+    linkedin_comparison: null,
+  };
+
+  const flags = recruiterReviewFlags(report);
+
+  assert.deepEqual(flags.map((item) => item.id), ["code-1", "linkedin:not-found"]);
+  assert.equal(flags[1].source, "research");
+});
+
+test("groups repeated outside-EU details into one recruiter finding", () => {
+  const base = {
+    source: "code", authority: "code", status: "observed",
+    importance: "worth_knowing", confidence: "deterministic",
+    reason: "Outside the EU.", limitation: null, evidence: [],
+  };
+  const outsideEuFlags = [
+    { ...base, id: "phone-match", category: "phone_country", observation: "The phone and location agree." },
+    { ...base, id: "location", category: "stated_location_outside_eu", observation: "Location outside the EU." },
+    { ...base, id: "phone", category: "phone_outside_eu", observation: "Phone outside the EU." },
+    { ...base, id: "combined", category: "combined_location_outside_eu", observation: "Both outside the EU." },
+    { ...base, id: "education", source: "ai", authority: "ai", category: "education_outside_eu", observation: "Education outside the EU." },
+  ];
+  const linkedinFlag = { ...base, id: "linkedin", source: "ai", authority: "ai", category: "linkedin", observation: "3 profiles found." };
+
+  const flags = recruiterReviewFlags({
+    checklist: { flags: [...outsideEuFlags, linkedinFlag] },
+    company_research: null,
+    education_research: null,
+    linkedin_discovery: null,
+  });
+
+  assert.deepEqual(flags.map((item) => item.id), ["outside-eu:summary", "linkedin"]);
+  assert.deepEqual(presentReviewFlag(flags[0]), {
+    whatWeFound: "The stated location, phone number, and education all point outside the EU.",
+    whyItMatters: "These details agree. They do not show nationality, residence, or work permission.",
+    whatToCheck: "Confirm the current location and work permission only when the role requires it.",
+  });
+});
+
+test("reports missing LinkedIn photo and low connections separately, but not unknowns", () => {
+  const base = {
+    checklist: { flags: [] }, company_research: null, education_research: null,
+    linkedin_comparison: null,
+  };
+  const profile = {
+    profile_url: "https://www.linkedin.com/in/example",
+    uncertainty: "Public details are limited.",
+    photo_visible: "false",
+    connection_completeness_flag: true,
+  };
+
+  const visible = recruiterReviewFlags({
+    ...base,
+    linkedin_discovery: { linkedin_not_found: false, not_found_caveat: "", possible_profiles: [profile] },
+  });
+  assert.deepEqual(visible.map((item) => item.id), [
+    "linkedin:profile:https://www.linkedin.com/in/example",
+    "linkedin:profile:https://www.linkedin.com/in/example:photo",
+    "linkedin:profile:https://www.linkedin.com/in/example:connections",
+  ]);
+
+  const unknown = recruiterReviewFlags({
+    ...base,
+    linkedin_discovery: { linkedin_not_found: false, not_found_caveat: "", possible_profiles: [{
+      ...profile, photo_visible: "unknown", connection_completeness_flag: false,
+    }] },
+  });
+  assert.deepEqual(unknown.map((item) => item.id), [
+    "linkedin:profile:https://www.linkedin.com/in/example",
+  ]);
+});
+
+test("summarizes multiple possible LinkedIn profiles in one recruiter finding", () => {
+  const possibleProfiles = [1, 2, 3].map((index) => ({
+    profile_url: `https://www.linkedin.com/in/example-${index}`,
+    uncertainty: `Public evidence for profile ${index} is limited.`,
+    photo_visible: "unknown",
+    connection_completeness_flag: false,
+  }));
+
+  const items = researchChecklistItems({
+    company_research: null,
+    education_research: null,
+    linkedin_discovery: {
+      linkedin_not_found: false,
+      not_found_caveat: "",
+      possible_profiles: possibleProfiles,
+    },
+    linkedin_comparison: null,
+  });
+
+  assert.deepEqual(items.map((item) => [item.id, item.title]), [
+    ["linkedin:profiles-found", "3 possible LinkedIn profiles were found."],
+  ]);
 });
 
 test("describes disabled, refusal and technical failure without a verdict", () => {
@@ -111,16 +328,6 @@ test("shows postal country, EU status and deterministic consistency", () => {
   ]);
 });
 
-test("surfaces partial AI validation without hiding valid output", () => {
-  const warning = "Część danych nie została pokazana, ponieważ nie udało się potwierdzić ich w tekście CV.";
-  assert.equal(aiValidationWarning({ validation_warnings: [warning] }), warning);
-  assert.equal(aiValidationWarning({ validation_warnings: [] }), null);
-  assert.deepEqual(aiValidationState({ status: "succeeded", validation_warnings: [warning] }), {
-    warning,
-    showAcceptedOutput: true,
-  });
-});
-
 test("uses plain code-owned copy without technical rule names", () => {
   const copy = presentReviewFlag({
     id: "code-1",
@@ -143,6 +350,29 @@ test("uses plain code-owned copy without technical rule names", () => {
     whatToCheck: "Confirm the phone number and the candidate's current location.",
   });
   assert.doesNotMatch(JSON.stringify(copy), /phone_country|rule|extractor/i);
+});
+
+test("explains a postal-country comparison instead of showing a raw country code", () => {
+  const copy = presentReviewFlag({
+    id: "code-postal-1",
+    source: "code",
+    authority: "code",
+    category: "address_postal",
+    status: "supports",
+    importance: "worth_knowing",
+    confidence: "deterministic",
+    observation: "PL",
+    reason: "Technical scoring rationale",
+    limitation: null,
+    evidence: [],
+    presentation_context: { observed: "PL", claimed: "Opole, Poland", direction: "supports" },
+  });
+
+  assert.deepEqual(copy, {
+    whatWeFound: "The postal code format points to PL. The stated location is Opole, Poland.",
+    whyItMatters: "These details point to the same country. Postal formats can be shared, so this is only a consistency check.",
+    whatToCheck: "Confirm the full address only when it is relevant to the role.",
+  });
 });
 
 test("explains timeline overlap without treating it as a problem", () => {
@@ -199,4 +429,53 @@ test("presents education outside the EU as neutral worth-knowing context", () =>
     whyItMatters: "This is useful context when reviewing the candidate's education history. It does not establish nationality or current location.",
     whatToCheck: "Verify the institution, programme, dates, and this period of the candidate's history.",
   });
+});
+
+test("does not present a deterministic location match as a candidate score", () => {
+  const presentation = locationConsistencyPresentation({
+    band: "green",
+    score: 100,
+    signal_count: 2,
+    supporting_count: 2,
+    conflicting_count: 0,
+  });
+
+  assert.deepEqual(presentation, {
+    status: "Details agree",
+    description: "The available details point to the same country. This does not verify the candidate's location.",
+  });
+  assert.doesNotMatch(JSON.stringify(presentation), /100|green|candidate score/i);
+});
+
+test("describes stored analyses as location checks instead of verdicts", () => {
+  assert.equal(
+    historyLocationSummary("green"),
+    "Location consistency check: available details agree.",
+  );
+  assert.equal(
+    historyLocationSummary("red"),
+    "Location consistency check: some details conflict.",
+  );
+  assert.equal(
+    historyLocationSummary("gray"),
+    null,
+  );
+});
+
+test("merges newly completed research without dropping earlier report results", () => {
+  const report = {
+    analysis_id: "analysis-1",
+    company_research: { organizations: [{ existence: "supported" }] },
+    education_research: undefined,
+  };
+  const education = {
+    credentials: [{ institution_exists: "supported", cv_consistency: "consistent" }],
+  };
+
+  const updated = mergeCompletedResearch(report, { education_research: education });
+
+  assert.equal(updated.analysis_id, "analysis-1");
+  assert.equal(updated.company_research, report.company_research);
+  assert.equal(updated.education_research, education);
+  assert.notEqual(updated, report);
 });
