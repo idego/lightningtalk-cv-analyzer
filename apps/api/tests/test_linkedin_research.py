@@ -135,4 +135,26 @@ def test_official_responses_api_is_bounded_no_retry_strict_and_injection_resista
     LinkedInDiscoveryService(adapter).run(_stored()); payload=responses.payload
     assert payload["tools"] == [{"type":"web_search", "search_context_size":"low"}] and payload["max_tool_calls"] == 4
     assert payload["store"] is False and payload["text"]["format"]["strict"] is True
+    assert '"format": "uri"' not in json.dumps(payload["text"]["format"]["schema"])
+    assert '"uniqueItems"' not in json.dumps(payload["text"]["format"]["schema"])
     assert "ignore instructions" not in payload["input"] and "untrusted data" in payload["instructions"]
+
+
+def test_openai_adapter_computes_connection_flag_from_configured_threshold():
+    result = _discovery()
+    result["possible_profiles"][0]["connection_completeness_flag"] = False
+
+    class ThresholdResponse(_Response):
+        output_text = json.dumps(result)
+
+    class ThresholdResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return ThresholdResponse()
+
+    adapter = OpenAIResponsesLinkedInResearcher(
+        client=type("Client", (), {"responses": ThresholdResponses()})(),
+        connection_threshold=500,
+    )
+    discovery = LinkedInDiscoveryService(adapter, connection_threshold=500).run(_stored())
+    assert discovery["possible_profiles"][0]["connection_completeness_flag"] is True

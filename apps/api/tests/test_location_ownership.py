@@ -295,6 +295,29 @@ def test_unlabeled_place_in_document_start_block_is_unknown_and_non_scoring() ->
     assert not any(fact.kind is FactKind.CLAIMED_LOCATION for fact in result.facts)
 
 
+def test_inline_contact_location_is_person_owned_after_contact_tokens_are_removed() -> None:
+    result = _analyze(
+        "Jane Example\n"
+        "jane@example.com  +49 30 123456  Munich, Germany  10115\n\n"
+        "Experience\nEngineer"
+    )
+
+    candidate = next(
+        candidate
+        for candidate in result.candidates
+        if candidate.kind is CandidateKind.EXPLICIT_LOCATION
+        and candidate.label == "contact block"
+    )
+    fact = next(fact for fact in result.facts if fact.kind is FactKind.CLAIMED_LOCATION)
+
+    assert candidate.value == "Munich, Germany"
+    assert candidate.relation is LocationRelation.PERSON
+    assert candidate.source_context is SourceContext.DOCUMENT_START_BLOCK
+    assert candidate.value_evidence[0].excerpt == "Munich, Germany"
+    assert fact.value == "DE"
+    assert fact.resolved_name == "Munich"
+
+
 def test_unlabeled_place_outside_start_block_remains_unknown_and_non_scoring() -> None:
     result = _analyze(
         "Jane Example\nSoftware engineer\n\nExperience\nMunich\nEngineer"

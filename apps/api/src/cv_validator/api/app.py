@@ -127,9 +127,13 @@ def create_app(
             timeout_seconds=selected_ai_settings.timeout_seconds,
         )
     selected_linkedin_researcher = linkedin_researcher
-    if selected_ai_settings.enabled and selected_linkedin_researcher is None:
-        selected_linkedin_researcher = OpenAIResponsesLinkedInResearcher(api_key=selected_ai_settings.api_key, timeout_seconds=selected_ai_settings.timeout_seconds)
     selected_linkedin_threshold = linkedin_connection_threshold if linkedin_connection_threshold is not None else _positive_int_env("CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD", 500)
+    if selected_ai_settings.enabled and selected_linkedin_researcher is None:
+        selected_linkedin_researcher = OpenAIResponsesLinkedInResearcher(
+            api_key=selected_ai_settings.api_key,
+            timeout_seconds=selected_ai_settings.timeout_seconds,
+            connection_threshold=selected_linkedin_threshold,
+        )
     resolver = location_resolver or load_location_resolver(
         required=require_location_resolver,
     )
@@ -277,6 +281,7 @@ def create_app(
                 ai_settings=selected_ai_settings,
                 document_analyzer=selected_document_analyzer,
                 report_language=_report_language(x_report_language),
+                defer_ai=selected_ai_settings.enabled,
             )
             analysis_id = str(uuid4())
             access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -294,7 +299,10 @@ def create_app(
                 access_token=access_token,
                 source_filename=filename,
             )
-            if result.redacted_document is not None and result.ai_outcome.status is AIAnalysisStatus.FAILED:
+            if result.redacted_document is not None and result.ai_outcome.status in {
+                AIAnalysisStatus.PENDING,
+                AIAnalysisStatus.FAILED,
+            }:
                 with retry_contexts_guard:
                     retry_contexts[analysis_id] = result
         except IngestionError as exc:
@@ -341,6 +349,7 @@ def create_app(
                     ai_settings=selected_ai_settings,
                     document_analyzer=selected_document_analyzer,
                     report_language=_report_language(x_report_language),
+                    defer_ai=selected_ai_settings.enabled,
                 )
                 analysis_id = str(uuid4())
                 access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -358,7 +367,10 @@ def create_app(
                     access_token=access_token,
                     source_filename=filename,
                 )
-                if result.redacted_document is not None and result.ai_outcome.status is AIAnalysisStatus.FAILED:
+                if result.redacted_document is not None and result.ai_outcome.status in {
+                    AIAnalysisStatus.PENDING,
+                    AIAnalysisStatus.FAILED,
+                }:
                     with retry_contexts_guard:
                         retry_contexts[analysis_id] = result
                 results.append(
@@ -655,7 +667,12 @@ def create_app(
                     _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "timeout")
                     raise HTTPException(status_code=504, detail="linkedin_discovery_timeout") from exc
                 except LinkedInResearchInvalidResponse as exc:
-                    _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "invalid_response")
+                    _record_research_failure(
+                        telemetry,
+                        analysis_id,
+                        "linkedin_discovery",
+                        f"invalid_response:{str(exc) or 'unknown'}",
+                    )
                     raise HTTPException(status_code=502, detail="linkedin_discovery_invalid_response") from exc
                 except LinkedInResearchClientError as exc:
                     _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "client_error")
@@ -698,7 +715,12 @@ def create_app(
                     _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "timeout")
                     raise HTTPException(status_code=504, detail="linkedin_comparison_timeout") from exc
                 except LinkedInResearchInvalidResponse as exc:
-                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "invalid_response")
+                    _record_research_failure(
+                        telemetry,
+                        analysis_id,
+                        "linkedin_comparison",
+                        f"invalid_response:{str(exc) or 'unknown'}",
+                    )
                     raise HTTPException(status_code=502, detail="linkedin_comparison_invalid_response") from exc
                 except LinkedInResearchClientError as exc:
                     _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "client_error")

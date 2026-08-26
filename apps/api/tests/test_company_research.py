@@ -349,4 +349,121 @@ def test_openai_adapter_uses_official_bounded_web_search_contract():
     assert payload["max_tool_calls"] == 4
     assert payload["store"] is False
     assert payload["text"]["format"]["strict"] is True
+    assert '"format": "uri"' not in json.dumps(payload["text"]["format"]["schema"])
     assert "private candidate text" not in json.dumps(payload)
+
+
+def test_openai_adapter_accepts_same_cited_page_with_tracking_query():
+    class CanonicalResponse(_Response):
+        output = [
+            type("Search", (), {
+                "type": "web_search_call",
+                "action": type("Action", (), {
+                    "queries": [f"Acme Systems query {index}" for index in range(6)],
+                    "sources": [{"url": "https://acme.example/?stream=top"}],
+                })(),
+            })(),
+        ]
+
+    class CanonicalResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return CanonicalResponse()
+
+    adapter = OpenAIResponsesCompanyResearcher(
+        client=type("Client", (), {"responses": CanonicalResponses()})()
+    )
+    result = CompanyResearchService(adapter).run(_stored_payload())
+    assert len(result["searches_performed"]) == 1
+    assert "query 5" in result["searches_performed"][0]
+
+
+def test_openai_adapter_accepts_official_homepage_from_sourced_origin():
+    result = _valid_result()
+    result["organizations"][0]["official_website"] = "https://acme.example/"
+    result["organizations"][0]["findings"][0]["source_urls"] = [
+        "https://acme.example/about"
+    ]
+
+    class HomepageResponse(_Response):
+        output_text = json.dumps(result)
+        output = [
+            type("Search", (), {
+                "type": "web_search_call",
+                "action": type("Action", (), {
+                    "query": "Acme Systems",
+                    "sources": [{"url": "https://acme.example/about"}],
+                })(),
+            })(),
+        ]
+
+    class HomepageResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return HomepageResponse()
+
+    adapter = OpenAIResponsesCompanyResearcher(
+        client=type("Client", (), {"responses": HomepageResponses()})()
+    )
+    CompanyResearchService(adapter).run(_stored_payload())
+
+
+def test_openai_adapter_keeps_canonical_url_from_sourced_origin():
+    result = _valid_result()
+    result["organizations"][0]["findings"][0]["source_urls"] = [
+        "https://acme.example/about",
+        "https://acme.example/",
+    ]
+
+    class FilteredResponse(_Response):
+        output_text = json.dumps(result)
+        output = [
+            type("Search", (), {
+                "type": "web_search_call",
+                "action": type("Action", (), {
+                    "query": "Acme Systems",
+                    "sources": [{"url": "https://acme.example/about"}],
+                })(),
+            })(),
+        ]
+
+    class FilteredResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return FilteredResponse()
+
+    adapter = OpenAIResponsesCompanyResearcher(
+        client=type("Client", (), {"responses": FilteredResponses()})()
+    )
+    researched, _, _ = adapter.research(
+        build_company_research_request(_stored_payload())
+    )
+    assert researched["organizations"][0]["findings"][0]["source_urls"] == [
+        "https://acme.example/about",
+        "https://acme.example/",
+    ]
+
+
+def test_openai_adapter_downgrades_only_unsupported_company_claims():
+    result = _valid_result()
+    result["organizations"][0]["findings"][0]["source_urls"] = [
+        "https://unsupported.example/claim"
+    ]
+
+    class UnsupportedResponse(_Response):
+        output_text = json.dumps(result)
+
+    class UnsupportedResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return UnsupportedResponse()
+
+    adapter = OpenAIResponsesCompanyResearcher(
+        client=type("Client", (), {"responses": UnsupportedResponses()})()
+    )
+    researched = CompanyResearchService(adapter).run(_stored_payload())
+    organization = researched["organizations"][0]
+    assert organization["existence"] == "insufficient_evidence"
+    assert organization["findings"] == []
+    assert organization["limited_online_presence"] is True
+    assert researched["status"] == "completed"

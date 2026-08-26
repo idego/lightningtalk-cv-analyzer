@@ -97,25 +97,25 @@ def validate_discovery(payload: Any, *, request: LinkedInDiscoveryRequest, conne
     _validate_schema(payload, "linkedin-discovery.schema.json")
     profiles = payload["possible_profiles"]
     urls = [normalize_linkedin_url(p["profile_url"]) for p in profiles]
-    if len(urls) != len(set(urls)): raise LinkedInResearchInvalidResponse()
-    if payload["linkedin_not_found"] != (not profiles): raise LinkedInResearchInvalidResponse()
-    if not payload["searches_performed"] or not payload["search_limitations"]: raise LinkedInResearchInvalidResponse()
+    if len(urls) != len(set(urls)): raise LinkedInResearchInvalidResponse("duplicate_profile")
+    if payload["linkedin_not_found"] != (not profiles): raise LinkedInResearchInvalidResponse("not_found_mismatch")
+    if not payload["searches_performed"] or not payload["search_limitations"]: raise LinkedInResearchInvalidResponse("missing_search_context")
     if payload["linkedin_not_found"] and "does not prove" not in payload["not_found_caveat"].casefold():
-        raise LinkedInResearchInvalidResponse()
+        raise LinkedInResearchInvalidResponse("unsafe_not_found_caveat")
     _reject_protected_claims([payload["not_found_caveat"], *payload["search_limitations"]])
     for profile in profiles:
         if not profile["match_evidence"] or not profile["source_urls"] or not profile["uncertainty"]:
-            raise LinkedInResearchInvalidResponse()
-        if profile["photo_visible"] == "unknown" and profile["photo_source_url"] is not None: raise LinkedInResearchInvalidResponse()
-        if profile["photo_visible"] != "unknown" and profile["photo_source_url"] is None: raise LinkedInResearchInvalidResponse()
+            raise LinkedInResearchInvalidResponse("missing_profile_evidence")
+        if profile["photo_visible"] == "unknown" and profile["photo_source_url"] is not None: raise LinkedInResearchInvalidResponse("photo_source_mismatch")
+        if profile["photo_visible"] != "unknown" and profile["photo_source_url"] is None: raise LinkedInResearchInvalidResponse("photo_source_mismatch")
         count = profile["connection_count"]
         if count["visibility"] == "unknown" and (count["minimum"] is not None or count["maximum"] is not None or count["source_url"] is not None):
-            raise LinkedInResearchInvalidResponse()
+            raise LinkedInResearchInvalidResponse("connection_count_mismatch")
         if count["visibility"] == "visible" and (count["source_url"] is None or count["display"] is None or count["minimum"] is None):
-            raise LinkedInResearchInvalidResponse()
-        if count["maximum"] is not None and (count["minimum"] is None or count["maximum"] < count["minimum"]): raise LinkedInResearchInvalidResponse()
+            raise LinkedInResearchInvalidResponse("connection_count_mismatch")
+        if count["maximum"] is not None and (count["minimum"] is None or count["maximum"] < count["minimum"]): raise LinkedInResearchInvalidResponse("connection_count_range")
         expected = count["visibility"] == "visible" and count["minimum"] is not None and count["minimum"] < connection_threshold
-        if profile["connection_completeness_flag"] != expected: raise LinkedInResearchInvalidResponse()
+        if profile["connection_completeness_flag"] != expected: raise LinkedInResearchInvalidResponse("connection_flag_mismatch")
         _reject_protected_claims([profile["uncertainty"], *(x["summary"] for x in profile["conflicts"])])
 
 
@@ -142,7 +142,7 @@ def normalize_linkedin_url(value: str) -> str:
 def _validate_schema(payload: Any, filename: str) -> None:
     schema = json.loads(files("cv_validator.research.contracts").joinpath(filename).read_text())
     if list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload)):
-        raise LinkedInResearchInvalidResponse()
+        raise LinkedInResearchInvalidResponse("schema")
 
 
 def _completed(payload: dict[str, Any], version: str, schema: str, response_model: str, usage: dict[str, Any]) -> dict[str, Any]:
@@ -167,4 +167,4 @@ def _reject_protected_claims(values: list[str]) -> None:
     blocked = re.compile(r"(?:definit(?:e|ely).{0,30}(?:candidate|person|identity)|photo.{0,30}(?:look|resembl|identical|same person)|appearance|fraud|decept|fake (?:person|candidate|cv)|ethnic|nationalit|race|racial|origin|gender|\bage\b|\bsex\b)", re.I)
     def authored_claim(value: str) -> str:
         return re.sub(r"(?:does not|do not|not|never|cannot|must not).{0,35}(?:fraud|decept|appearance|ethnic|nationalit|race|racial|origin|gender|age|sex|identity)", "", value, flags=re.I)
-    if any(blocked.search(authored_claim(value)) for value in values): raise LinkedInResearchInvalidResponse()
+    if any(blocked.search(authored_claim(value)) for value in values): raise LinkedInResearchInvalidResponse("protected_claim")

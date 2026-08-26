@@ -246,6 +246,78 @@ def test_failed_analysis_has_a_complete_graceful_contract() -> None:
     )
 
 
+def test_deferred_ai_returns_pending_deterministic_report_without_calling_provider() -> None:
+    analyzer = _Analyzer()
+
+    result = analyze_cv_text_result(
+        "Candidate Example\nPhone: +48 22 123 45 67\nSoftware engineer profile",
+        ai_settings=AISettings(enabled=True, api_key="test-key"),
+        document_analyzer=analyzer,
+        defer_ai=True,
+    )
+    payload = serialize_analysis_payload(
+        result,
+        AISettings(enabled=True, api_key="test-key"),
+        analysis_id="analysis-pending-1",
+    )
+
+    assert analyzer.requests == []
+    assert payload["ai_analysis"]["status"] == "pending"
+    assert payload["ai_analysis"]["manual_retry_available"] is False
+    assert payload["deterministic"]["facts"]
+    assert payload["deterministic"]["scoring_signals"]
+
+
+def test_pending_ai_enrichment_reuses_the_same_analysis_and_deterministic_report(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "pending-enrichment.db"
+    token = "owner-token"
+    settings = AISettings(enabled=True, api_key="test-key")
+    analyzer = _Analyzer()
+    pending = analyze_cv_text_result(
+        "Candidate Example\nPhone: +48 22 123 45 67\nSoftware engineer profile",
+        ai_settings=settings,
+        document_analyzer=analyzer,
+        defer_ai=True,
+    )
+    pending_payload = serialize_analysis_payload(
+        pending,
+        settings,
+        analysis_id="analysis-pending-2",
+    )
+    store = PersistenceStore(PersistenceConfig(db_path, retention_days=30))
+    store.persist_report(
+        pending.document_identity,
+        pending.report,
+        report_payload=pending_payload,
+        analysis_id="analysis-pending-2",
+        ai_analysis=pending_payload["ai_analysis"],
+        access_token=token,
+    )
+    app = create_app(
+        db_path=db_path,
+        ai_settings=settings,
+        document_analyzer=analyzer,
+    )
+    app.state.ai_retry_contexts["analysis-pending-2"] = pending
+    endpoint = next(
+        route.endpoint
+        for route in app.routes
+        if getattr(route, "path", None) == "/analyses/{analysis_id}/ai/retry"
+    )
+
+    response = endpoint("analysis-pending-2", token)
+    enriched = json.loads(response.body)
+
+    assert enriched["analysis_id"] == pending_payload["analysis_id"]
+    assert enriched["ai_analysis"]["status"] == "succeeded"
+    assert enriched["deterministic"] == pending_payload["deterministic"]
+    assert enriched["score"] == pending_payload["score"]
+    assert enriched["band"] == pending_payload["band"]
+    assert len(analyzer.requests) == 1
+
+
 def test_manual_ai_retry_replaces_only_ai_result_and_keeps_deterministic_report(
     tmp_path,
 ) -> None:
@@ -698,8 +770,9 @@ def test_partial_validation_never_persists_rejected_model_text(tmp_path) -> None
         ai_settings=AISettings(enabled=True, api_key="test-key"),
         document_analyzer=_PayloadAnalyzer(payload),
     )
+    token = "partial-validation-owner"
     with TestClient(app) as client:
-        response = client.post(
+        initial = client.post(
             "/analyze",
             files={
                 "file": (
@@ -711,6 +784,11 @@ def test_partial_validation_never_persists_rejected_model_text(tmp_path) -> None
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
             },
+            headers={"X-Analysis-Access-Token": token},
+        )
+        response = client.post(
+            f"/analyses/{initial.json()['analysis_id']}/ai/retry",
+            headers={"X-Analysis-Access-Token": token},
         )
 
     assert response.status_code == 200
@@ -811,9 +889,10 @@ def test_http_response_and_audit_share_one_stable_analysis_id(tmp_path) -> None:
         ai_settings=AISettings(enabled=True, api_key="test-key"),
         document_analyzer=_Analyzer(),
     )
+    token = "stable-id-owner"
 
     with TestClient(app) as client:
-        response = client.post(
+        initial = client.post(
             "/analyze",
             files={
                 "file": (
@@ -822,6 +901,12 @@ def test_http_response_and_audit_share_one_stable_analysis_id(tmp_path) -> None:
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
             },
+            headers={"X-Analysis-Access-Token": token},
+        )
+        assert initial.json()["ai_analysis"]["status"] == "pending"
+        response = client.post(
+            f"/analyses/{initial.json()['analysis_id']}/ai/retry",
+            headers={"X-Analysis-Access-Token": token},
         )
 
     assert response.status_code == 200
@@ -908,9 +993,27 @@ def test_bounded_four_cv_batch_has_independent_ids_and_persisted_ai(tmp_path) ->
         )
         for number in range(4)
     ]
+    token = "batch-owner"
 
     with TestClient(app) as client:
-        response = client.post("/analyze/batch", files=files)
+        response = client.post(
+            "/analyze/batch",
+            files=files,
+            headers={"X-Analysis-Access-Token": token},
+        )
+        initial_results = response.json()["results"]
+        assert all(
+            item["report"]["ai_analysis"]["status"] == "pending"
+            for item in initial_results
+        )
+        assert analyzer.requests == []
+        enriched = [
+            client.post(
+                f"/analyses/{item['report']['analysis_id']}/ai/retry",
+                headers={"X-Analysis-Access-Token": token},
+            ).json()
+            for item in initial_results
+        ]
 
     assert response.status_code == 200
     results = response.json()["results"]
@@ -918,5 +1021,6 @@ def test_bounded_four_cv_batch_has_independent_ids_and_persisted_ai(tmp_path) ->
     analysis_ids = [item["report"]["analysis_id"] for item in results]
     assert len(set(analysis_ids)) == 4
     assert len(analyzer.requests) == 4
+    assert all(item["ai_analysis"]["status"] == "succeeded" for item in enriched)
     assert len(app.state.store.get_audit_entries()) == 4
     assert all(app.state.store.get_ai_analysis(item) is not None for item in analysis_ids)

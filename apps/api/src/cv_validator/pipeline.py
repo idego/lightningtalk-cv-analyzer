@@ -68,6 +68,7 @@ def analyze_cv_text_result(
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
     report_language: str = "en",
+    defer_ai: bool = False,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = RawDocument(
@@ -82,6 +83,7 @@ def analyze_cv_text_result(
         ai_settings,
         document_analyzer,
         report_language,
+        defer_ai,
     )
 
 
@@ -116,6 +118,7 @@ def analyze_cv_bytes_result(
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
     report_language: str = "en",
+    defer_ai: bool = False,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = ingest_cv(content, filename=filename, config=ingestion_config)
@@ -126,6 +129,7 @@ def analyze_cv_bytes_result(
         ai_settings,
         document_analyzer,
         report_language,
+        defer_ai,
     )
 
 
@@ -157,6 +161,7 @@ def _analyze_raw(
     ai_settings: AISettings | None,
     document_analyzer: DocumentAnalyzer | None,
     report_language: str = "en",
+    defer_ai: bool = False,
 ) -> PipelineResult:
     redacted = redact_national_ids(parsed)
     deterministic = analyze_deterministically(
@@ -166,7 +171,11 @@ def _analyze_raw(
     )
     report = score_deterministic(deterministic, weights)
     selected_ai_settings = ai_settings or AISettings()
-    if selected_ai_settings.enabled:
+    if selected_ai_settings.enabled and defer_ai:
+        ai_outcome = AIDocumentAnalysisOutcome(
+            status=AIAnalysisStatus.PENDING
+        )
+    elif selected_ai_settings.enabled:
         if document_analyzer is None:
             from cv_validator.ai.openai_client import (
                 OpenAIResponsesDocumentAnalyzer,
