@@ -11,10 +11,12 @@ The current analyzer checks location consistency with prototype fixed rules. Sev
 - Return structured contact, education, and employment data plus cited AI findings in the current report.
 - Let the model cite stable source-line IDs and let code materialize exact page excerpts, so the model never has to reproduce candidate text byte-for-byte.
 - Surface possible typos of well-known public email-provider domains as code-owned, non-scoring `worth knowing` observations with an explicit confirmation caveat.
+- Surface a uniquely resolved non-EU locality with a known population below the project-owner-approved configurable threshold (10,000 by default) as an informational, zero-weight small-locality review signal.
 - Make Magdalena's HR backlog the required business scope: location flags, company checks, education checks, LinkedIn checks, a complete flag checklist, and JSON/HTML results.
 - Keep score and band calculation deterministic. Only code-owned facts may affect them. AI-derived facts and findings support human review but never enter the verdict path, reject, or advance a candidate.
 - Preserve the current JSON fields and add one nested `deterministic` object containing facts, observations, authority, evidence, and deterministic versions.
 - Let the recruiter start company, education/certification, and LinkedIn research separately. Each action runs as a normal synchronous request through the existing API.
+- Present one deduplicated recruiter-facing checklist, a structured icon-led CV overview, compact deterministic date-range summaries, and disclosure controls that are available only when details exist.
 - Use OpenAI Web Search for research and store completed results in the existing SQLite persistence layer.
 - Keep the current Next.js, FastAPI, SQLite, and Docker Compose service boundaries and synchronous external API shape. Internal parsing, extraction, and report models may be replaced when the current prototype behavior is inaccurate.
 - Use the private, gitignored corpus only to create anonymous prompt rules and eval cases. The running application does not use this corpus.
@@ -26,7 +28,7 @@ This V1 does not add a broker, background queue, worker service, leases, polling
 ### New Capabilities
 
 - `ai-document-analysis`: Analyze one CV with OpenAI inside the existing request. Return structured facts, findings, evidence, uncertainty, and research candidates.
-- `ai-assisted-research`: Run recruiter-selected company, education/certification, and LinkedIn web research through synchronous API actions. Return cited results and require human confirmation for identity matches.
+- `ai-assisted-research`: Run recruiter-selected company, education/certification, and LinkedIn web research through synchronous API actions. Return cited results and leave LinkedIn profile review to the recruiter without an automated profile-to-CV comparison.
 
 ### Modified Capabilities
 

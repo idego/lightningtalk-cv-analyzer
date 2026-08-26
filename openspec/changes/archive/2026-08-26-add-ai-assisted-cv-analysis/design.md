@@ -124,7 +124,7 @@ scoring.
 
 Only an explicitly described person location may become the code-owned claimed location used by scoring. An unlabeled place name in the document header remains an observation. Candidate, employer, client, project, office, and education locations are separate concepts and are never collapsed into one location relation. Ambiguous postal formats and locations remain unknown. Postal compatibility stays unweighted until anonymous fixtures, calibration, and project-owner approval support a scoring change.
 
-V1 uses a versioned EU-27 ISO-2 member-state set sourced from the official European Union country list. Phone-country and stated-location outside-EU observations remain separate. A combined observation requires both distinct code-owned categories and both must be non-EU; mixed EU/non-EU categories are reported separately. These observations do not establish nationality, identity, physical presence, work eligibility, or fraud. There is no approved anonymous calibration for locality size or atypicality, so V1 does not classify either. A resolved non-EU locality receives only a `small_locality_not_evaluated` informational checklist result.
+V1 uses a versioned EU-27 ISO-2 member-state set sourced from the official European Union country list. Phone-country and stated-location outside-EU observations remain separate. A combined observation requires both distinct code-owned categories and both must be non-EU; mixed EU/non-EU categories are reported separately. These observations do not establish nationality, identity, physical presence, work eligibility, or fraud. The project owner approved an informational small-locality rule on 2026-08-26: a uniquely resolved non-EU locality with a known reference population below the configurable threshold, defaulting to 10,000, receives `small_locality_outside_eu`. A locality at the threshold is not small. Missing population receives `small_locality_not_evaluated`, and V1 does not classify atypicality. Both observations have zero weight and cannot change score or band.
 
 The weights-file version and scoring-policy version are separate immutable identities. A report records both, and persistence records their canonical composition, so an algorithm change cannot silently reuse the same weights-only audit identity.
 
@@ -140,12 +140,14 @@ There is no background job state in V1. If a request fails or the page closes, t
 
 Research uses OpenAI Web Search and keeps its source data. It does not use browser automation or logged-in sessions. Treat all page content as untrusted data. A page cannot change the request's instructions, tools, or scope.
 
-LinkedIn discovery returns possible profiles. The recruiter must confirm a possible profile before a later comparison treats its differences from the CV as relevant.
+LinkedIn discovery returns possible public profile links, source citations, confidence, and visible completeness data. The application does not compare a profile with the CV. The recruiter opens and reviews each possible profile manually.
 
 The V1 public connection-count completeness threshold is 500 and is configurable
 through `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD`. It applies only when a
 public minimum count is explicitly visible and cited. An unknown count never
 creates a negative completeness signal.
+
+Discovery uses only candidate name plus optional company and role search hints. It excludes education, dates, and location from the request. Code sorts a valid response and retains at most `CV_VALIDATOR_LINKEDIN_MAX_PROFILES` profiles, defaulting to three with an allowed range of 1 to 20, so one overlong response does not discard all usable links.
 
 ### D9: Keep the existing runtime and persistence
 
@@ -240,7 +242,7 @@ Neither stage changes signal weights, minimum evidence requirements, or band thr
 - [AI invents a finding] -> Require a CV excerpt or web source and validate every structured result.
 - [A prototype rule creates false certainty] -> Remove weak proxy signals, keep ambiguous values unknown, and cover each code-owned fact with anonymous deterministic fixtures.
 - [An AI-selected fact changes the verdict] -> Tag fact authority and reject AI-derived score inputs at the scoring boundary.
-- [Research matches the wrong person] -> Show uncertainty and require recruiter confirmation for LinkedIn comparison.
+- [Research returns the wrong person] -> Show uncertainty, label every result as a possible profile, and leave profile-to-CV review to the recruiter.
 - [Research costs grow] -> Make it optional, limit searches, remove duplicate requests, and cache reusable public entities in SQLite.
 - [A web page injects instructions] -> Give research read-only tools and treat page text only as data.
 - [Private corpus enters Git] -> Keep `data/` ignored and commit only anonymous rules and tests.
@@ -278,8 +280,8 @@ not phone candidates.
 
 ### D15: Apply HR acceptance follow-ups as bounded V1 hardening
 
-The 16-CV HR review adds a follow-up stage without rewriting completed slice
-history or closing stakeholder gates 8.7 and 8.8. Reviewer-facing text uses a
+The 16-CV HR review adds a bounded implementation follow-up stage without rewriting completed slice
+history. Reviewer-facing text uses a
 project house style informed by Google global-audience and accessibility
 guidance and ASD-STE100 principles, without claiming full ASD-STE100
 compliance. Known categories prefer short code-owned templates with `What we
@@ -306,8 +308,8 @@ Settings gains a master automatic-public-research toggle and independent
 company, education, and LinkedIn discovery toggles. The upload surface states
 which categories will start. After each successful base report, the browser
 starts enabled categories with bounded concurrency and independent status.
-LinkedIn comparison still requires recruiter confirmation of a discovered
-profile. Research failures never remove the base report.
+LinkedIn discovery remains manual-review only. It does not expose confirmation
+or profile-to-CV comparison actions. Research failures never remove the base report.
 
 DOCX remains text-extraction only. PDF keeps text-layer-first extraction; OCR
 is reserved for a later scan-only or unusable-text fallback. Phone candidate
@@ -335,15 +337,13 @@ without a separate checkpoint and approval against the acceptance set.
 9. Update the frontend to show the completed AI-assisted report.
 10. Add company, education, and LinkedIn research as separate synchronous actions.
 11. Add SQLite cache, request limits, retention checks, metrics, and an operations guide.
-12. Measure realistic batches and get stakeholder acceptance before enabling the feature.
+12. Keep AI and public research operator-controlled through explicit configuration; rollout timing and stakeholder acceptance remain product decisions outside this implementation change.
 
 Disabling AI and research must preserve a tested deterministic-only report based on the new code-owned facts. It does not need to preserve removed prototype heuristics. A queue, workers, or database migration require a separate change proposal and stakeholder approval.
 
-## Open Questions
+## Operational decisions outside this change
 
-- Which GPT-5.6 Luna snapshot and reasoning level pass the four-CV eval?
-- Which per-CV and per-batch cost limits should production enforce?
-- How long should SQLite research cache entries remain valid?
-- No separate production constant is required. One runtime-configurable
-  retention value covers the complete candidate-analysis graph; development
-  defaults to 90 days and operators can change the effective value in Settings.
+- Production rollout timing and stakeholder acceptance do not block completion or archival of this code change.
+- Production must enforce its provider budget outside the post-response application measurement path.
+- Reusable public research defaults to a 30-day configurable TTL.
+- One runtime-configurable retention value covers the complete candidate-analysis graph; development defaults to 90 days and operators can change it in Settings.

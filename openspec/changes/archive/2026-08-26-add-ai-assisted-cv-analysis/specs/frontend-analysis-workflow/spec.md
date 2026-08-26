@@ -27,11 +27,19 @@ The UI SHALL group findings as `requires attention`, `worth knowing`, and `remai
 - **THEN** the UI keeps them in the collapsed `remaining signals` section
 
 ### Requirement: Complete candidate flag checklist
-The UI SHALL show a per-candidate checklist containing every detected location, LinkedIn, company, education, deterministic, and AI-assisted flag with a short reason.
+The UI SHALL show a per-candidate checklist containing every detected location, LinkedIn, company, education, deterministic, and AI-assisted flag with a short reason. It SHALL merge duplicate serialized finding and observation representations into one recruiter-facing item. Repeated outside-EU facts SHALL be summarized in one item with supporting details available on disclosure, and several possible LinkedIn profiles SHALL produce one summary item plus separate profile cards.
 
 #### Scenario: Candidate has findings from several sources
 - **WHEN** document analysis, fixed rules, or research return flags
 - **THEN** the report lists all flags and identifies their source and reason
+
+#### Scenario: One deterministic signal is serialized twice
+- **WHEN** one code-owned signal is available both as a scored finding and its source observation
+- **THEN** the recruiter-facing checklist shows it once
+
+#### Scenario: Several facts point outside the EU
+- **WHEN** stated location, phone, or education facts all point outside the EU
+- **THEN** the visible checklist summarizes the shared conclusion once and keeps the distinct supporting facts available
 
 ### Requirement: Readable HTML report
 The UI SHALL render each candidate result as a readable HTML report backed by the same report data returned by the API.
@@ -39,6 +47,35 @@ The UI SHALL render each candidate result as a readable HTML report backed by th
 #### Scenario: Candidate report is ready
 - **WHEN** the recruiter opens a completed analysis
 - **THEN** the UI shows structured facts, the flag checklist, evidence, and available research results
+
+### Requirement: Structured CV overview
+The CV overview SHALL group contact, location, education, and experience facts with compact icons and accessible labels. Phone country SHALL appear as secondary information under the phone number. Education and experience SHALL show deterministic minimum-to-maximum date summaries and summed non-overlapping duration when parseable, without an AI call.
+
+#### Scenario: Structured facts are available
+- **WHEN** the report contains contact, location, education, or employment facts
+- **THEN** the overview groups them by subject and uses compact secondary text instead of a flat text wall
+
+#### Scenario: Date ranges are parseable
+- **WHEN** education or experience entries contain supported date ranges
+- **THEN** code displays their earliest-to-latest span and summed duration without changing report facts or invoking AI
+
+### Requirement: Honest disclosure controls
+Cards with hidden details SHALL allow the recruiter to open them by clicking the whole card, and MAY preview on hover when the browser supports hover and the setting is enabled. A card with no hidden content SHALL show no chevron and SHALL NOT act as expandable. LinkedIn possible profiles SHALL each be separate disclosure cards with a clearly styled external `Open profile` action.
+
+#### Scenario: Research section has no completed details
+- **WHEN** a research section contains only its title and start action
+- **THEN** it shows no expansion affordance
+
+#### Scenario: Collapsed report card contains details
+- **WHEN** a recruiter clicks anywhere on the non-interactive area of that card
+- **THEN** the card opens without requiring a precise click on its title
+
+### Requirement: Result navigation
+The completed-result view SHALL provide a left-aligned `Back` action with a back arrow that returns to the upload flow.
+
+#### Scenario: Recruiter wants another analysis
+- **WHEN** the recruiter activates `Back`
+- **THEN** the current results are cleared and the upload flow is shown
 
 ### Requirement: Synchronized original-document preview
 The UI SHALL keep each submitted file in browser memory for the lifetime of the
@@ -115,7 +152,7 @@ The report SHALL use a project house style informed by global-audience and acces
 - **THEN** it leads with a short plain-language result and a concrete reviewer check
 
 ### Requirement: Automatic research settings
-Settings SHALL provide a master automatic-public-research control and independent company, education, and LinkedIn discovery controls. Upload SHALL name enabled automatic categories. After a base report succeeds, the UI SHALL start enabled categories with bounded concurrency and independent status. Research failure MUST NOT remove the base report. LinkedIn comparison MUST NOT start until a recruiter confirms a discovered profile.
+Settings SHALL provide a master automatic-public-research control and independent company, education, and LinkedIn discovery controls. Upload SHALL name enabled automatic categories. After a base report succeeds, the UI SHALL start enabled categories with bounded concurrency and independent status. Research failure MUST NOT remove the base report. LinkedIn discovery SHALL expose possible profiles as manual-review links and MUST NOT offer profile confirmation or automated profile-to-CV comparison.
 
 #### Scenario: Automatic research is enabled
 - **WHEN** a base report completes with one or more automatic categories enabled

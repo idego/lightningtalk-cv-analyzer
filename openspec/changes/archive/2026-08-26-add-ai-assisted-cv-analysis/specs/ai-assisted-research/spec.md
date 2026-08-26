@@ -42,24 +42,30 @@ Company research SHALL check whether organizations exist, what they do, where an
 - **THEN** the result includes a visible limited-online-presence flag, the searches performed, and the limits of that conclusion
 
 ### Requirement: Requested education checks
-Education research SHALL check whether institutions, programs, degrees, and certificates exist and identify relevant dates, city, country, and accreditation when available. It SHALL highlight a location that appears inconsistent with the rest of the CV for manual review.
+Education research SHALL check whether institutions, programs, degrees, and certificates exist and identify relevant dates, city, country, and accreditation when available. It SHALL highlight for manual review when the researched institution country differs from the candidate's current code-owned stated-location country. This is an attention signal only: the difference MUST NOT be described as proof of dishonesty, fraud, nationality, residence, or work permission and MUST NOT affect score or band.
 
 #### Scenario: Institution or credential researched
 - **WHEN** research checks an institution, program, degree, or certificate
 - **THEN** the result separates supporting, conflicting, and missing evidence
 
-#### Scenario: Institution location differs from the rest of the CV
-- **WHEN** cited evidence places the institution in a country not otherwise explained by the CV
+#### Scenario: Institution country differs from current stated location
+- **WHEN** cited evidence places the institution in a country different from the candidate's current code-owned stated-location country
 - **THEN** the result shows the location difference and its evidence for recruiter review
+- **AND** states that the difference alone does not prove a false claim
 
 ### Requirement: Requested LinkedIn discovery and completeness checks
-LinkedIn discovery SHALL search by candidate name and, when useful, company or role from the CV. It MUST NOT claim identity. For possible public profiles it SHALL report match evidence, whether a photo is visible, and whether a public connection or follower count is visible. Missing photo data or a visible count below the configured threshold SHALL produce the requested profile-completeness flag.
+LinkedIn discovery SHALL search by candidate name and may use company or role from the CV only as search hints. It MUST NOT claim identity or compare a possible profile with the CV. For possible public profiles it SHALL report the public profile URL, cited source evidence, discovery confidence, whether a photo is visible, and whether a public connection or follower count is visible. Missing photo data or a visible count below the configured threshold SHALL produce the requested profile-completeness flag.
 The V1 connection-count threshold SHALL default to 500 and SHALL be configurable. It SHALL apply only to an explicitly public visible minimum count with a cited source; an unknown count SHALL NOT produce a negative count-completeness flag.
+The V1 possible-profile limit SHALL default to three and SHALL be configurable from 1 to 20. When a valid provider response contains more profiles, code SHALL sort them deterministically and retain only the configured maximum instead of rejecting the complete discovery result.
 
 #### Scenario: Potential profiles found
 - **WHEN** LinkedIn discovery finds plausible profiles
-- **THEN** the system shows them as possible matches with evidence
-- **AND** waits for recruiter confirmation before it treats profile-to-CV differences as relevant
+- **THEN** the system shows each possible profile as a separate manual-review link with cited evidence and discovery confidence
+- **AND** the system does not offer confirmation or automated profile-to-CV comparison
+
+#### Scenario: Discovery returns more profiles than the configured limit
+- **WHEN** a valid discovery response contains more possible profiles than the configured maximum
+- **THEN** code retains a deterministic subset up to that maximum and keeps the discovery result usable
 
 #### Scenario: Completeness data is visible
 - **WHEN** a possible public profile exposes photo or connection information
@@ -88,6 +94,11 @@ The system SHALL store completed category results in the existing SQLite persist
 - **WHEN** a current compatible SQLite cache entry exists for the same normalized public entity
 - **THEN** the system can reuse it and records the cache use
 
-#### Scenario: LinkedIn research performed
-- **WHEN** the system stores LinkedIn discovery or comparison
+#### Scenario: Reusable education research is applied to a candidate
+- **WHEN** public institution research is loaded from a reusable cache entry
+- **THEN** candidate-specific location comparison is calculated after the cache read and stored only on that candidate's analysis
+- **AND** the reusable entry contains no candidate location or candidate-specific consistency conclusion
+
+#### Scenario: LinkedIn discovery performed
+- **WHEN** the system stores LinkedIn discovery
 - **THEN** the result stays within the candidate analysis that requested it

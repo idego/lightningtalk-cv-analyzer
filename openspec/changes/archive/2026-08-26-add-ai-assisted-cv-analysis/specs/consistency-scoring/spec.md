@@ -66,7 +66,7 @@ The next visible assessment SHALL be designed as a calibratable 0-100 score with
 - **THEN** the proposal identifies evidence requirements and expected band outcomes without changing runtime scoring
 
 ### Requirement: Requested location signals
-The report SHALL contain code-owned phone-country facts and an explicitly person-owned stated-city-or-address result when deterministic extraction can identify them without guessing. It SHALL resolve localities through versioned offline reference data without treating absence from the bounded index as proof that a place does not exist. It SHALL show separate informational observations for an aggregate explicit phone country outside the EU and a uniquely resolved stated location outside the EU. It SHALL show a combined outside-EU observation only when both distinct code-owned categories are available and non-EU, and SHALL show mixed EU/non-EU evidence separately. Without approved anonymous calibration, V1 MUST NOT classify a locality as small or atypical; for a resolved non-EU locality it SHALL instead return an informational `small_locality_not_evaluated` checklist observation that makes no positive or negative claim. Postal compatibility SHALL remain an unweighted observation until separate calibration and explicit project-owner approval authorize a change.
+The report SHALL contain code-owned phone-country facts and an explicitly person-owned stated-city-or-address result when deterministic extraction can identify them without guessing. It SHALL resolve localities through versioned offline reference data without treating absence from the bounded index as proof that a place does not exist. It SHALL show separate informational observations for an aggregate explicit phone country outside the EU and a uniquely resolved stated location outside the EU. It SHALL show a combined outside-EU observation only when both distinct code-owned categories are available and non-EU, and SHALL show mixed EU/non-EU evidence separately. The project-owner-approved V1 locality-size rule SHALL classify a uniquely resolved non-EU locality as small only when the reference population is below the configurable threshold, which defaults to 10,000. This observation SHALL remain informational and MUST NOT affect score or band. When reference population is unavailable, the report SHALL instead return an informational `small_locality_not_evaluated` checklist observation that makes no positive or negative claim. V1 MUST NOT classify a locality as atypical. Postal compatibility SHALL remain an unweighted observation until separate calibration and explicit project-owner approval authorize a change.
 
 #### Scenario: Explicit phone prefix points outside the EU
 - **WHEN** every deterministically person-owned, valid, country-resolved international phone fact maps to the same non-EU country
@@ -83,7 +83,15 @@ The report SHALL contain code-owned phone-country facts and an explicitly person
 #### Scenario: Stated locality can be resolved
 - **WHEN** deterministic code resolves the stated city or address to one country
 - **THEN** the report shows the resolved location, reference-data version, and whether the stated-location outside-EU observation applies
-- **AND** for a non-EU locality reports locality-size classification as `not_evaluated` because V1 has no calibrated rule
+- **AND** for a non-EU locality with a known population below 10,000 reports the zero-weight `small_locality_outside_eu` observation
+
+#### Scenario: Locality is at the configured boundary
+- **WHEN** a resolved non-EU locality has a population equal to the configured 10,000 threshold
+- **THEN** the report does not classify it as small
+
+#### Scenario: Locality population is unavailable
+- **WHEN** a resolved non-EU locality has no population in the bounded reference data
+- **THEN** the report shows `small_locality_not_evaluated` without guessing its size
 
 #### Scenario: Stated locality cannot be resolved
 - **WHEN** deterministic code cannot find the stated locality in the bounded offline index or cannot map it to one country
