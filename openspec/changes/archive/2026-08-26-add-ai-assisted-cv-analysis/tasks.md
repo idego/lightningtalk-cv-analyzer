@@ -82,19 +82,19 @@
 - [x] 6.1 Let the recruiter start education and certification research for a stored analysis
 - [x] 6.2 Add an idempotent education-research endpoint with a bounded timeout
 - [x] 6.3 Define the Web Search prompt and schema for institutions, programs, degrees, certificates, dates, accreditation, city, and country
-- [x] 6.4 Store cited results in SQLite and highlight unexplained location differences for review
+- [x] 6.4 Store cited results in SQLite and highlight institution-country differences from the current code-owned stated location for review without affecting score or band
 - [x] 6.5 Show education research separately from company and LinkedIn results
 - [x] 6.6 Test evidence, uncertainty, timeout, retry, duplicate requests, and cost limits
 
-## 7. Slice 6 - Synchronous LinkedIn Discovery and Comparison
+## 7. Slice 6 - Synchronous LinkedIn Discovery and Manual Review
 
 - [x] 7.1 Let the recruiter start candidate-scoped LinkedIn discovery for a stored analysis
 - [x] 7.2 Add an idempotent LinkedIn-discovery endpoint with a bounded timeout
-- [x] 7.3 Return possible profiles with match evidence and confidence without claiming identity
+- [x] 7.3 Return possible profiles with cited public-result evidence and discovery confidence without claiming identity or comparing them with the CV
 - [x] 7.4 Report visible photo and connection-count availability and apply the agreed completeness threshold without analyzing appearance
 - [x] 7.5 Show a `linkedin_not_found` flag with the searches performed and their limitations
-- [x] 7.6 Require recruiter confirmation before profile-to-CV comparison
-- [x] 7.7 Compare a confirmed profile's companies, roles, dates, location, and education with the CV
+- [x] 7.6 Expose every possible profile as a separate manual-review link without a confirmation endpoint
+- [x] 7.7 Prohibit automated profile-to-CV comparison in discovery and omit the comparison flow from the API and UI
 - [x] 7.8 Test wrong-person matches, ambiguity, no profile, evidence, timeout, retry, and candidate isolation
 
 ## 8. Slice 7 - V1 Hardening in the Existing Architecture
@@ -108,8 +108,6 @@
 - [x] 8.5 Verify original-file deletion, national-ID redaction, development retention, and the approved production retention
   - Uploads remain request-scoped and are never persisted as original files; national-ID API, database, audit, batch and log privacy tests pass. One runtime-configurable value covers the complete candidate-analysis graph, defaults to 90 days in development, persists when changed in Settings, and replaces the rejected idea of a separate hard-coded production value. Reusable public-entity cache entries keep their independent non-candidate TTL.
 - [x] 8.6 Add request metrics, structured logs, research error reporting, cache metrics, and an operations guide
-- [ ] 8.7 Run the wider permitted corpus regression and agree on acceptance criteria with HR
-- [ ] 8.8 Get stakeholder acceptance, enable the feature, and keep a tested deterministic-only rollback based on the new code-owned facts
 - [x] 8.9 Create a separate architecture proposal only if measured volume or failures require background processing
   - The measured local single and batch flows completed without failures and do not justify a queue, workers, leases, polling, or a new database. No separate architecture proposal is created for V1.
 - [x] 8.10 Require the approved GeoNames pair in the standard development stack, fail startup instead of silently degrading, and expose non-sensitive capability readiness through health
@@ -121,7 +119,7 @@
 ## 9. HR Acceptance Follow-ups
 
 - [x] 9.1 Prevent digits inside extracted email spans from becoming phone candidates, facts, observations, or scoring signals; cover the public deterministic pipeline and API seam with anonymous tests
-  - Candidate extraction excludes every phone-shaped span that overlaps a syntactically extracted email. Deterministic tests pass; the HTTP assertion is added but currently blocked because both new and unchanged FastAPI `TestClient` tests hang under the required shared interpreter.
+  - Candidate extraction excludes every phone-shaped span that overlaps a syntactically extracted email. Deterministic and HTTP assertions remain in the regression suite; Docker-hosted FastAPI `TestClient` execution is working.
 - [x] 9.2 Tighten the `document_artifact` policy so understandable extraction defects are suppressed and only meaning-blocking defects remain; cover the validated AI contract with anonymous tests
   - Prompt policy requires an important blocked fact or changed meaning. Code suppresses findings unless exact source evidence contains a language-neutral strong corruption marker; ordinary joined words, spacing, wrapping, or repeated structure remain limitations.
 - [x] 9.3 Add safe failure stages and configurable bounded retries with defaults of one transport retry, one invalid-response retry, and three total attempts; preserve 120 seconds, 4,096 output tokens, deterministic fallback, per-file isolation, and log/persistence privacy
@@ -131,10 +129,13 @@
 - [x] 9.5 Add code-owned plain-language templates for known findings with `What we found`, `Why it matters`, and `What to check`, and hide technical labels as primary UI explanations
   - The presentation layer keeps source facts/evidence unchanged, maps known deterministic categories to English B2 copy, uses selected-language AI prose as the fallback, simplifies English timeline-overlap notes, and removes category, rule, authority, confidence, extractor, reference-data, and raw contact-kind labels from the main view.
 - [x] 9.6 Add Analysis settings with a master automatic-public-research toggle plus independent company, education, and LinkedIn discovery toggles; show active categories at upload and run post-analysis research with bounded concurrency and independent status
-- [x] 9.7 Preserve recruiter confirmation as a mandatory gate before any LinkedIn comparison, including automatic discovery flows
+- [x] 9.7 Keep LinkedIn discovery manual-review only in both explicit and automatic flows, with no confirmation or profile-to-CV comparison action
 - [x] 9.8 Document and regression-test the neutral candidate-name boundary: name is a fact only and never a proxy, suspicious finding, score, or band input
   - The name-only mutation regression keeps the complete deterministic payload, findings, checklist counts, score, band, and research-category eligibility unchanged; only the neutral name fact and candidate-scoped LinkedIn query subject differ.
 - [x] 9.9 Prepare a concrete calibration proposal for a 0-100 score and green/amber/red/gray bands from the acceptance set; keep failed/incomplete/insufficient gray and do not change `weights.yaml`, thresholds, or runtime band logic without a separate checkpoint
   - `docs/scoring-calibration-proposal.md` defines candidate code-owned categories, independence/deduplication, coverage, weights, bands, anonymous scenarios, the 16-CV calibration method, rejection gates, and the remaining owner decisions without changing runtime scoring.
-- [x] 9.10 Run one focused P0/P1/P2 review after each logical implementation stage and keep 8.7/8.8 open until the fresh manual-decision export and stakeholder acceptance exist
-  - Final focused review and independent verify-fix closed one P1, four P2 findings, and the retention-versus-in-flight-retry race follow-up. Tasks 8.7/8.8 remain open for the fresh manual-decision export and stakeholder acceptance.
+- [x] 9.10 Run one focused P0/P1/P2 review after each logical implementation stage
+  - Focused reviews and independent verification closed the implementation findings; rollout and stakeholder decisions are intentionally outside this change.
+- [x] 9.11 Deduplicate recruiter-facing flags, aggregate repeated outside-EU conclusions, and keep distinct supporting details available
+- [x] 9.12 Add the structured CV overview, deterministic education and experience date summaries, whole-card disclosure interaction, honest empty-section affordances, separate LinkedIn profile cards, and left-aligned Back navigation
+- [x] 9.13 Apply the project-owner-approved small-locality threshold below 10,000 and preserve the intended education-country difference as a zero-weight manual-review signal

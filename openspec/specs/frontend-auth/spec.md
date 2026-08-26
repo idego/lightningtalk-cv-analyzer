@@ -1,7 +1,8 @@
 # frontend-auth Specification
 
 ## Purpose
-TBD - created by archiving change google-auth-sqlite. Update Purpose after archive.
+Defines Google SSO, allowed-domain enforcement, protected application routes,
+and SQLite-backed session persistence.
 ## Requirements
 ### Requirement: Google SSO integration for web app
 The frontend SHALL support Google sign-in via Better Auth and maintain authenticated sessions for protected routes.
@@ -47,4 +48,3 @@ Authentication data SHALL persist in SQLite storage suitable for local and conta
 #### Scenario: SQLite file used by auth layer
 - **WHEN** the web app is running
 - **THEN** Better Auth reads/writes session/account records from the configured SQLite file
-

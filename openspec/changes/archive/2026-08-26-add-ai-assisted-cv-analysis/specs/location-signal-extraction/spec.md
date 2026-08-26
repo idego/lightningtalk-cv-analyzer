@@ -38,7 +38,11 @@ The system SHALL resolve explicit location strings through a `LocationResolver` 
 
 #### Scenario: Unambiguous place
 - **WHEN** a location string maps to one locality and country in the configured reference data
-- **THEN** the system records the resolved location, code authority, source evidence, extractor version, and reference-data version
+- **THEN** the system records the resolved location, available reference population, code authority, source evidence, extractor version, and reference-data version
+
+#### Scenario: Country disambiguates a repeated locality name
+- **WHEN** the same locality name exists in several countries and an explicit country resolves it to one record
+- **THEN** the system preserves that record's population with the resolved claimed-location fact
 
 #### Scenario: Ambiguous place name
 - **WHEN** a location string maps to several plausible country interpretations

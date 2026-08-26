@@ -85,7 +85,7 @@ facts or scoring.
 - **THEN** controls remain English and newly generated AI explanations use Polish
 
 ### Requirement: Complete owner-scoped retention and reopen state
-Every retention purge path SHALL identify the concrete expired analysis IDs and delete the complete SQLite candidate-analysis graph together with process-local retry context, lock, and in-flight registry state. Persist-triggered and retention-setting-triggered purge SHALL use the same cleanup contract. Reading an owned stored analysis SHALL hydrate completed company, education, LinkedIn discovery, and LinkedIn comparison results from their separate tables without returning access-token hashes, capability tokens, secrets, or another owner's data.
+Every retention purge path SHALL identify the concrete expired analysis IDs and delete the complete SQLite candidate-analysis graph together with process-local retry context, lock, and in-flight registry state. Persist-triggered and retention-setting-triggered purge SHALL use the same cleanup contract. Reading an owned stored analysis SHALL hydrate completed company, education, and LinkedIn discovery results from their separate tables without returning access-token hashes, capability tokens, secrets, or another owner's data. Legacy LinkedIn confirmation and comparison rows MAY remain stored for backward-compatible cleanup but MUST NOT be exposed through the current API.
 
 #### Scenario: Persist triggers retention cleanup
 - **WHEN** persisting a new analysis purges an expired analysis

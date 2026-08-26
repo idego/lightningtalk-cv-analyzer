@@ -1,7 +1,8 @@
 # compose-orchestration Specification
 
 ## Purpose
-TBD - created by archiving change compose-web-api. Update Purpose after archive.
+Defines the containerized web/API runtime, internal service networking,
+persistent storage, test profile, and deployment configuration.
 ## Requirements
 ### Requirement: Two-service compose runtime
 The root compose configuration SHALL run `web` and `api` services together, with `web` as the only host-published service.
@@ -37,4 +38,3 @@ Project docs SHALL describe env setup and reverse-proxy deployment pattern for a
 #### Scenario: Deployment notes available
 - **WHEN** README and root `.env.example` are reviewed
 - **THEN** they describe compose startup, required env vars, and TLS termination at external reverse proxy (not Vercel)
-
