@@ -31,6 +31,7 @@ class LocationMatch:
     country_name: str
     region_code: str | None = None
     region_name: str | None = None
+    population: int | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -42,6 +43,8 @@ class LocationMatch:
         ):
             if not getattr(self, field_name).strip():
                 raise ValueError(f"{field_name} must not be empty")
+        if self.population is not None and self.population < 0:
+            raise ValueError("population must not be negative")
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,7 @@ class ScopeResolution:
     country_code: str
     supporting_record_ids: tuple[str, ...]
     region_code: str | None = None
+    population: int | None = None
 
     def __post_init__(self) -> None:
         if not self.canonical_name.strip():
@@ -65,6 +69,8 @@ class ScopeResolution:
             raise ValueError("country resolution cannot have a region_code")
         if self.level is ResolutionLevel.REGION and not self.region_code:
             raise ValueError("region resolution requires region_code")
+        if self.population is not None and self.population < 0:
+            raise ValueError("population must not be negative")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -300,6 +306,7 @@ def _resolution_from_matches(
             canonical_name=match.canonical_name,
             country_code=match.country_code,
             region_code=match.region_code,
+            population=match.population,
             supporting_record_ids=(match.record_id,),
         )
         return Resolved(

@@ -1,4 +1,5 @@
 import json
+import os
 import io
 from pathlib import Path
 
@@ -147,13 +148,18 @@ def test_api_and_audit_expose_version_but_not_host_paths(monkeypatch, tmp_path) 
 
 
 def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
-    root = Path(__file__).resolve().parents[3]
+    root = (
+        Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
+        if "CV_VALIDATOR_REPO_ROOT" in os.environ
+        else Path(__file__).resolve().parents[3]
+    )
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     dockerfile = (root / "apps/api/Dockerfile").read_text(encoding="utf-8")
     dockerignore = (root / "apps/api/.dockerignore").read_text(encoding="utf-8")
     gitignore = (root / ".gitignore").read_text(encoding="utf-8")
 
     assert "CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: \"true\"" in compose
+    assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}" in compose
     assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3" in compose
     assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json" in compose
     assert "create_host_path: false" in compose
@@ -163,7 +169,11 @@ def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
 
 
 def test_optional_compose_overlay_requires_read_only_operator_directory() -> None:
-    root = Path(__file__).resolve().parents[3]
+    root = (
+        Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
+        if "CV_VALIDATOR_REPO_ROOT" in os.environ
+        else Path(__file__).resolve().parents[3]
+    )
     overlay = (root / "docker-compose.reference-data.yml").read_text(
         encoding="utf-8"
     )

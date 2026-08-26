@@ -19,6 +19,7 @@ def analyze_deterministically(
     ruleset_version: str,
     *,
     location_resolver: LocationResolver | None = None,
+    small_locality_population_max: int = 10_000,
 ) -> DeterministicAnalysisResult:
     candidates = extract_candidates(document)
     phone_facts, phone_observations, phone_signals = classify_and_aggregate_phones(
@@ -67,6 +68,7 @@ def analyze_deterministically(
         facts,
         scoring_signals,
         ruleset_version=ruleset_version,
+        small_locality_population_max=small_locality_population_max,
     )
     return DeterministicAnalysisResult(
         ruleset_version=ruleset_version,

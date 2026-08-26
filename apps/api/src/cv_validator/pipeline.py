@@ -13,6 +13,7 @@ from cv_validator.config import (
     IngestionConfig,
     WeightsConfig,
     load_ingestion_config,
+    load_small_locality_population_max,
     load_weights,
 )
 from cv_validator.domain import DeterministicAnalysisResult, Report
@@ -168,6 +169,7 @@ def _analyze_raw(
         redacted,
         weights.version,
         location_resolver=location_resolver,
+        small_locality_population_max=load_small_locality_population_max(),
     )
     report = score_deterministic(deterministic, weights)
     selected_ai_settings = ai_settings or AISettings()

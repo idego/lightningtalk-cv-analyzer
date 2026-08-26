@@ -472,6 +472,7 @@ def _resolve_locality_country(
                 country_code=match.country_code,
                 region_code=match.region_code,
                 supporting_record_ids=(match.record_id,),
+                population=match.population,
             ),
             locality.reference_data_version,
         )
@@ -560,6 +561,7 @@ def _claimed_location_fact(
         resolved_level=attempt.scope.level.value,
         resolved_name=attempt.scope.canonical_name,
         resolved_record_ids=attempt.scope.supporting_record_ids,
+        resolved_population=attempt.scope.population,
     )
 
 

@@ -34,8 +34,9 @@ services:
       CV_VALIDATOR_DB_PATH: /app/data/cv_validator.db
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS: ${CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS:-5}
+      CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION: ${CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION:-10000}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
-      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
+      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
       CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}
@@ -66,6 +67,14 @@ services:
     environment:
       CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS: ${CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS:-5}
       CV_VALIDATOR_WEIGHTS_PATH: /app/weights.yaml
+      CV_VALIDATOR_REPO_ROOT: /workspace
+    volumes:
+      - ./scripts:/workspace/scripts:ro
+      - ./docker-compose.yml:/workspace/docker-compose.yml:ro
+      - ./docker-compose.reference-data.yml:/workspace/docker-compose.reference-data.yml:ro
+      - ./.gitignore:/workspace/.gitignore:ro
+      - ./apps/api/Dockerfile:/workspace/apps/api/Dockerfile:ro
+      - ./apps/api/.dockerignore:/workspace/apps/api/.dockerignore:ro
     command: ["pytest", "-q"]
     profiles:
       - test

@@ -11,10 +11,11 @@ public profile to infer:
 - citizenship, work permission, identity, honesty, fraud, or recruitment risk;
 - a suspicious finding, review priority, score, band, rejection, or advancement.
 
-LinkedIn discovery returns possible profiles only. A recruiter must confirm a
-specific profile before comparison. A missing or ambiguous result is uncertainty,
-not negative evidence. LinkedIn discovery and comparison remain outside the
-deterministic verdict.
+LinkedIn discovery returns possible public profile links only. The application
+does not confirm identity or compare a profile with the CV; the recruiter opens
+and reviews each result manually. A missing or ambiguous result is uncertainty,
+not negative evidence. LinkedIn discovery remains outside the deterministic
+verdict.
 
 The regression test
 `test_candidate_name_is_neutral_except_for_literal_linkedin_discovery_query`
@@ -22,4 +23,3 @@ changes only the name in two otherwise identical anonymous CVs. It requires the
 complete deterministic payload, findings, checklist counts, score, band, and
 research-category eligibility to remain unchanged. Only the accepted
 `candidate_name` fact and its LinkedIn `query_subject` may change.
-

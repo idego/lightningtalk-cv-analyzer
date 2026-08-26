@@ -72,7 +72,10 @@ def classify_eu_observations(
     scoring_signals: tuple[ScoringSignal, ...],
     *,
     ruleset_version: str,
+    small_locality_population_max: int = 10_000,
 ) -> tuple[Observation, ...]:
+    if small_locality_population_max < 0:
+        raise ValueError("small_locality_population_max must not be negative")
     claim = _unique_claim(candidates, facts)
     phone = _unique_phone_aggregate(
         candidates,
@@ -92,7 +95,29 @@ def classify_eu_observations(
                 reason=f"The unique code-owned stated-location country is outside the EU-27 set. {_CAVEAT}",
             )
         )
-        if claim.resolved_level == "locality":
+        if (
+            claim.resolved_level == "locality"
+            and claim.resolved_population is not None
+            and small_locality_population_max > 0
+            and claim.resolved_population < small_locality_population_max
+        ):
+            observations.append(
+                _observation(
+                    kind=ObservationKind.SMALL_LOCALITY_OUTSIDE_EU,
+                    subject_ids=(str(claim.id),),
+                    values=(
+                        claim.resolved_name or claim.value,
+                        f"population:{claim.resolved_population}",
+                    ),
+                    evidence=claim.provenance.evidence,
+                    reason=(
+                        f"The resolved locality population ({claim.resolved_population}) "
+                        "is below the configured review threshold "
+                        f"({small_locality_population_max}). {_CAVEAT}"
+                    ),
+                )
+            )
+        elif claim.resolved_level == "locality" and claim.resolved_population is None:
             observations.append(
                 _observation(
                     kind=ObservationKind.SMALL_LOCALITY_NOT_EVALUATED,

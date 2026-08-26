@@ -7,7 +7,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import openai
 
-from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout, LinkedInComparisonRequest, LinkedInDiscoveryRequest, LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
+from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout, LinkedInDiscoveryRequest, LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
+from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LIMIT
 
 
 class OpenAIResponsesCompanyResearcher:
@@ -101,15 +102,24 @@ class OpenAIResponsesLinkedInResearcher:
         api_key: str | None = None,
         timeout_seconds: float = 120.0,
         connection_threshold: int = 500,
+        max_profiles: int = DEFAULT_MAX_PROFILES,
     ):
+        if not 1 <= max_profiles <= MAX_PROFILES_LIMIT:
+            raise ValueError("linkedin_max_profiles_out_of_range")
         self._client = client or openai.OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=0)
         self._connection_threshold = connection_threshold
+        self._max_profiles = max_profiles
 
     def discover(self, request: LinkedInDiscoveryRequest):
-        return self._call("linkedin-discovery.schema.json", "linkedin_discovery", {"candidate_facts": request.candidate})
-
-    def compare(self, request: LinkedInComparisonRequest):
-        return self._call("linkedin-comparison.schema.json", "linkedin_comparison", {"candidate_facts": request.candidate, "confirmed_profile_url": request.profile_url})
+        return self._call(
+            "linkedin-discovery.schema.json",
+            "linkedin_discovery",
+            {
+                "candidate_name": request.candidate["name"],
+                "search_hints": request.candidate.get("search_hints", []),
+                "max_profiles": self._max_profiles,
+            },
+        )
 
     def _call(self, schema_file: str, schema_name: str, input_payload: dict[str, Any]):
         prompt = files("cv_validator.research.contracts").joinpath("linkedin-prompt.md").read_text()
@@ -140,8 +150,6 @@ class OpenAIResponsesLinkedInResearcher:
             _retain_sourced_linkedin_profiles(
                 payload, sources, connection_threshold=self._connection_threshold
             )
-        elif _uncited_urls(_nested_source_urls(payload), sources):
-            raise LinkedInResearchInvalidResponse("uncited_comparison_source")
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
 
@@ -175,33 +183,6 @@ def _search_queries(response: Any) -> list[str]:
         if action_queries:
             searches.append(" | ".join(action_queries))
     return searches
-
-
-def _nested_source_urls(value: Any) -> set[str]:
-    urls: set[str] = set()
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key in {"source_urls"} and isinstance(item, list):
-                urls.update(url for url in item if isinstance(url, str))
-            elif key in {"source_url", "photo_source_url", "profile_url"} and isinstance(item, str):
-                urls.add(item)
-            else: urls.update(_nested_source_urls(item))
-    elif isinstance(value, list):
-        for item in value: urls.update(_nested_source_urls(item))
-    return urls
-
-
-def _uncited_urls(
-    cited: set[str], sources: set[str], *, allow_same_origin: bool = False
-) -> set[str]:
-    canonical_sources = {_canonical_source_url(url) for url in sources}
-    source_origins = {_source_origin(url) for url in sources}
-    return {
-        url
-        for url in cited
-        if _canonical_source_url(url) not in canonical_sources
-        and (not allow_same_origin or _source_origin(url) not in source_origins)
-    }
 
 
 def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> None:
@@ -349,31 +330,12 @@ def _retain_sourced_linkedin_profiles(
             normalized = True
             continue
 
-        profile["source_urls"] = [
+        profile["source_urls"] = list(dict.fromkeys([
+            profile["profile_url"],
+            *[
             url for url in profile.get("source_urls", []) if sourced(url)
-        ]
-        retained_evidence: list[dict[str, Any]] = []
-        for evidence in profile.get("match_evidence", []):
-            evidence["source_urls"] = [
-                url for url in evidence.get("source_urls", []) if sourced(url)
-            ]
-            if evidence["source_urls"]:
-                retained_evidence.append(evidence)
-            else:
-                normalized = True
-        profile["match_evidence"] = retained_evidence
-
-        retained_conflicts: list[dict[str, Any]] = []
-        for conflict in profile.get("conflicts", []):
-            conflict["source_urls"] = [
-                url for url in conflict.get("source_urls", []) if sourced(url)
-            ]
-            if conflict["source_urls"]:
-                retained_conflicts.append(conflict)
-            else:
-                normalized = True
-        profile["conflicts"] = retained_conflicts
-
+            ],
+        ]))
         if not sourced(profile.get("photo_source_url")):
             profile["photo_visible"] = "unknown"
             profile["photo_source_url"] = None
@@ -403,13 +365,15 @@ def _retain_sourced_linkedin_profiles(
                 count["minimum"] < connection_threshold
             )
 
-        if profile["source_urls"] and profile["match_evidence"]:
+        if profile["source_urls"]:
             retained_profiles.append(profile)
         else:
             normalized = True
 
     payload["possible_profiles"] = retained_profiles
     payload["linkedin_not_found"] = not retained_profiles
+    if retained_profiles and payload.get("outcome") == "insufficient_evidence":
+        payload["outcome"] = "ambiguous"
     if not retained_profiles:
         payload["outcome"] = "insufficient_evidence"
         payload["not_found_caveat"] = (

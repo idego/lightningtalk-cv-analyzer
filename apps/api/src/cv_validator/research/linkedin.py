@@ -12,46 +12,45 @@ from urllib.parse import urlsplit, urlunsplit
 from jsonschema import Draft202012Validator, FormatChecker
 
 from cv_validator.research.domain import (
-    LinkedInComparisonRequest,
     LinkedInDiscoveryRequest,
     LinkedInResearchInvalidResponse,
 )
 
-DISCOVERY_VERSION = "linkedin-discovery-v1"
-COMPARISON_VERSION = "linkedin-comparison-v1"
-PROMPT_VERSION = "linkedin-research-prompt-v1"
-DISCOVERY_SCHEMA_VERSION = "linkedin-discovery-schema-v1"
-COMPARISON_SCHEMA_VERSION = "linkedin-comparison-schema-v1"
+DISCOVERY_VERSION = "linkedin-discovery-v2"
+COMPARISON_VERSION = "linkedin-comparison-v2"
+PROMPT_VERSION = "linkedin-research-prompt-v3"
+DISCOVERY_SCHEMA_VERSION = "linkedin-discovery-schema-v3"
 MAX_SEARCHES = 4
 DEFAULT_CONNECTION_THRESHOLD = 500
+DEFAULT_MAX_PROFILES = 3
+MAX_PROFILES_LIMIT = 20
 
 
 class LinkedInResearcher(Protocol):
     def discover(self, request: LinkedInDiscoveryRequest) -> tuple[dict[str, Any], str, dict[str, Any]]: ...
-    def compare(self, request: LinkedInComparisonRequest) -> tuple[dict[str, Any], str, dict[str, Any]]: ...
 
 
 @dataclass(frozen=True)
 class LinkedInDiscoveryService:
     researcher: LinkedInResearcher
     connection_threshold: int = DEFAULT_CONNECTION_THRESHOLD
+    max_profiles: int = DEFAULT_MAX_PROFILES
 
     def run(self, stored_report: dict[str, Any]) -> dict[str, Any]:
         request = build_discovery_request(stored_report)
         payload, response_model, usage = self.researcher.discover(request)
-        validate_discovery(payload, request=request, connection_threshold=self.connection_threshold)
+        if isinstance(payload, dict) and isinstance(payload.get("possible_profiles"), list):
+            payload["possible_profiles"] = sorted(
+                payload["possible_profiles"],
+                key=lambda profile: str(profile.get("profile_url", "")) if isinstance(profile, dict) else "",
+            )[: self.max_profiles]
+        validate_discovery(
+            payload,
+            request=request,
+            connection_threshold=self.connection_threshold,
+            max_profiles=self.max_profiles,
+        )
         return _completed(payload, DISCOVERY_VERSION, DISCOVERY_SCHEMA_VERSION, response_model, usage)
-
-
-@dataclass(frozen=True)
-class LinkedInComparisonService:
-    researcher: LinkedInResearcher
-
-    def run(self, stored_report: dict[str, Any], profile_url: str) -> dict[str, Any]:
-        request = build_comparison_request(stored_report, profile_url)
-        payload, response_model, usage = self.researcher.compare(request)
-        validate_comparison(payload, request=request)
-        return _completed(payload, COMPARISON_VERSION, COMPARISON_SCHEMA_VERSION, response_model, usage)
 
 
 def build_discovery_request(stored_report: dict[str, Any]) -> LinkedInDiscoveryRequest:
@@ -62,40 +61,30 @@ def build_discovery_request(stored_report: dict[str, Any]) -> LinkedInDiscoveryR
     if len({name.casefold() for name in names}) != 1:
         raise ValueError("no_unambiguous_linkedin_candidate")
     candidate: dict[str, Any] = {"name": names[0]}
-    employment = []
+    search_hints = []
     for item in (ai.get("facts") or {}).get("employment", [])[:4]:
         if not isinstance(item, dict): continue
-        fact = {key: item[key].strip() for key in ("organization", "role", "location")
+        hint = {key: item[key].strip() for key in ("organization", "role")
                 if isinstance(item.get(key), str) and _safe_text(item[key], 200)}
-        if isinstance(item.get("employment_dates"), str) and _safe_date_text(item["employment_dates"]): fact["employment_dates"] = item["employment_dates"].strip()
-        if fact: employment.append(fact)
-    education = []
-    for item in (ai.get("facts") or {}).get("education", [])[:3]:
-        if not isinstance(item, dict): continue
-        fact = {target: item[source].strip() for source, target in (("institution", "institution"), ("program", "program"))
-                if isinstance(item.get(source), str) and _safe_text(item[source], 200)}
-        if isinstance(item.get("study_dates"), str) and _safe_date_text(item["study_dates"]): fact["dates"] = item["study_dates"].strip()
-        if fact: education.append(fact)
-    locations = [x.get("value") for x in (ai.get("facts") or {}).get("contact", [])
-                 if isinstance(x, dict) and x.get("kind") == "stated_location" and isinstance(x.get("value"), str) and _safe_text(x["value"], 160)]
-    if employment: candidate["employment"] = employment
-    if education: candidate["education"] = education
-    if locations: candidate["stated_location"] = locations[0].strip()
+        if hint: search_hints.append(hint)
+    if search_hints:
+        candidate["search_hints"] = search_hints
     return LinkedInDiscoveryRequest(candidate)
 
 
-def build_comparison_request(stored_report: dict[str, Any], profile_url: str) -> LinkedInComparisonRequest:
-    normalized = normalize_linkedin_url(profile_url)
-    discovery = stored_report.get("linkedin_discovery") or {}
-    urls = {normalize_linkedin_url(p["profile_url"]) for p in discovery.get("possible_profiles", []) if isinstance(p, dict)}
-    if normalized not in urls:
-        raise ValueError("profile_not_in_discovery")
-    return LinkedInComparisonRequest(build_discovery_request(stored_report).candidate, normalized)
-
-
-def validate_discovery(payload: Any, *, request: LinkedInDiscoveryRequest, connection_threshold: int) -> None:
+def validate_discovery(
+    payload: Any,
+    *,
+    request: LinkedInDiscoveryRequest,
+    connection_threshold: int,
+    max_profiles: int = DEFAULT_MAX_PROFILES,
+) -> None:
     _validate_schema(payload, "linkedin-discovery.schema.json")
     profiles = payload["possible_profiles"]
+    if not 1 <= max_profiles <= MAX_PROFILES_LIMIT:
+        raise ValueError("linkedin_max_profiles_out_of_range")
+    if len(profiles) > max_profiles:
+        raise LinkedInResearchInvalidResponse("profile_limit_exceeded")
     urls = [normalize_linkedin_url(p["profile_url"]) for p in profiles]
     if len(urls) != len(set(urls)): raise LinkedInResearchInvalidResponse("duplicate_profile")
     if payload["linkedin_not_found"] != (not profiles): raise LinkedInResearchInvalidResponse("not_found_mismatch")
@@ -104,7 +93,12 @@ def validate_discovery(payload: Any, *, request: LinkedInDiscoveryRequest, conne
         raise LinkedInResearchInvalidResponse("unsafe_not_found_caveat")
     _reject_protected_claims([payload["not_found_caveat"], *payload["search_limitations"]])
     for profile in profiles:
-        if not profile["match_evidence"] or not profile["source_urls"] or not profile["uncertainty"]:
+        if profile.get("match_evidence") or profile.get("conflicts"):
+            raise LinkedInResearchInvalidResponse("comparison_not_allowed")
+        if (
+            not profile["source_urls"]
+            or not profile["uncertainty"]
+        ):
             raise LinkedInResearchInvalidResponse("missing_profile_evidence")
         if profile["photo_visible"] == "unknown" and profile["photo_source_url"] is not None: raise LinkedInResearchInvalidResponse("photo_source_mismatch")
         if profile["photo_visible"] != "unknown" and profile["photo_source_url"] is None: raise LinkedInResearchInvalidResponse("photo_source_mismatch")
@@ -116,19 +110,7 @@ def validate_discovery(payload: Any, *, request: LinkedInDiscoveryRequest, conne
         if count["maximum"] is not None and (count["minimum"] is None or count["maximum"] < count["minimum"]): raise LinkedInResearchInvalidResponse("connection_count_range")
         expected = count["visibility"] == "visible" and count["minimum"] is not None and count["minimum"] < connection_threshold
         if profile["connection_completeness_flag"] != expected: raise LinkedInResearchInvalidResponse("connection_flag_mismatch")
-        _reject_protected_claims([profile["uncertainty"], *(x["summary"] for x in profile["conflicts"])])
-
-
-def validate_comparison(payload: Any, *, request: LinkedInComparisonRequest) -> None:
-    _validate_schema(payload, "linkedin-comparison.schema.json")
-    if normalize_linkedin_url(payload["profile_url"]) != request.profile_url: raise LinkedInResearchInvalidResponse()
-    if {item["field"] for item in payload["comparisons"]} != {"companies", "roles", "dates", "stated_location", "education"} or len(payload["comparisons"]) != 5:
-        raise LinkedInResearchInvalidResponse()
-    for comparison in payload["comparisons"]:
-        if not comparison["source_urls"] or not comparison["uncertainty"]:
-            raise LinkedInResearchInvalidResponse()
-        _reject_protected_claims([comparison["summary"], comparison["uncertainty"]])
-    _reject_protected_claims(payload["limitations"])
+        _reject_protected_claims([profile["uncertainty"]])
 
 
 def normalize_linkedin_url(value: str) -> str:
@@ -156,11 +138,6 @@ def _completed(payload: dict[str, Any], version: str, schema: str, response_mode
 def _safe_text(value: str, limit: int) -> bool:
     stripped = value.strip()
     return bool(stripped) and len(stripped) <= limit and not any(ord(c) < 32 for c in stripped) and "@" not in stripped and not re.search(r"(?:https?://|www\.)|\+?\d[\d\s().-]{6,}\d", stripped, re.I)
-
-
-def _safe_date_text(value: str) -> bool:
-    stripped = value.strip()
-    return bool(stripped) and len(stripped) <= 100 and not any(ord(c) < 32 for c in stripped) and "@" not in stripped and not re.search(r"(?:https?://|www\.)", stripped, re.I)
 
 
 def _reject_protected_claims(values: list[str]) -> None:

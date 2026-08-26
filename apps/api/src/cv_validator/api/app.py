@@ -11,6 +11,7 @@ from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
@@ -32,14 +33,19 @@ from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.research.company import CompanyResearchService, build_company_research_request
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesCompanyResearcher
-from cv_validator.research.education import EducationResearchService, build_education_research_request
+from cv_validator.research.education import (
+    EducationResearchService,
+    apply_owner_scoped_education_context,
+    build_education_research_request,
+    normalize_public_education_result,
+)
 from cv_validator.research.cache import (
     company_cache_descriptor, education_cache_descriptor, materialize_cache_hit,
     reusable_payload,
 )
 from cv_validator.research.domain import EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesEducationResearcher
-from cv_validator.research.linkedin import LinkedInComparisonService, LinkedInDiscoveryService, normalize_linkedin_url
+from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LIMIT, LinkedInDiscoveryService
 from cv_validator.research.domain import LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearcher
 from cv_validator.operations import OperationsTelemetry, safe_log
@@ -47,10 +53,6 @@ from cv_validator.operations import OperationsTelemetry, safe_log
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
 DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
-
-
-class _LinkedInConfirmation(BaseModel):
-    profile_url: str
 
 
 class _RetentionUpdate(BaseModel):
@@ -104,6 +106,7 @@ def create_app(
     education_researcher=None,
     linkedin_researcher=None,
     linkedin_connection_threshold: int | None = None,
+    linkedin_max_profiles: int | None = None,
     research_cache_ttl_days: int | None = None,
     require_location_resolver: bool = False,
 ) -> FastAPI:
@@ -128,11 +131,15 @@ def create_app(
         )
     selected_linkedin_researcher = linkedin_researcher
     selected_linkedin_threshold = linkedin_connection_threshold if linkedin_connection_threshold is not None else _positive_int_env("CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD", 500)
+    selected_linkedin_max_profiles = linkedin_max_profiles if linkedin_max_profiles is not None else _positive_int_env("CV_VALIDATOR_LINKEDIN_MAX_PROFILES", DEFAULT_MAX_PROFILES)
+    if selected_linkedin_max_profiles > MAX_PROFILES_LIMIT:
+        raise ValueError("CV_VALIDATOR_LINKEDIN_MAX_PROFILES must be at most 20")
     if selected_ai_settings.enabled and selected_linkedin_researcher is None:
         selected_linkedin_researcher = OpenAIResponsesLinkedInResearcher(
             api_key=selected_ai_settings.api_key,
             timeout_seconds=selected_ai_settings.timeout_seconds,
             connection_threshold=selected_linkedin_threshold,
+            max_profiles=selected_linkedin_max_profiles,
         )
     resolver = location_resolver or load_location_resolver(
         required=require_location_resolver,
@@ -474,7 +481,6 @@ def create_app(
                     "company_research",
                     "education_research",
                     "linkedin_discovery",
-                    "linkedin_comparison",
                 ):
                     if key in stored_payload:
                         payload[key] = stored_payload[key]
@@ -620,17 +626,16 @@ def create_app(
             else:
                 cached = store.get_reusable_research(descriptor)
                 if cached is not None:
-                    result = materialize_cache_hit("education", cached, descriptor=descriptor)
+                    public_result = materialize_cache_hit("education", cached, descriptor=descriptor)
+                    public_result = normalize_public_education_result(public_result)
                     store.record_cache_use(analysis_id, "education", descriptor.cache_key, "hit")
-                    store.persist_education_research(analysis_id, result)
                     telemetry.increment("research_cache_total", category="education", outcome="hit")
                 else:
                     try:
-                        result = EducationResearchService(selected_education_researcher).run(stored_payload)
-                        result["cache"] = {"status": "miss", "format_version": descriptor.cache_format_version}
-                        store.persist_reusable_research(descriptor, reusable_payload("education", result))
+                        public_result = EducationResearchService(selected_education_researcher).run(stored_payload)
+                        public_result["cache"] = {"status": "miss", "format_version": descriptor.cache_format_version}
+                        store.persist_reusable_research(descriptor, reusable_payload("education", public_result))
                         store.record_cache_use(analysis_id, "education", descriptor.cache_key, "miss")
-                        store.persist_education_research(analysis_id, result)
                         telemetry.increment("research_cache_total", category="education", outcome="miss")
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -646,6 +651,12 @@ def create_app(
                         telemetry.increment("research_failures_total", category="education", outcome="client_error")
                         safe_log("research_failed", analysis_id=analysis_id, category="education", error_code="client_error")
                         raise HTTPException(status_code=502, detail="education_research_client_error") from exc
+                result = apply_owner_scoped_education_context(
+                    public_result,
+                    stored_payload,
+                    location_resolver=resolver,
+                )
+                store.persist_education_research(analysis_id, result)
         response = deepcopy(stored_payload)
         response["education_research"] = result
         return JSONResponse(response)
@@ -660,7 +671,11 @@ def create_app(
             if completed is not None: result = json.loads(completed["result_json"])
             else:
                 try:
-                    result = LinkedInDiscoveryService(selected_linkedin_researcher, selected_linkedin_threshold).run(stored_payload)
+                    result = LinkedInDiscoveryService(
+                        selected_linkedin_researcher,
+                        selected_linkedin_threshold,
+                        selected_linkedin_max_profiles,
+                    ).run(stored_payload)
                     store.persist_linkedin_discovery(analysis_id, result)
                 except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
                 except LinkedInResearchTimeout as exc:
@@ -680,54 +695,6 @@ def create_app(
         response = deepcopy(stored_payload); response["linkedin_discovery"] = result
         return JSONResponse(response)
 
-    @app.post("/analyses/{analysis_id}/research/linkedin/confirmation")
-    def confirm_linkedin(analysis_id: str, confirmation: _LinkedInConfirmation, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
-        _owned_payload(store, analysis_id, x_analysis_access_token)
-        discovery_row = store.get_linkedin_discovery(analysis_id)
-        if discovery_row is None: raise HTTPException(status_code=409, detail="linkedin_discovery_required")
-        discovery = json.loads(discovery_row["result_json"])
-        try: profile_url = normalize_linkedin_url(confirmation.profile_url)
-        except ValueError as exc: raise HTTPException(status_code=422, detail=str(exc)) from exc
-        allowed = {normalize_linkedin_url(profile["profile_url"]) for profile in discovery["possible_profiles"]}
-        if profile_url not in allowed: raise HTTPException(status_code=409, detail="profile_not_in_discovery")
-        try: audit = store.confirm_linkedin_profile(analysis_id, profile_url, discovery["versions"]["research"])
-        except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return JSONResponse({"linkedin_confirmation": audit})
-
-    @app.post("/analyses/{analysis_id}/research/linkedin/comparison")
-    def compare_linkedin(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
-        stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
-        if selected_linkedin_researcher is None: raise HTTPException(status_code=503, detail="linkedin_research_disabled")
-        confirmation = store.get_linkedin_confirmation(analysis_id)
-        discovery_row = store.get_linkedin_discovery(analysis_id)
-        if confirmation is None or discovery_row is None: raise HTTPException(status_code=409, detail="linkedin_confirmation_required")
-        stored_payload["linkedin_discovery"] = json.loads(discovery_row["result_json"])
-        with research_locks_guard: lock = research_locks.setdefault(f"linkedin-comparison:{analysis_id}", threading.Lock())
-        with lock:
-            completed = store.get_linkedin_comparison(analysis_id)
-            if completed is not None: result = json.loads(completed["result_json"])
-            else:
-                try:
-                    result = LinkedInComparisonService(selected_linkedin_researcher).run(stored_payload, confirmation["profile_url"])
-                    store.persist_linkedin_comparison(analysis_id, confirmation["profile_url"], result)
-                except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
-                except LinkedInResearchTimeout as exc:
-                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "timeout")
-                    raise HTTPException(status_code=504, detail="linkedin_comparison_timeout") from exc
-                except LinkedInResearchInvalidResponse as exc:
-                    _record_research_failure(
-                        telemetry,
-                        analysis_id,
-                        "linkedin_comparison",
-                        f"invalid_response:{str(exc) or 'unknown'}",
-                    )
-                    raise HTTPException(status_code=502, detail="linkedin_comparison_invalid_response") from exc
-                except LinkedInResearchClientError as exc:
-                    _record_research_failure(telemetry, analysis_id, "linkedin_comparison", "client_error")
-                    raise HTTPException(status_code=502, detail="linkedin_comparison_client_error") from exc
-        response = deepcopy(stored_payload); response["linkedin_comparison"] = result
-        return JSONResponse(response)
-
     app.state.store = store
     app.state.location_resolver = resolver
     app.state.ai_settings = selected_ai_settings
@@ -738,6 +705,7 @@ def create_app(
     app.state.education_researcher = selected_education_researcher
     app.state.linkedin_researcher = selected_linkedin_researcher
     app.state.linkedin_connection_threshold = selected_linkedin_threshold
+    app.state.linkedin_max_profiles = selected_linkedin_max_profiles
     app.state.research_cache_ttl_days = store.config.research_cache_ttl_days
     app.state.telemetry = telemetry
     app.state.ai_retry_contexts = retry_contexts
@@ -810,7 +778,6 @@ def _owned_payload(store: PersistenceStore, analysis_id: str, access_token: str 
         ("company_research", store.get_company_research(analysis_id)),
         ("education_research", store.get_education_research(analysis_id)),
         ("linkedin_discovery", store.get_linkedin_discovery(analysis_id)),
-        ("linkedin_comparison", store.get_linkedin_comparison(analysis_id)),
     )
     for key, row in completed_rows:
         if row is not None:

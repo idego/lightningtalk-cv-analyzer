@@ -106,7 +106,7 @@ This matrix is the anonymous product contract derived from the approved roadmap.
 | Non-EU phone-country flag | fixed signal | Offline phone parsing; informational, never identity or work-eligibility proof |
 | Locality existence, country, and atypicality | fixed signal | Offline reference-data result or explicit unresolved state |
 | Combined outside-EU location flag | fixed signal | Phone plus stated-location observations and limitation |
-| Possible LinkedIn profiles | research check | Candidate-scoped possible matches; recruiter confirmation required |
+| Possible LinkedIn profiles | research check | Candidate-scoped manual-review links; no identity confirmation or automated CV comparison |
 | Visible photo and public connection count | research check | Availability only; no appearance analysis; unavailable stays unknown |
 | No plausible LinkedIn profile found | research check + explicit test | Searches and limitations; absence is not proof |
 | Institution existence and location | research check | Cited supporting, conflicting, or insufficient evidence |

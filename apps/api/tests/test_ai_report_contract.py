@@ -643,7 +643,7 @@ def test_retention_change_returns_ids_and_removes_db_and_retry_state(tmp_path) -
     assert "expired-retention" not in app.state.ai_retry_flights
 
 
-def test_reopened_analysis_hydrates_owner_scoped_completed_research(tmp_path) -> None:
+def test_reopened_analysis_hydrates_active_research_but_hides_retired_comparison(tmp_path) -> None:
     app = create_app(db_path=tmp_path / "research-reopen.db")
     store = app.state.store
     base = {
@@ -681,7 +681,8 @@ def test_reopened_analysis_hydrates_owner_scoped_completed_research(tmp_path) ->
     assert payload["company_research"] == company
     assert payload["education_research"] == education
     assert payload["linkedin_discovery"] == linkedin
-    assert payload["linkedin_comparison"] == linkedin_comparison
+    assert "linkedin_comparison" not in payload
+    assert "linkedin_confirmation" not in payload
     assert "analysis_access_token" not in payload
     assert "access_token_hash" not in json.dumps(payload)
     with pytest.raises(Exception) as denied:
@@ -722,6 +723,48 @@ def test_every_code_observation_is_exposed_as_a_remaining_review_flag(
         )
         assert flag["reason"] == observation["reason"]
         assert flag["evidence"] == observation["evidence"]
+
+
+def test_informational_finding_is_not_repeated_as_a_code_observation_flag(
+    location_resolver,
+) -> None:
+    result = analyze_cv_text_result(
+        "Candidate Example\nCurrent location: Berlin, Germany\n"
+        "Phone: +49 30 123456\nSoftware engineer",
+        location_resolver=location_resolver,
+    )
+
+    payload = serialize_analysis_payload(
+        result,
+        AISettings(enabled=False),
+        analysis_id="analysis-no-duplicate-flags",
+    )
+
+    categories = [flag["category"] for flag in payload["checklist"]["flags"]]
+    assert categories.count("combined_location_inside_eu") == 1
+
+
+def test_outside_eu_context_is_zero_weight_but_recruiter_visible() -> None:
+    result = analyze_cv_text_result(
+        "Candidate Example\nPhone: +44 20 7946 0958\nSoftware engineer"
+    )
+    payload = serialize_analysis_payload(
+        result,
+        AISettings(enabled=False),
+        analysis_id="analysis-outside-eu-context",
+    )
+
+    finding = next(
+        item for item in payload["findings"]
+        if item["signal"] == "phone_outside_eu"
+    )
+    flag = next(
+        item for item in payload["checklist"]["flags"]
+        if item["category"] == "phone_outside_eu"
+    )
+    assert finding["weight"] == 0
+    assert finding["score_impact"] == "none"
+    assert flag["importance"] == "worth_knowing"
 
 
 def test_partial_validation_never_persists_rejected_model_text(tmp_path) -> None:

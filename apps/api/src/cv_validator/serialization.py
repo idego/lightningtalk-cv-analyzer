@@ -143,6 +143,9 @@ def _serialize_flags(
     deterministic_observations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
+    finding_categories = {
+        finding["signal"] for finding in deterministic_findings
+    }
     for index, finding in enumerate(deterministic_findings, start=1):
         flags.append(
             {
@@ -181,6 +184,8 @@ def _serialize_flags(
             }
         )
     for index, observation in enumerate(deterministic_observations, start=1):
+        if observation["kind"] in finding_categories:
+            continue
         flags.append(
             {
                 "id": f"code-observation-{index:04d}",
@@ -203,6 +208,13 @@ def _deterministic_importance(finding: dict[str, Any]) -> str:
     if finding.get("score_impact") == "weighted" and finding.get("direction") == "conflicts":
         return "attention"
     if finding.get("score_impact") == "weighted":
+        return "worth_knowing"
+    if finding.get("signal") in {
+        "stated_location_outside_eu",
+        "phone_outside_eu",
+        "combined_location_outside_eu",
+        "small_locality_outside_eu",
+    }:
         return "worth_knowing"
     return "remaining"
 

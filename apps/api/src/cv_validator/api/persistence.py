@@ -526,11 +526,29 @@ class PersistenceStore:
                  "caveat": "Confirmation authorizes comparison only; it does not establish identity."}
         try:
             with self._connect() as conn:
-                conn.execute("""INSERT INTO linkedin_confirmation (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
-                    VALUES (?, ?, ?, ?, ?) ON CONFLICT(analysis_id) DO NOTHING""",
-                    (analysis_id, profile_url, discovery_version, confirmed_at, json.dumps(audit)))
-                row = conn.execute("SELECT profile_url, audit_json FROM linkedin_confirmation WHERE analysis_id = ?", (analysis_id,)).fetchone()
-                if row is None or row["profile_url"] != profile_url: raise ValueError("different_profile_already_confirmed")
+                cursor = conn.execute(
+                    """INSERT INTO linkedin_confirmation
+                    (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(analysis_id) DO UPDATE SET
+                        profile_url = excluded.profile_url,
+                        discovery_version = excluded.discovery_version,
+                        confirmed_at = excluded.confirmed_at,
+                        audit_json = excluded.audit_json
+                    WHERE linkedin_confirmation.discovery_version <> excluded.discovery_version""",
+                    (analysis_id, profile_url, discovery_version, confirmed_at, json.dumps(audit)),
+                )
+                if cursor.rowcount:
+                    conn.execute(
+                        "DELETE FROM linkedin_comparison WHERE analysis_id = ?",
+                        (analysis_id,),
+                    )
+                row = conn.execute(
+                    "SELECT profile_url, audit_json FROM linkedin_confirmation WHERE analysis_id = ?",
+                    (analysis_id,),
+                ).fetchone()
+                if row is None or row["profile_url"] != profile_url:
+                    raise ValueError("different_profile_already_confirmed")
                 audit = json.loads(row["audit_json"])
         except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin confirmation persistence failed") from exc
         return audit
