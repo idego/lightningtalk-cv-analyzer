@@ -18,6 +18,11 @@ export function structuredFactLines(
     lines.push(line);
   };
 
+  const personPostalCandidateIds = new Set(
+    report.deterministic.facts
+      .filter((fact) => fact.kind === "postal_country" && fact.subject === "person")
+      .flatMap((fact) => fact.source_candidate_ids),
+  );
   for (const candidate of report.deterministic.candidates) {
     if (candidate.subject !== "person") continue;
     if (candidate.kind === "phone") add(`Phone: ${candidate.value}`);
@@ -25,10 +30,18 @@ export function structuredFactLines(
       add(`Stated location: ${candidate.value}`);
     }
   }
+  for (const candidate of report.deterministic.candidates) {
+    if (candidate.kind === "postal" && personPostalCandidateIds.has(candidate.id)) {
+      add(`Postal code: ${candidate.value}`);
+    }
+  }
   for (const fact of report.deterministic.facts) {
     if (fact.subject !== "person") continue;
     if (fact.kind === "phone_country") {
       add(`Phone country: ${countryLabel(fact.value)}`);
+    }
+    if (fact.kind === "postal_country") {
+      add(`Postal country: ${countryLabel(fact.value)}`);
     }
     if (fact.kind === "claimed_location") {
       const location = fact.resolved_name ?? fact.value;
@@ -39,6 +52,25 @@ export function structuredFactLines(
     (observation) => observation.kind === "combined_location_outside_eu",
   )) {
     add("EU status: Outside the EU");
+  }
+  if (report.deterministic.observations.some(
+    (observation) => observation.kind === "combined_location_inside_eu",
+  )) {
+    add("EU status: Inside the EU");
+  }
+
+  const claim = report.deterministic.facts.find(
+    (fact) => fact.kind === "claimed_location" && fact.subject === "person",
+  );
+  const comparisonValues = (report.deterministic.scoring_signals ?? [])
+    .filter((signal) => signal.kind === "phone_country" || signal.kind === "postal_country")
+    .map((signal) => signal.value);
+  if (claim && comparisonValues.length > 0) {
+    add(
+      comparisonValues.every((value) => value === claim.value)
+        ? "Location consistency: Available deterministic details agree"
+        : "Location consistency: Available deterministic details conflict",
+    );
   }
 
   const contactLabels = {
@@ -112,6 +144,11 @@ const deterministicTemplates: Record<string, (flag: ReviewFlag) => ReviewCopy> =
     whyItMatters: "These details do not prove nationality, residence, or work permission.",
     whatToCheck: "Confirm the current location and collect work-permission facts directly when needed.",
   }),
+  combined_location_inside_eu: () => ({
+    whatWeFound: "The stated location and phone both point to countries in the EU.",
+    whyItMatters: "These details are consistent, but they do not prove nationality, residence, or work permission.",
+    whatToCheck: "Confirm the current location and work permission only when the role requires it.",
+  }),
   right_to_work: (flag) => ({
     whatWeFound: `The CV includes a work-permission statement: ${flag.presentation_context?.observed ?? flag.observation}.`,
     whyItMatters: "The statement is useful context, but it is not proof.",
@@ -152,6 +189,13 @@ export function presentReviewFlag(
       whatWeFound: simplifyTimelineOverlap(flag.observation),
       whyItMatters: "The roles may be parallel, part-time, or contract work. The overlap is not proof of a problem.",
       whatToCheck: "Ask whether both roles were active at the same time and how the work was arranged.",
+    };
+  }
+  if (flag.source === "ai" && flag.category === "education_outside_eu" && reportLanguage === "en") {
+    return {
+      whatWeFound: "The CV lists education outside the EU.",
+      whyItMatters: "This is useful context when reviewing the candidate's education history. It does not establish nationality or current location.",
+      whatToCheck: "Verify the institution, programme, dates, and this period of the candidate's history.",
     };
   }
   return {
