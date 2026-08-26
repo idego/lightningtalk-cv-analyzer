@@ -9,6 +9,7 @@ from cv_validator.extraction.email_providers import (
 from cv_validator.extraction.locations import classify_locations
 from cv_validator.extraction.informational import classify_informational_candidates
 from cv_validator.extraction.phones import classify_and_aggregate_phones
+from cv_validator.extraction.postal_countries import classify_person_postal_countries
 from cv_validator.ingestion import RedactedDocument
 from cv_validator.location import LocationResolver
 
@@ -36,8 +37,31 @@ def analyze_deterministically(
         )
     )
     result_candidates = tuple((*candidates, *added_candidates))
-    facts = tuple((*phone_facts, *location_facts))
-    scoring_signals = tuple((*phone_signals, *location_signals))
+    base_facts = tuple((*phone_facts, *location_facts))
+    postal_facts, postal_signals = classify_person_postal_countries(
+        document,
+        result_candidates,
+        base_facts,
+        ruleset_version=ruleset_version,
+    )
+    facts = tuple((*base_facts, *postal_facts))
+    scoring_signals = tuple((*phone_signals, *location_signals, *postal_signals))
+    scored_postal_candidates = {
+        str(candidate_id)
+        for fact in postal_facts
+        for candidate_id in fact.source_candidate_ids
+    }
+    informational_observations = tuple(
+        observation
+        for observation in informational_observations
+        if not (
+            observation.kind.value == "postal_compatibility"
+            and any(
+                subject_id in scored_postal_candidates
+                for subject_id in observation.subject_ids
+            )
+        )
+    )
     eu_observations = classify_eu_observations(
         result_candidates,
         facts,

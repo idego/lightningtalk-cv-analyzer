@@ -99,6 +99,18 @@ def test_explicit_phone_label_preserves_valid_german_number_with_year_like_digit
     assert any(fact.value == "DE" for fact in result.facts)
 
 
+def test_single_slash_date_is_not_a_phone_candidate():
+    result = _analyze("Candidate Example\n01/02/2020\nEngineer profile")
+
+    phone_candidates = [
+        candidate
+        for candidate in result.candidates
+        if candidate.kind is CandidateKind.PHONE
+    ]
+
+    assert phone_candidates == []
+
+
 def test_possible_phone_remains_observation_and_blocks_aggregate_signal():
     result = _analyze(
         "Jane Example\n"

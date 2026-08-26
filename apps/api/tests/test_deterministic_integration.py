@@ -104,7 +104,7 @@ def test_report_json_is_additive_and_deterministic_serialization_is_explicit() -
     assert fact["resolved_level"] == "locality"
     assert payload["ruleset_version"]["version"] == "1.0.0"
     assert payload["ruleset_version"]["scoring_policy_version"] == (
-        "deterministic-phone-comparison-v1"
+        "deterministic-phone-postal-comparison-v2"
     )
     assert "__dataclass_fields__" not in json.dumps(payload)
 
@@ -220,7 +220,7 @@ def test_previous_schema_rows_remain_readable_when_new_report_is_persisted(
     assert json.loads(audit_rows[0]["output_json"]) == {"band": "gray"}
     assert "deterministic" in json.loads(audit_rows[1]["output_json"])
     assert audit_rows[1]["ruleset_version"] == (
-        "weights:1.0.0;policy:deterministic-phone-comparison-v1"
+        "weights:1.0.0;policy:deterministic-phone-postal-comparison-v2"
     )
     with sqlite3.connect(db_path) as connection:
         old_report = connection.execute(

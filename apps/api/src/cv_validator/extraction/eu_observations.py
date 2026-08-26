@@ -136,6 +136,19 @@ def classify_eu_observations(
                     ),
                 )
             )
+        elif claim_in_eu and phone_in_eu:
+            observations.append(
+                _observation(
+                    kind=ObservationKind.COMBINED_LOCATION_INSIDE_EU,
+                    subject_ids=subject_ids,
+                    values=values,
+                    evidence=evidence,
+                    reason=(
+                        "The unique stated-location and aggregate person-owned "
+                        f"phone countries are in the EU-27 set. {_CAVEAT}"
+                    ),
+                )
+            )
         elif claim_in_eu != phone_in_eu:
             observations.append(
                 _observation(

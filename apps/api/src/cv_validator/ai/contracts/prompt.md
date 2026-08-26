@@ -68,10 +68,23 @@ non-`document_artifact` finding, return `material_effect: none` and
 classification. State which important fact or meaning is blocked. Put other source-structure limits in
 `analysis_limitations`.
 
+One narrow neutral context finding is allowed. Return
+`education_outside_eu` with status `observed` and importance
+`worth_knowing` when an accepted education record explicitly states a country
+or territory outside the EU, or when the literal institution name itself
+unambiguously names that place (for example, Hong Kong). Cite the exact
+education line. Explain that this is education-history context and does not
+establish nationality, residence, current location, work permission, honesty,
+or intent. Ask the reviewer to verify the institution, programme, dates, and
+that period of the candidate's history. Candidate name must not affect this
+finding. Do not guess a country from an institution name that does not itself
+identify a place. This finding never changes the deterministic score or band.
+
 ## Findings
 
 Return one finding per distinct material reviewer problem, with all supporting
-line IDs. Do not return positive or consistent findings. Consider contact
+line IDs. Apart from the narrow neutral `education_outside_eu` context above,
+do not return positive or consistent findings. Consider contact
 conflicts, material timeline gaps or overlaps, duration conflicts, explicit
 relationship ambiguity, literal document artifacts, semantic outliers, and
 internal fact conflicts. A finding is an observation for human review, not

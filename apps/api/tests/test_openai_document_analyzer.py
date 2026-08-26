@@ -19,7 +19,7 @@ from cv_validator.ai.domain import (
     DocumentAnalyzerResponse,
 )
 from cv_validator.ai.openai_client import OpenAIResponsesDocumentAnalyzer
-from cv_validator.ai.request import build_document_analysis_request
+from cv_validator.ai.request import SCHEMA_VERSION, build_document_analysis_request
 from cv_validator.api.app import create_app
 from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.ingestion import RawDocument, SourcePage
@@ -30,7 +30,7 @@ from cv_validator.serialization import serialize_report_payload
 
 def _empty_response() -> dict:
     return {
-        "schema_version": "document-analysis-schema-v8",
+        "schema_version": SCHEMA_VERSION,
         "facts": {"contact": [], "education": [], "employment": []},
         "findings": [],
         "unknowns": [],
@@ -386,7 +386,7 @@ def test_pipeline_keeps_code_contact_authority_separate_from_ai_semantic_facts()
     assert ai_facts["employment"][0]["source"] == "document_analyzer"
 
 
-def test_enabled_app_routes_each_upload_through_the_pipeline_ai_seam(tmp_path) -> None:
+def test_enabled_app_defers_ai_until_the_follow_up_request(tmp_path) -> None:
     analyzer = _Analyzer(
         DocumentAnalyzerResponse(
             payload=_empty_response(),
@@ -405,8 +405,10 @@ def test_enabled_app_routes_each_upload_through_the_pipeline_ai_seam(tmp_path) -
     buffer = io.BytesIO()
     document.save(buffer)
 
-    response = TestClient(app).post(
+    client = TestClient(app)
+    response = client.post(
         "/analyze",
+        headers={"x-analysis-access-token": "owner-token"},
         files={
             "file": (
                 "cv.docx",
@@ -418,5 +420,14 @@ def test_enabled_app_routes_each_upload_through_the_pipeline_ai_seam(tmp_path) -
     )
 
     assert response.status_code == 200
+    assert response.json()["ai_analysis"]["status"] == "pending"
+    assert len(analyzer.requests) == 0
+
+    retry = client.post(
+        f"/analyses/{response.json()['analysis_id']}/ai/retry",
+        headers={"x-analysis-access-token": "owner-token"},
+    )
+
+    assert retry.status_code == 200
     assert len(analyzer.requests) == 1
-    assert "ai" not in response.json()
+    assert retry.json()["ai_analysis"]["status"] == "succeeded"

@@ -15,6 +15,7 @@ from cv_validator.ai.domain import (
 )
 from cv_validator.ai.request import (
     DETERMINISTIC_OBSERVATIONS_VERSION,
+    SCHEMA_VERSION,
     build_document_analysis_request,
 )
 from cv_validator.ai.validation import (
@@ -51,7 +52,7 @@ def _documents():
 
 def _valid_response() -> dict:
     return {
-        "schema_version": "document-analysis-schema-v8",
+        "schema_version": SCHEMA_VERSION,
         "facts": {
             "contact": [],
             "education": [
@@ -367,6 +368,104 @@ def test_prompt_requires_structural_material_fields_for_every_finding() -> None:
 
     assert "For every finding, always return both `material_effect` and `affected_fact`" in instructions
     assert "`material_effect: none` and `affected_fact: not_applicable`" in instructions
+
+
+def test_prompt_surfaces_explicit_education_outside_eu_as_neutral_context() -> None:
+    instructions = " ".join(_prompt_instructions().split())
+
+    assert "education_outside_eu" in instructions
+    assert "worth_knowing" in instructions
+    assert "does not establish nationality" in instructions
+    assert "Candidate name must not affect this finding" in instructions
+
+
+def test_education_outside_eu_finding_is_name_and_score_invariant(
+    location_resolver,
+) -> None:
+    def analyze_named_cv(name: str):
+        raw = RawDocument(
+            pages=(
+                SourcePage(
+                    "page-0001",
+                    1,
+                    (
+                        f"{name}\nCurrent location: Opole, Poland\n"
+                        "Phone: +48 732 080 047\n45-061\n"
+                        "Education\nCity University of Hong Kong"
+                    ),
+                ),
+            ),
+            source_format="docx",
+        )
+        redacted = redact_national_ids(raw)
+        deterministic = analyze_deterministically(
+            redacted,
+            "1.0.0",
+            location_resolver=location_resolver,
+        )
+        report = score_deterministic(deterministic, load_weights())
+        response = _valid_response()
+        response["facts"]["education"] = [
+            {
+                "kind": "education",
+                "institution": _field(
+                    "City University of Hong Kong",
+                    "page-0001-line-0006",
+                ),
+                "program": _field(None),
+                "study_dates": _field(None),
+                "status": "present",
+            }
+        ]
+        response["findings"] = [
+            {
+                "category": "education_outside_eu",
+                "status": "observed",
+                "observation": "The CV lists education in Hong Kong.",
+                "reason": "This is international education history outside the EU.",
+                "importance": "worth_knowing",
+                "confidence": "high",
+                "limitation": (
+                    "This education record alone does not establish the "
+                    "candidate's current location."
+                ),
+                "material_effect": "none",
+                "affected_fact": "not_applicable",
+                "evidence": [
+                    {
+                        "page_id": "page-0001",
+                        "line_id": "page-0001-line-0006",
+                    }
+                ],
+            }
+        ]
+        composed = analyze_report_with_ai(
+            AISettings(enabled=True, api_key="test-key"),
+            FakeDocumentAnalyzer(
+                DocumentAnalyzerResponse(
+                    payload=response,
+                    response_model="gpt-5.6-luna-runtime",
+                    usage={"input_tokens": 10, "output_tokens": 5},
+                )
+            ),
+            redacted,
+            report,
+        )
+        return composed
+
+    first = analyze_named_cv("Alex Example")
+    second = analyze_named_cv("Rhea Example")
+
+    assert first.ai_outcome.status is AIAnalysisStatus.SUCCEEDED
+    assert second.ai_outcome.status is AIAnalysisStatus.SUCCEEDED
+    assert first.ai_outcome.analysis.payload["findings"] == (
+        second.ai_outcome.analysis.payload["findings"]
+    )
+    assert first.ai_outcome.analysis.payload["findings"][0]["category"] == (
+        "education_outside_eu"
+    )
+    assert first.deterministic_report.score == second.deterministic_report.score
+    assert first.deterministic_report.band is second.deterministic_report.band
 
 
 @pytest.mark.parametrize(
@@ -1073,15 +1172,9 @@ def test_finding_check_id_is_code_owned_by_category() -> None:
         (lambda result: result.update({"research_candidates": []}), "schema"),
         (lambda result: result["facts"]["education"][0].update({"authority": "ai"}), "schema"),
         (lambda result: result.update({"score": 87}), "schema"),
-        (
-            lambda result: result["analysis_limitations"].append(
-                "The candidate's nationality is inferred from their name."
-            ),
-            "protected boundary",
-        ),
     ),
 )
-def test_validator_rejects_research_verdict_and_demographic_outputs(
+def test_validator_rejects_fields_outside_the_structured_contract(
     mutate,
     error_kind,
 ) -> None:
@@ -1101,18 +1194,47 @@ def test_validator_rejects_research_verdict_and_demographic_outputs(
         "Do not interview this candidate.",
     ),
 )
-def test_validator_rejects_proxy_inferences_and_hiring_decisions(
+def test_validator_preserves_model_conclusions_for_human_review(
     authored_conclusion,
 ) -> None:
     _, redacted = _documents()
     response = _valid_response()
     response["analysis_limitations"] = [authored_conclusion]
 
-    with pytest.raises(
-        DocumentAnalysisValidationError,
-        match="protected boundary",
-    ):
-        validate_document_analysis_response(response, redacted)
+    validated = validate_document_analysis_response(response, redacted)
+
+    assert validated.payload["analysis_limitations"] == [authored_conclusion]
+    assert validated.payload["validation_warnings"]
+
+
+def test_application_keeps_paid_response_instead_of_retrying_for_model_wording() -> None:
+    _, redacted = _documents()
+    deterministic = analyze_deterministically(redacted, "1.0.0")
+    response = _valid_response()
+    response["analysis_limitations"] = [
+        "Education history does not establish nationality or current location."
+    ]
+    analyzer = FakeDocumentAnalyzer(
+        DocumentAnalyzerResponse(
+            payload=response,
+            response_model="gpt-5.6-luna-runtime",
+            usage={"input_tokens": 10, "output_tokens": 5},
+        )
+    )
+
+    outcome = run_document_analysis(
+        AISettings(enabled=True, api_key="test-key"),
+        analyzer,
+        redacted,
+        deterministic,
+    )
+
+    assert outcome.status is AIAnalysisStatus.SUCCEEDED
+    assert outcome.attempt_count == 1
+    assert len(analyzer.requests) == 1
+    assert outcome.analysis is not None
+    assert outcome.analysis.payload["analysis_limitations"] == response["analysis_limitations"]
+    assert outcome.analysis.payload["validation_warnings"]
 
 
 def test_validator_allows_protected_word_inside_literal_entity_and_evidence() -> None:

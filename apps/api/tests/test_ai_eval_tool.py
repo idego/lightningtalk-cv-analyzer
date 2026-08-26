@@ -8,6 +8,7 @@ from cv_validator.ai.validation import (
     DocumentAnalysisValidationError,
     validate_document_analysis_response,
 )
+from cv_validator.ai.request import SCHEMA_VERSION
 from cv_validator.ingestion import RawDocument, SourcePage
 from cv_validator.ingestion.redaction import redact_national_ids
 
@@ -29,7 +30,7 @@ def model_evidence(page_id="page-0001", line_id="page-0001-line-0001"):
 
 def valid_result():
     return {
-        "schema_version": "document-analysis-schema-v8",
+        "schema_version": SCHEMA_VERSION,
         "facts": {
             "contact": [{"kind": "phone", "value": "source evidence", "status": "present", "evidence": [model_evidence()]}],
             "education": [],

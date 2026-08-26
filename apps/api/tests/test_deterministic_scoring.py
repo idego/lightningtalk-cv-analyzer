@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from cv_validator.config import load_weights
 from cv_validator.domain import (
     AgreementDirection,
@@ -34,6 +36,33 @@ def _resolver() -> InMemoryLocationResolver:
                 match_kind=MatchKind.CANONICAL,
                 country_code="DE",
                 country_name="Germany",
+            ),
+            LocationMatch(
+                record_id="country:germany",
+                level=ResolutionLevel.COUNTRY,
+                canonical_name="Germany",
+                matched_name="Germany",
+                match_kind=MatchKind.CANONICAL,
+                country_code="DE",
+                country_name="Germany",
+            ),
+            LocationMatch(
+                record_id="place:opole",
+                level=ResolutionLevel.LOCALITY,
+                canonical_name="Opole",
+                matched_name="Opole",
+                match_kind=MatchKind.CANONICAL,
+                country_code="PL",
+                country_name="Poland",
+            ),
+            LocationMatch(
+                record_id="country:poland",
+                level=ResolutionLevel.COUNTRY,
+                canonical_name="Poland",
+                matched_name="Poland",
+                match_kind=MatchKind.CANONICAL,
+                country_code="PL",
+                country_name="Poland",
             ),
         ),
         reference_data_version=ComponentVersion("test-locations", "v1"),
@@ -94,6 +123,131 @@ def test_one_agreeing_phone_category_is_gray_for_insufficient_independent_eviden
     assert phone.score_impact == "weighted"
 
 
+def test_phone_and_person_postal_country_support_claim_with_configured_weights() -> None:
+    deterministic = _deterministic(
+        "Jane Example\n"
+        "jane@example.com +48 732080047 Opole, Poland 45-061\n"
+        "Software engineer"
+    )
+
+    report = score_deterministic(deterministic, load_weights())
+
+    assert {
+        fact.kind for fact in deterministic.facts
+    } >= {FactKind.PHONE_COUNTRY, FactKind.POSTAL_COUNTRY, FactKind.CLAIMED_LOCATION}
+    assert {
+        signal.kind for signal in deterministic.scoring_signals
+    } == {ScoringSignalKind.PHONE_COUNTRY, ScoringSignalKind.POSTAL_COUNTRY}
+    assert report.score == 100
+    assert report.band is Band.GREEN
+    assert report.signal_count == 2
+    assert report.supporting_count == 2
+    assert report.conflicting_count == 0
+    postal = next(
+        finding for finding in report.findings if finding.signal == "address_postal"
+    )
+    assert postal.direction is AgreementDirection.SUPPORTS
+    assert postal.weight == load_weights().signals["address_postal"].weight
+    assert postal.score_impact == "weighted"
+    assert report.ruleset_version.scoring_policy_version == (
+        "deterministic-phone-postal-comparison-v2"
+    )
+
+
+def test_person_postal_conflict_uses_configured_weight_without_hardcoded_score() -> None:
+    deterministic = _deterministic(
+        "Jane Example\n"
+        "jane@example.com +49 30 123456 Munich, Germany 45-061\n"
+        "Software engineer"
+    )
+
+    report = score_deterministic(deterministic, load_weights())
+
+    assert report.score == 54
+    assert report.band is Band.AMBER
+    assert report.signal_count == 2
+    assert report.supporting_count == 1
+    assert report.conflicting_count == 1
+    postal = next(
+        finding for finding in report.findings if finding.signal == "address_postal"
+    )
+    assert postal.observed == "PL"
+    assert postal.claimed == "Munich, Germany"
+    assert postal.direction is AgreementDirection.CONFLICTS
+
+
+def test_shared_postal_format_abstains_and_keeps_report_gray() -> None:
+    deterministic = _deterministic(
+        "Jane Example\n"
+        "jane@example.com +49 30 123456 Munich, Germany 10115\n"
+        "Software engineer"
+    )
+
+    report = score_deterministic(deterministic, load_weights())
+
+    assert not any(
+        fact.kind is FactKind.POSTAL_COUNTRY for fact in deterministic.facts
+    )
+    assert not any(
+        signal.kind is ScoringSignalKind.POSTAL_COUNTRY
+        for signal in deterministic.scoring_signals
+    )
+    postal = next(
+        observation
+        for observation in deterministic.observations
+        if observation.kind is ObservationKind.POSTAL_COMPATIBILITY
+    )
+    assert postal.values == ("DE", "FR", "US")
+    assert report.score == 50
+    assert report.band is Band.GRAY
+    assert report.signal_count == 1
+
+
+def test_postal_code_outside_person_contact_line_does_not_enter_scoring() -> None:
+    deterministic = _deterministic(
+        "Jane Example\n"
+        "Current location: Munich\n"
+        "Phone: +49 30 123456\n"
+        "Employer address: Warsaw 45-061\n"
+        "Software engineer"
+    )
+
+    report = score_deterministic(deterministic, load_weights())
+
+    assert not any(
+        fact.kind is FactKind.POSTAL_COUNTRY for fact in deterministic.facts
+    )
+    assert not any(
+        signal.kind is ScoringSignalKind.POSTAL_COUNTRY
+        for signal in deterministic.scoring_signals
+    )
+    assert report.score == 50
+    assert report.band is Band.GRAY
+    assert report.signal_count == 1
+
+
+def test_postal_country_graph_rejects_tampered_country() -> None:
+    deterministic = _deterministic(
+        "Jane Example\n"
+        "jane@example.com +48 732080047 Opole, Poland 45-061\n"
+        "Software engineer"
+    )
+    postal = next(
+        signal
+        for signal in deterministic.scoring_signals
+        if signal.kind is ScoringSignalKind.POSTAL_COUNTRY
+    )
+
+    with pytest.raises(ValueError, match="invalid postal scoring graph"):
+        replace(
+            deterministic,
+            scoring_signals=tuple(
+                replace(signal, value="US") if signal.id == postal.id else signal
+                for signal in deterministic.scoring_signals
+            ),
+        )
+
+
 def test_one_conflicting_phone_category_is_still_gray_not_a_negative_verdict() -> None:
     deterministic = _deterministic(
         "Jane Example\nCurrent location: Munich\nPhone: +1 415 555 0100\nEngineer"
@@ -148,10 +302,10 @@ def test_scoring_policy_identity_is_separate_from_weights_version() -> None:
     assert report.ruleset_version.version == "1.0.0"
     assert (
         report.ruleset_version.scoring_policy_version
-        == "deterministic-phone-comparison-v1"
+        == "deterministic-phone-postal-comparison-v2"
     )
     assert report.ruleset_version.audit_identity == (
-        "weights:1.0.0;policy:deterministic-phone-comparison-v1"
+        "weights:1.0.0;policy:deterministic-phone-postal-comparison-v2"
     )
     assert report.ruleset_version.audit_identity != (
         "weights:1.0.0;policy:legacy-prototype-v1"
@@ -169,7 +323,7 @@ def test_legal_weights_version_bump_is_explicit_and_not_hardcoded() -> None:
 
     assert report.ruleset_version.version == "1.0.1"
     assert report.ruleset_version.scoring_policy_version == (
-        "deterministic-phone-comparison-v1"
+        "deterministic-phone-postal-comparison-v2"
     )
     assert report.signal_count == 1
 

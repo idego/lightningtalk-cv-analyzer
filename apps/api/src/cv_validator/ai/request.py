@@ -11,8 +11,8 @@ from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.ingestion import RedactedDocument, SourcePage
 
 
-PROMPT_VERSION = "3205"
-SCHEMA_VERSION = "document-analysis-schema-v8"
+PROMPT_VERSION = "3206"
+SCHEMA_VERSION = "document-analysis-schema-v9"
 LEGACY_SCHEMA_VERSION = "document-analysis-schema-v7"
 INPUT_CONTRACT_VERSION = "document-analysis-input-v3"
 DETERMINISTIC_OBSERVATIONS_VERSION = "deterministic-observations-v1"
@@ -128,7 +128,7 @@ def format_line_referenced_markdown(pages: tuple[SourcePage, ...]) -> str:
 
 
 def load_document_analysis_schema() -> dict[str, Any]:
-    return json.loads(_contract_text("document-analysis.schema.v8.json"))
+    return json.loads(_contract_text("document-analysis.schema.v9.json"))
 
 
 def load_legacy_document_analysis_schema() -> dict[str, Any]:

@@ -7,6 +7,7 @@ services:
       - "${WEB_HOST:-0.0.0.0}:${WEB_PORT:-3000}:3000"
     environment:
       PORT: "3000"
+      HOSTNAME: "0.0.0.0"
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
