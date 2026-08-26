@@ -84,7 +84,7 @@ class SQLiteLocationResolver:
                         """SELECT
                             r.record_id, r.level, r.canonical_name, n.display_name,
                             n.match_kind, r.country_code, r.country_name,
-                            r.region_code, r.region_name
+                            r.region_code, r.region_name, r.population
                         FROM location_name AS n
                         JOIN location_record AS r ON r.record_id = n.record_id
                         WHERE n.normalized_name = ? AND r.level = ?""",
@@ -107,6 +107,7 @@ class SQLiteLocationResolver:
                         country_name=row[6],
                         region_code=row[7],
                         region_name=row[8],
+                        population=row[9],
                     )
                     for row in rows
                 ),

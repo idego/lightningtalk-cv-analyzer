@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,12 @@ from cv_validator.ingestion import RawDocument, SourcePage
 from cv_validator.ingestion.redaction import redact_national_ids
 
 
-SCRIPT = Path(__file__).parents[3] / "scripts/eval_ai_document.py"
+REPO_ROOT = (
+    Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
+    if "CV_VALIDATOR_REPO_ROOT" in os.environ
+    else Path(__file__).parents[3]
+)
+SCRIPT = REPO_ROOT / "scripts/eval_ai_document.py"
 SPEC = importlib.util.spec_from_file_location("eval_ai_document", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader

@@ -9,9 +9,18 @@ from fastapi.testclient import TestClient
 from cv_validator.ai.config import AISettings
 from cv_validator.api.app import create_app
 from cv_validator.domain import ComponentVersion
-from cv_validator.location import InMemoryLocationResolver
+from cv_validator.location import (
+    InMemoryLocationResolver,
+    LocationMatch,
+    MatchKind,
+    ResolutionLevel,
+)
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchTimeout
-from cv_validator.research.education import EducationResearchService, build_education_research_request
+from cv_validator.research.education import (
+    EducationResearchService,
+    apply_owner_scoped_education_context,
+    build_education_research_request,
+)
 from cv_validator.research.openai_client import OpenAIResponsesEducationResearcher
 
 
@@ -44,9 +53,9 @@ class Fake:
         return self.result, "gpt-5.6-luna", {"input_tokens": 10, "output_tokens": 20}
 
 
-def _app(tmp_path, researcher):
-    app=create_app(db_path=tmp_path/"db.sqlite", location_resolver=InMemoryLocationResolver(records=(), reference_data_version=ComponentVersion("test", "v1")), ai_settings=AISettings(enabled=False), education_researcher=researcher)
-    app.state.store.persist_analysis_payload_for_test(_stored())
+def _app(tmp_path, researcher, *, payload=None, resolver=None):
+    app=create_app(db_path=tmp_path/"db.sqlite", location_resolver=resolver or InMemoryLocationResolver(records=(), reference_data_version=ComponentVersion("test", "v1")), ai_settings=AISettings(enabled=False), education_researcher=researcher)
+    app.state.store.persist_analysis_payload_for_test(payload or _stored())
     return app
 
 
@@ -97,6 +106,84 @@ def test_minimal_input_exact_set_candidate_isolation_and_pii_non_leak():
     standalone=_stored(); standalone["ai_analysis"]["facts"]["education"]=[]
     standalone["ai_analysis"]["research_candidates"][0]["query_subject"]="AWS Certified Developer"
     assert build_education_research_request(standalone).input_facts == ({"certificate":"AWS Certified Developer"},)
+
+
+def test_owner_scoped_step_highlights_sourced_education_country_difference():
+    stored = _stored()
+    stored["claimed_location"] = {"country_code": "PL", "raw": "private candidate location"}
+    public_result = EducationResearchService(Fake()).run(stored)
+    resolver = InMemoryLocationResolver(
+        records=(
+            LocationMatch(
+                record_id="country-ie",
+                level=ResolutionLevel.COUNTRY,
+                canonical_name="Ireland",
+                matched_name="Ireland",
+                match_kind=MatchKind.CANONICAL,
+                country_code="IE",
+                country_name="Ireland",
+            ),
+        ),
+        reference_data_version=ComponentVersion("test", "v1"),
+    )
+
+    result = apply_owner_scoped_education_context(
+        public_result,
+        stored,
+        location_resolver=resolver,
+    )
+
+    credential = result["credentials"][0]
+    assert credential["city"] == "Dublin"
+    assert credential["country"] == "Ireland"
+    assert credential["cv_consistency"] == "mismatch"
+    assert "Ireland" in credential["location_difference_for_review"]
+    assert "PL" in credential["location_difference_for_review"]
+    assert any(
+        finding["kind"] == "cv_consistency"
+        and finding["source_urls"] == ["https://northbridge.example/"]
+        for finding in credential["findings"]
+    )
+    assert "private candidate location" not in json.dumps(result)
+
+
+def test_cached_public_result_gets_owner_scoped_location_context_per_analysis(tmp_path):
+    resolver = InMemoryLocationResolver(
+        records=(
+            LocationMatch(
+                record_id="country-ie",
+                level=ResolutionLevel.COUNTRY,
+                canonical_name="Ireland",
+                matched_name="Ireland",
+                match_kind=MatchKind.CANONICAL,
+                country_code="IE",
+                country_name="Ireland",
+            ),
+        ),
+        reference_data_version=ComponentVersion("test", "v1"),
+    )
+    first_payload = _stored()
+    first_payload["claimed_location"] = {"country_code": "PL", "raw": "private"}
+    fake = Fake()
+    app = _app(tmp_path, fake, payload=first_payload, resolver=resolver)
+    client = _client(app)
+
+    first = client.post("/analyses/analysis-edu/research/education").json()["education_research"]
+    second_payload = _stored()
+    second_payload["analysis_id"] = "analysis-edu-2"
+    second_payload["claimed_location"] = {"country_code": "IE", "raw": "private"}
+    app.state.store.persist_analysis_payload_for_test(second_payload)
+    second = client.post("/analyses/analysis-edu-2/research/education").json()["education_research"]
+
+    assert first["credentials"][0]["cv_consistency"] == "mismatch"
+    assert second["credentials"][0]["cv_consistency"] == "supported"
+    assert second["cache"]["status"] == "hit"
+    assert len(fake.calls) == 1
+    with app.state.store._connect() as conn:
+        cached = conn.execute("SELECT payload_json FROM reusable_research_cache").fetchone()[0]
+    assert '"cv_consistency":"mismatch"' not in cached.replace(" ", "")
+    assert "location_difference_for_review" in cached
+    assert "private" not in cached
 
 
 def test_access_token_is_required_and_wrong_analysis_id_does_not_disclose(tmp_path):

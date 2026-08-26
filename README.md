@@ -58,6 +58,7 @@ Optional environment variables (via shell or `.env`):
 - `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
+- `CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION` — informational review threshold for resolved non-EU localities (default `10000`; set `0` to disable; never changes score)
 - `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis and recruiter-triggered company research; defaults to `false`
 - `CV_VALIDATOR_AI_TRANSPORT_RETRY_LIMIT` — retryable timeout/network/429/5xx retries per AI analysis (default `1`)
 - `CV_VALIDATOR_AI_INVALID_RESPONSE_RETRY_LIMIT` — fresh retries after invalid model output (default `1`)
@@ -66,6 +67,7 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
 - `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` — public, cited count-completeness threshold (default `500`; unknown counts are never negative evidence)
+- `CV_VALIDATOR_LINKEDIN_MAX_PROFILES` — maximum number of sourced, plausible name-matched profiles retained by one discovery run (default `3`, maximum `20`)
 - `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` — reusable public research-fact cache TTL (development default `30`)
 
 Retention is runtime-configurable and applies to the complete candidate-analysis

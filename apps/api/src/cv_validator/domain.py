@@ -48,6 +48,7 @@ class ObservationKind(str, Enum):
     COMBINED_LOCATION_INSIDE_EU = "combined_location_inside_eu"
     MIXED_EU_LOCATION_EVIDENCE = "mixed_eu_location_evidence"
     SMALL_LOCALITY_NOT_EVALUATED = "small_locality_not_evaluated"
+    SMALL_LOCALITY_OUTSIDE_EU = "small_locality_outside_eu"
     POSSIBLE_EMAIL_DOMAIN_TYPO = "possible_email_domain_typo"
 
 
@@ -176,10 +177,13 @@ class Fact:
     resolved_level: str | None = None
     resolved_name: str | None = None
     resolved_record_ids: tuple[str, ...] = ()
+    resolved_population: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind is FactKind.CLAIMED_LOCATION and self.relation is not LocationRelation.PERSON:
             raise ValueError("claimed-location facts require a person relation")
+        if self.resolved_population is not None and self.resolved_population < 0:
+            raise ValueError("resolved_population must not be negative")
 
 
 @dataclass(frozen=True)
@@ -473,6 +477,7 @@ def _fact_to_dict(fact: Fact) -> dict[str, Any]:
         "resolved_level": fact.resolved_level,
         "resolved_name": fact.resolved_name,
         "resolved_record_ids": list(fact.resolved_record_ids),
+        "resolved_population": fact.resolved_population,
     }
 
 

@@ -65,9 +65,3 @@ class LinkedInResearchClientError(LinkedInResearchError):
 @dataclass(frozen=True)
 class LinkedInDiscoveryRequest:
     candidate: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class LinkedInComparisonRequest:
-    candidate: dict[str, Any]
-    profile_url: str

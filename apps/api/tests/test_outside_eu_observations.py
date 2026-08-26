@@ -45,6 +45,7 @@ def _record(
     name: str,
     country_code: str,
     country_name: str,
+    population: int | None = None,
 ) -> LocationMatch:
     return LocationMatch(
         record_id=record_id,
@@ -54,6 +55,7 @@ def _record(
         match_kind=MatchKind.CANONICAL,
         country_code=country_code,
         country_name=country_name,
+        population=population,
     )
 
 
@@ -222,6 +224,150 @@ def test_resolved_non_eu_locality_is_explicitly_not_evaluated_for_size() -> None
         "eu-member-states",
         "eu27-2026-08-21",
         EU_MEMBER_STATES_SOURCE_URL,
+    )
+
+
+def test_small_non_eu_locality_uses_configured_population_threshold() -> None:
+    resolver = InMemoryLocationResolver(
+        records=(
+            _record("country:PK", ResolutionLevel.COUNTRY, "Pakistan", "PK", "Pakistan"),
+            _record(
+                "locality:small-pk",
+                ResolutionLevel.LOCALITY,
+                "Smalltown",
+                "PK",
+                "Pakistan",
+                population=9_999,
+            ),
+        ),
+        reference_data_version=ComponentVersion("test-locations", "v1"),
+    )
+    document = redact_national_ids(
+        RawDocument(
+            pages=(
+                SourcePage(
+                    "page-0001",
+                    1,
+                    "Candidate\nCurrent location: Smalltown, Pakistan\n\nExperience",
+                ),
+            ),
+            source_format="text",
+        )
+    )
+
+    result = analyze_deterministically(
+        document,
+        "1.0.0",
+        location_resolver=resolver,
+        small_locality_population_max=10_000,
+    )
+    observation = next(
+        value
+        for value in result.observations
+        if value.kind is ObservationKind.SMALL_LOCALITY_OUTSIDE_EU
+    )
+
+    assert observation.values == ("Smalltown", "population:9999")
+    assert "configured review threshold (10000)" in observation.reason
+    report = score_deterministic(result, load_weights())
+    finding = next(
+        value for value in report.findings if value.signal == "small_locality_outside_eu"
+    )
+    assert finding.weight == 0
+    assert finding.score_impact == "none"
+
+
+def test_locality_at_population_threshold_is_not_classified_as_small() -> None:
+    resolver = InMemoryLocationResolver(
+        records=(
+            _record("country:PK", ResolutionLevel.COUNTRY, "Pakistan", "PK", "Pakistan"),
+            _record(
+                "locality:boundary-pk",
+                ResolutionLevel.LOCALITY,
+                "Boundarytown",
+                "PK",
+                "Pakistan",
+                population=10_000,
+            ),
+        ),
+        reference_data_version=ComponentVersion("test-locations", "v1"),
+    )
+    document = redact_national_ids(
+        RawDocument(
+            pages=(
+                SourcePage(
+                    "page-0001",
+                    1,
+                    "Candidate\nCurrent location: Boundarytown, Pakistan\n\nExperience",
+                ),
+            ),
+            source_format="text",
+        )
+    )
+
+    result = analyze_deterministically(
+        document,
+        "1.0.0",
+        location_resolver=resolver,
+        small_locality_population_max=10_000,
+    )
+
+    assert not any(
+        value.kind is ObservationKind.SMALL_LOCALITY_OUTSIDE_EU
+        for value in result.observations
+    )
+
+
+def test_country_disambiguated_small_locality_preserves_population() -> None:
+    resolver = InMemoryLocationResolver(
+        records=(
+            _record("country:PK", ResolutionLevel.COUNTRY, "Pakistan", "PK", "Pakistan"),
+            _record("country:IN", ResolutionLevel.COUNTRY, "India", "IN", "India"),
+            _record(
+                "locality:small-pk",
+                ResolutionLevel.LOCALITY,
+                "Smalltown",
+                "PK",
+                "Pakistan",
+                population=9_999,
+            ),
+            _record(
+                "locality:small-in",
+                ResolutionLevel.LOCALITY,
+                "Smalltown",
+                "IN",
+                "India",
+                population=120_000,
+            ),
+        ),
+        reference_data_version=ComponentVersion("test-locations", "v1"),
+    )
+    document = redact_national_ids(
+        RawDocument(
+            pages=(
+                SourcePage(
+                    "page-0001",
+                    1,
+                    "Candidate\nCurrent location: Smalltown, Pakistan\n\nExperience",
+                ),
+            ),
+            source_format="text",
+        )
+    )
+
+    result = analyze_deterministically(
+        document,
+        "1.0.0",
+        location_resolver=resolver,
+        small_locality_population_max=10_000,
+    )
+
+    claim = next(value for value in result.facts if value.resolved_name == "Smalltown")
+    assert claim.resolved_record_ids == ("locality:small-pk",)
+    assert claim.resolved_population == 9_999
+    assert any(
+        value.kind is ObservationKind.SMALL_LOCALITY_OUTSIDE_EU
+        for value in result.observations
     )
 
 

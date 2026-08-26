@@ -64,6 +64,24 @@ def load_ingestion_config() -> IngestionConfig:
     return IngestionConfig(minimum_meaningful_tokens=threshold)
 
 
+def load_small_locality_population_max() -> int:
+    raw_threshold = os.environ.get(
+        "CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION",
+        "10000",
+    )
+    try:
+        threshold = int(raw_threshold)
+    except ValueError as exc:
+        raise ValueError(
+            "CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION must be a non-negative integer"
+        ) from exc
+    if threshold < 0:
+        raise ValueError(
+            "CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION must be a non-negative integer"
+        )
+    return threshold
+
+
 def load_location_resolver(*, required: bool = False) -> SQLiteLocationResolver | None:
     index_path = os.environ.get("CV_VALIDATOR_LOCATION_INDEX_PATH")
     manifest_path = os.environ.get("CV_VALIDATOR_LOCATION_MANIFEST_PATH")

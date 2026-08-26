@@ -219,6 +219,7 @@ def _informational_findings(
         ObservationKind.COMBINED_LOCATION_INSIDE_EU: "combined_location_inside_eu",
         ObservationKind.MIXED_EU_LOCATION_EVIDENCE: "mixed_eu_location_evidence",
         ObservationKind.SMALL_LOCALITY_NOT_EVALUATED: "small_locality_not_evaluated",
+        ObservationKind.SMALL_LOCALITY_OUTSIDE_EU: "small_locality_outside_eu",
         ObservationKind.POSSIBLE_EMAIL_DOMAIN_TYPO: "possible_email_domain_typo",
     }
     findings: list[Finding] = []

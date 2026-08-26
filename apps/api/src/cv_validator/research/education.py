@@ -10,10 +10,11 @@ from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from cv_validator.location import Ambiguous, LocationResolver, Resolved, ResolutionLevel
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
 
-RESEARCH_VERSION = "education-research-v1"
-PROMPT_VERSION = "education-research-prompt-v1"
+RESEARCH_VERSION = "education-research-v2"
+PROMPT_VERSION = "education-research-prompt-v2"
 SCHEMA_VERSION = "education-research-schema-v1"
 MAX_CREDENTIALS = 12
 
@@ -30,7 +31,7 @@ class EducationResearchService:
         request = build_education_research_request(stored_report)
         payload, response_model, usage = self.researcher.research(request)
         validate_education_research(payload, request=request)
-        result = deepcopy(payload)
+        result = normalize_public_education_result(payload)
         result.update({
             "status": "completed", "authority": "ai_research", "source": "openai_web_search",
             "accessed_at": datetime.now(timezone.utc).isoformat(),
@@ -39,6 +40,90 @@ class EducationResearchService:
             "usage": deepcopy(usage),
         })
         return result
+
+
+def normalize_public_education_result(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove candidate-context claims that public institution research cannot support."""
+    result = deepcopy(payload)
+    for credential in result.get("credentials", []):
+        credential["cv_consistency"] = "evidence_unavailable"
+        credential["location_difference_for_review"] = None
+        credential["findings"] = [
+            finding for finding in credential.get("findings", [])
+            if finding.get("kind") != "cv_consistency"
+        ]
+    return result
+
+
+def apply_owner_scoped_education_context(
+    public_result: dict[str, Any],
+    stored_report: dict[str, Any],
+    *,
+    location_resolver: LocationResolver,
+) -> dict[str, Any]:
+    """Compare cited institution countries with the owner's code-owned location."""
+    result = normalize_public_education_result(public_result)
+    claimed_country = str(
+        (stored_report.get("claimed_location") or {}).get("country_code") or ""
+    ).strip().upper()
+    if not claimed_country:
+        return result
+
+    for credential in result.get("credentials", []):
+        country = credential.get("country")
+        if not isinstance(country, str) or not country.strip():
+            continue
+        location_findings = [
+            finding
+            for finding in credential.get("findings", [])
+            if finding.get("kind") == "location" and finding.get("source_urls")
+        ]
+        if not location_findings:
+            continue
+        resolution = location_resolver.resolve(
+            country.strip(),
+            level=ResolutionLevel.COUNTRY,
+        )
+        researched_country = None
+        if isinstance(resolution, Resolved):
+            researched_country = resolution.resolution.country_code
+        elif isinstance(resolution, Ambiguous) and resolution.common_resolution:
+            researched_country = resolution.common_resolution.country_code
+        if not researched_country:
+            continue
+
+        if researched_country == claimed_country:
+            credential["cv_consistency"] = "supported"
+            credential["location_difference_for_review"] = None
+            continue
+
+        summary = (
+            f"Public sources place this education entry in {country.strip()}, while "
+            f"the code-owned stated-location country is {claimed_country}. Review "
+            "whether the education history explains this difference."
+        )
+        credential["cv_consistency"] = "mismatch"
+        credential["location_difference_for_review"] = summary
+        source_urls = list(
+            dict.fromkeys(
+                url
+                for finding in location_findings
+                for url in finding["source_urls"]
+            )
+        )
+        credential["findings"].append(
+            {
+                "kind": "cv_consistency",
+                "summary": summary,
+                "source_urls": source_urls,
+                "confidence": credential.get("confidence", "low"),
+                "uncertainty": (
+                    "A different education country is not evidence of a false claim; "
+                    "study history may explain it."
+                ),
+            }
+        )
+    return result
 
 
 def build_education_research_request(stored_report: dict[str, Any]) -> EducationResearchRequest:
