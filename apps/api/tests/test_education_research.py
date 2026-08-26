@@ -156,7 +156,39 @@ def test_official_responses_web_search_is_bounded_strict_and_injection_resistant
     assert payload["tools"] == [{"type":"web_search", "search_context_size":"low"}]
     assert payload["include"] == ["web_search_call.action.sources"] and payload["max_tool_calls"] == 4
     assert payload["store"] is False and payload["text"]["format"]["strict"] is True
+    assert '"format": "uri"' not in json.dumps(payload["text"]["format"]["schema"])
     assert "ignore instructions" not in payload["input"] and "untrusted data" in payload["instructions"]
 
     _Response.output=[type("Search", (), {"type":"web_search_call", "action":type("Action", (), {"query":"Northbridge University", "sources":[{"url":"https://northbridge.example/"}]})()})()]
     service.run(_stored())
+
+
+def test_openai_adapter_downgrades_only_unsupported_education_claims():
+    result = _result()
+    result["credentials"][0]["findings"][0]["source_urls"] = [
+        "https://unsupported.example/claim"
+    ]
+
+    class UnsupportedResponse(_Response):
+        output_text = json.dumps(result)
+
+    class UnsupportedResponses(_Responses):
+        def create(self, **payload):
+            self.payload = payload
+            return UnsupportedResponse()
+
+    service = EducationResearchService(
+        OpenAIResponsesEducationResearcher(
+            client=type("Client", (), {"responses": UnsupportedResponses()})()
+        )
+    )
+    researched = service.run(_stored())
+    credential = researched["credentials"][0]
+    assert credential["institution_exists"] == "evidence_unavailable"
+    assert credential["findings"]
+    assert all(
+        "unsupported.example" not in url
+        for finding in credential["findings"]
+        for url in finding["source_urls"]
+    )
+    assert researched["status"] == "completed"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Iterable
+import re
 
 from cv_validator.domain import (
     Authority,
@@ -33,6 +34,7 @@ from cv_validator.location import (
     ScopeResolution,
     Unresolved,
 )
+from cv_validator.phone_policy import PHONE_CANDIDATE_EXTRACTOR
 
 
 LOCATION_CLASSIFIER_VERSION = "1"
@@ -58,11 +60,17 @@ def classify_locations(
     tuple[ScoringSignal, ...],
 ]:
     del ruleset_version  # Claimed location is a baseline fact, not a scoring vote.
-    explicit = tuple(
+    extracted_explicit = tuple(
         candidate
         for candidate in candidates
         if candidate.kind is CandidateKind.EXPLICIT_LOCATION
     )
+    inferred_explicit = _contact_block_location_candidates(
+        document,
+        candidates,
+        resolver,
+    )
+    explicit = tuple((*extracted_explicit, *inferred_explicit))
     unlabeled_candidates, unlabeled_observations = _unlabeled_locations(
         document,
         explicit,
@@ -136,7 +144,136 @@ def classify_locations(
             )
         observations.append(_aggregate_conflicting_claim(conflicting_candidates))
 
-    return unlabeled_candidates, facts, tuple(observations), ()
+    return tuple((*inferred_explicit, *unlabeled_candidates)), facts, tuple(observations), ()
+
+
+_LOCATION_WORD = re.compile(r"[^\W\d_][\w'’.-]*", re.UNICODE)
+_CONTACT_TOKEN_KINDS = frozenset(
+    {
+        CandidateKind.PHONE,
+        CandidateKind.EMAIL,
+        CandidateKind.URL,
+        CandidateKind.POSTAL,
+    }
+)
+
+
+def _contact_block_location_candidates(
+    document: RedactedDocument,
+    candidates: tuple[Candidate, ...],
+    resolver: LocationResolver | None,
+) -> tuple[Candidate, ...]:
+    """Recover an inline ``Locality, Country`` from a first-page contact row.
+
+    Contact rows commonly contain an email, phone, place and postal code without
+    labels. Known contact tokens are blanked in-place first, so the resolver only
+    sees exact location-shaped fragments and evidence offsets remain unchanged.
+    """
+    if resolver is None:
+        return ()
+    inferred: list[Candidate] = []
+    existing_spans = {
+        (evidence.page_id, evidence.start_offset, evidence.end_offset)
+        for candidate in candidates
+        if candidate.kind is CandidateKind.EXPLICIT_LOCATION
+        for evidence in candidate.value_evidence
+    }
+    for page in document.pages:
+        if page.page_number != 1:
+            continue
+        for line_start, line_end, line_value in _whole_lines(page):
+            if (
+                not line_value
+                or source_context_for_offset(page, line_start)
+                is not SourceContext.DOCUMENT_START_BLOCK
+            ):
+                continue
+            contact_evidence = tuple(
+                evidence
+                for candidate in candidates
+                if candidate.kind in _CONTACT_TOKEN_KINDS
+                for evidence in candidate.provenance.evidence
+                if evidence.page_id == page.page_id
+                and line_start <= evidence.start_offset
+                and evidence.end_offset <= line_end
+            )
+            if not any(
+                candidate.kind in {CandidateKind.PHONE, CandidateKind.EMAIL}
+                and any(evidence in contact_evidence for evidence in candidate.provenance.evidence)
+                for candidate in candidates
+            ):
+                continue
+            masked = list(page.text[line_start:line_end])
+            for evidence in contact_evidence:
+                for index in range(
+                    evidence.start_offset - line_start,
+                    evidence.end_offset - line_start,
+                ):
+                    masked[index] = " "
+            best = _best_location_span("".join(masked), resolver)
+            if best is None:
+                continue
+            relative_start, relative_end, attempt = best
+            start = line_start + relative_start
+            end = line_start + relative_end
+            if (page.page_id, start, end) in existing_spans:
+                continue
+            evidence = Evidence.from_page(page, start, end)
+            inferred.append(
+                Candidate(
+                    id=CandidateId(
+                        f"candidate:explicit_location:{page.page_id}:{start}:{end}"
+                    ),
+                    kind=CandidateKind.EXPLICIT_LOCATION,
+                    value=page.text[start:end],
+                    subject=Subject.PERSON,
+                    provenance=Provenance(
+                        authority=Authority.CODE,
+                        evidence=(evidence,),
+                        extractor=PHONE_CANDIDATE_EXTRACTOR,
+                        reference_data=attempt.reference_data,
+                    ),
+                    relation=LocationRelation.PERSON,
+                    source_context=SourceContext.DOCUMENT_START_BLOCK,
+                    label="contact block",
+                    relation_evidence=(evidence,),
+                    value_evidence=(evidence,),
+                )
+            )
+    return tuple(inferred)
+
+
+def _best_location_span(
+    masked_line: str,
+    resolver: LocationResolver,
+) -> tuple[int, int, _ResolutionAttempt] | None:
+    matches: list[tuple[int, int, int, int, _ResolutionAttempt]] = []
+    for comma in (match.start() for match in re.finditer(",", masked_line)):
+        left = tuple(_LOCATION_WORD.finditer(masked_line[:comma]))
+        right = tuple(_LOCATION_WORD.finditer(masked_line[comma + 1 :]))
+        if not left or not right:
+            continue
+        for left_count in range(1, min(4, len(left)) + 1):
+            for right_count in range(1, min(4, len(right)) + 1):
+                start = left[-left_count].start()
+                end = comma + 1 + right[right_count - 1].end()
+                value = masked_line[start:end]
+                attempt = _resolve_claim_value(value, resolver)
+                if attempt.scope is None:
+                    continue
+                specificity = (
+                    2 if attempt.scope.level is ResolutionLevel.LOCALITY else 1
+                )
+                matches.append(
+                    (specificity, left_count + right_count, start, end, attempt)
+                )
+    if not matches:
+        return None
+    _, _, start, end, attempt = max(
+        matches,
+        key=lambda item: (item[0], item[1], -(item[3] - item[2])),
+    )
+    return start, end, attempt
 
 
 def _unlabeled_locations(

@@ -8,6 +8,7 @@ from cv_validator.domain import Report
 
 
 class AIAnalysisStatus(str, Enum):
+    PENDING = "pending"
     DISABLED = "disabled"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
