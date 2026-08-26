@@ -315,7 +315,6 @@ function SidebarRail({
 }: React.ComponentProps<"button">) {
   const {
     state,
-    toggleSidebar,
     sidebarWidth,
     setSidebarWidth,
     setIsResizing,
@@ -330,11 +329,13 @@ function SidebarRail({
 
   function finishDrag(element: HTMLButtonElement, pointerId: number) {
     if (!drag.current || drag.current.pointerId !== pointerId) return
+    const completedDrag = drag.current
     if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId)
     window.localStorage.setItem(
       SIDEBAR_WIDTH_STORAGE_KEY,
-      String(drag.current.currentWidth),
+      String(completedDrag.currentWidth),
     )
+    drag.current = null
     document.body.style.cursor = ""
     document.body.style.userSelect = ""
     setIsResizing(false)
@@ -344,16 +345,10 @@ function SidebarRail({
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="Resize or collapse sidebar"
+      aria-label="Resize sidebar"
       tabIndex={0}
       onClick={(event) => {
         onClick?.(event)
-        if (event.defaultPrevented) return
-        if (drag.current?.moved) {
-          drag.current = null
-          return
-        }
-        toggleSidebar()
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event)
@@ -404,7 +399,7 @@ function SidebarRail({
         finishDrag(event.currentTarget, event.pointerId)
       }}
       onPointerCancel={(event) => finishDrag(event.currentTarget, event.pointerId)}
-      title="Drag to resize. Click to collapse."
+      title="Drag to resize sidebar."
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 touch-none transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-accent focus-visible:after:bg-sidebar-accent sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "cursor-col-resize",

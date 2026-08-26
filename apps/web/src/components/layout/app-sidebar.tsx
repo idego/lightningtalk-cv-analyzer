@@ -55,13 +55,13 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
         </Link>
       </SidebarHeader>
 
-      <SidebarContent className="relative z-10 group-data-[collapsible=icon]:translate-x-2">
+      <SidebarContent className="relative z-10">
         {nav.map((group) => (
           <SidebarGroup
             key={group.title}
             className="group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-1"
           >
-            <SidebarMenu className="group-data-[collapsible=icon]:w-10">
+            <SidebarMenu>
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton

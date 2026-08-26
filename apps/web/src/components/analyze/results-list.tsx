@@ -195,7 +195,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 <div className="mt-3 space-y-3 text-sm">
                   <p className="text-muted-foreground">{report.summary}</p>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <div><span className="text-muted-foreground">Score:</span> {report.band === "gray" ? "Not assessed" : report.score}</div>
+                    <div><span className="text-muted-foreground">Score:</span> {report.score}/100{report.band === "gray" ? " (insufficient evidence)" : ""}</div>
                     <div><span className="text-muted-foreground">Claimed:</span> {claimed}</div>
                     <div><span className="text-muted-foreground">Signals:</span> {report.signal_count}</div>
                   </div>
