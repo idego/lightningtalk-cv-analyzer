@@ -1,4 +1,62 @@
-import type { AIAnalysis, ReviewFlag } from "@/lib/analyze-types";
+import type { AIAnalysis, AnalysisReport, ReviewFlag } from "@/lib/analyze-types";
+
+function countryLabel(countryCode: string) {
+  const code = countryCode.toUpperCase();
+  const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
+  return name && name !== code ? `${name} (${code})` : code;
+}
+
+export function structuredFactLines(
+  report: Pick<AnalysisReport, "deterministic" | "ai_analysis">,
+) {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  const add = (line: string) => {
+    const normalized = line.trim().toLocaleLowerCase();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    lines.push(line);
+  };
+
+  for (const candidate of report.deterministic.candidates) {
+    if (candidate.subject !== "person") continue;
+    if (candidate.kind === "phone") add(`Phone: ${candidate.value}`);
+    if (candidate.kind === "explicit_location") {
+      add(`Stated location: ${candidate.value}`);
+    }
+  }
+  for (const fact of report.deterministic.facts) {
+    if (fact.subject !== "person") continue;
+    if (fact.kind === "phone_country") {
+      add(`Phone country: ${countryLabel(fact.value)}`);
+    }
+    if (fact.kind === "claimed_location") {
+      const location = fact.resolved_name ?? fact.value;
+      add(`Resolved location: ${location}${fact.value ? ` (${fact.value})` : ""}`);
+    }
+  }
+  if (report.deterministic.observations.some(
+    (observation) => observation.kind === "combined_location_outside_eu",
+  )) {
+    add("EU status: Outside the EU");
+  }
+
+  const contactLabels = {
+    candidate_name: "Candidate name",
+    phone: "Phone",
+    stated_location: "Stated location",
+  } as const;
+  for (const fact of report.ai_analysis.facts.contact) {
+    add(`${contactLabels[fact.kind]}: ${fact.value}`);
+  }
+  for (const fact of report.ai_analysis.facts.education) {
+    add([fact.institution, fact.program, fact.study_dates].filter(Boolean).join(" — "));
+  }
+  for (const fact of report.ai_analysis.facts.employment) {
+    add([fact.organization, fact.role, fact.employment_dates].filter(Boolean).join(" — "));
+  }
+  return lines;
+}
 
 export function partitionReviewFlags(flags: ReviewFlag[]) {
   return {
@@ -117,6 +175,11 @@ export function aiStatusMessage(
   reason: AIAnalysis["failure_reason"],
   language: "en" | "pl" = "en",
 ) {
+  if (status === "pending") {
+    return language === "pl"
+      ? "Dane sprawdzone kodem są gotowe. Dodajemy analizę AI…"
+      : "Code-checked facts are ready. Adding AI analysis…";
+  }
   if (status === "disabled") {
     return language === "pl"
       ? "Analiza AI jest wyłączona. Sprawdź stan systemu w Ustawieniach."

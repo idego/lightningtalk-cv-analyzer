@@ -95,7 +95,7 @@ export type AIEmploymentFact = AICompositeFactBase & {
 };
 
 export type AIAnalysis = {
-  status: "disabled" | "succeeded" | "failed";
+  status: "pending" | "disabled" | "succeeded" | "failed";
   failure_reason: "timeout" | "refusal" | "invalid_response" | "client_error" | null;
   failure: {
     stage: string | null;
@@ -200,7 +200,7 @@ export type EducationResearch = {
 export type LinkedInDiscovery = {
   status: "completed"; outcome: "completed" | "ambiguous" | "insufficient_evidence";
   linkedin_not_found: boolean; not_found_caveat: string; searches_performed: string[]; search_limitations: string[];
-  possible_profiles: Array<{ profile_url: string; confidence: "low" | "medium" | "high"; uncertainty: string;
+  possible_profiles: Array<{ profile_url: string; source_urls: string[]; confidence: "low" | "medium" | "high"; uncertainty: string;
     match_evidence: Array<{ field: string; cv_value: string; profile_value: string; source_urls: string[] }>;
     conflicts: Array<{ field: string; summary: string; source_urls: string[] }>;
     photo_visible: "true" | "false" | "unknown"; photo_source_url: string | null;
