@@ -132,6 +132,7 @@ def test_eu_member_does_not_emit_outside_eu_observations() -> None:
         ObservationKind.COMBINED_LOCATION_OUTSIDE_EU,
         ObservationKind.MIXED_EU_LOCATION_EVIDENCE,
     }
+    assert ObservationKind.COMBINED_LOCATION_INSIDE_EU in kinds
 
 
 def test_one_non_eu_category_never_emits_combined() -> None:

@@ -24,9 +24,10 @@ from cv_validator.domain import (
 )
 from cv_validator.phone_policy import PHONE_RULE_ID, phone_signal_graph_is_valid
 from cv_validator.location_policy import claimed_location_graph_is_valid
+from cv_validator.postal_policy import POSTAL_RULE_ID, postal_signal_graph_is_valid
 
 
-SCORING_POLICY_VERSION = "deterministic-phone-comparison-v1"
+SCORING_POLICY_VERSION = "deterministic-phone-postal-comparison-v2"
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ def score_deterministic(
                 or supporting_facts & used_supporting_facts
             ):
                 continue
-            finding = _phone_comparison_finding(
+            finding = _comparison_finding(
                 signal,
                 deterministic,
                 claim,
@@ -128,24 +129,37 @@ def score_deterministic(
     )
 
 
-def _phone_comparison_finding(
+def _comparison_finding(
     signal: ScoringSignal,
     deterministic: DeterministicAnalysisResult,
     claim: ClaimedLocation,
     weights: WeightsConfig,
 ) -> Finding | None:
-    if (
-        signal.kind is not ScoringSignalKind.PHONE_COUNTRY
-        or signal.rule_id != PHONE_RULE_ID
-        or signal.ruleset_version != weights.version
-        or signal.provenance.authority is not Authority.CODE
-        or not phone_signal_graph_is_valid(
+    if signal.ruleset_version != weights.version or signal.provenance.authority is not Authority.CODE:
+        return None
+    if signal.kind is ScoringSignalKind.PHONE_COUNTRY:
+        fact_kind = FactKind.PHONE_COUNTRY
+        weight_key = "phone_country"
+        signal_name = "phone_country"
+        valid = signal.rule_id == PHONE_RULE_ID and phone_signal_graph_is_valid(
             deterministic.candidates,
             deterministic.facts,
             signal,
             expected_ruleset_version=weights.version,
         )
-    ):
+    elif signal.kind is ScoringSignalKind.POSTAL_COUNTRY:
+        fact_kind = FactKind.POSTAL_COUNTRY
+        weight_key = "address_postal"
+        signal_name = "address_postal"
+        valid = signal.rule_id == POSTAL_RULE_ID and postal_signal_graph_is_valid(
+            deterministic.candidates,
+            deterministic.facts,
+            signal,
+            expected_ruleset_version=weights.version,
+        )
+    else:
+        return None
+    if not valid:
         return None
     facts_by_id = {fact.id: fact for fact in deterministic.facts}
     supporting_facts = tuple(
@@ -155,7 +169,7 @@ def _phone_comparison_finding(
         not supporting_facts
         or any(fact is None for fact in supporting_facts)
         or any(
-            fact.kind is not FactKind.PHONE_COUNTRY
+            fact.kind is not fact_kind
             or fact.subject is not Subject.PERSON
             or fact.provenance.authority is not Authority.CODE
             or fact.value != signal.value
@@ -164,21 +178,21 @@ def _phone_comparison_finding(
         )
     ):
         return None
-    cfg = weights.signals["phone_country"]
+    cfg = weights.signals[weight_key]
     direction = (
         AgreementDirection.SUPPORTS
         if signal.value == claim.country_code
         else AgreementDirection.CONFLICTS
     )
     return Finding(
-        signal="phone_country",
+        signal=signal_name,
         strength=cfg.strength,
         observed=signal.value,
         claimed=claim.raw or claim.country_code,
         direction=direction,
         weight=cfg.weight,
         rationale=(
-            "Aggregate explicitly person-owned phone country is compared with "
+            f"Code-owned {signal_name.replace('_', ' ')} is compared with "
             "the code-owned claimed-location country"
         ),
         authority=Authority.CODE,
@@ -202,6 +216,7 @@ def _informational_findings(
         ObservationKind.PHONE_OUTSIDE_EU: "phone_outside_eu",
         ObservationKind.STATED_LOCATION_OUTSIDE_EU: "stated_location_outside_eu",
         ObservationKind.COMBINED_LOCATION_OUTSIDE_EU: "combined_location_outside_eu",
+        ObservationKind.COMBINED_LOCATION_INSIDE_EU: "combined_location_inside_eu",
         ObservationKind.MIXED_EU_LOCATION_EVIDENCE: "mixed_eu_location_evidence",
         ObservationKind.SMALL_LOCALITY_NOT_EVALUATED: "small_locality_not_evaluated",
         ObservationKind.POSSIBLE_EMAIL_DOMAIN_TYPO: "possible_email_domain_typo",

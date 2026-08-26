@@ -29,6 +29,7 @@ class CandidateKind(str, Enum):
 
 class FactKind(str, Enum):
     PHONE_COUNTRY = "phone_country"
+    POSTAL_COUNTRY = "postal_country"
     CLAIMED_LOCATION = "claimed_location"
 
 
@@ -44,6 +45,7 @@ class ObservationKind(str, Enum):
     PHONE_OUTSIDE_EU = "phone_outside_eu"
     STATED_LOCATION_OUTSIDE_EU = "stated_location_outside_eu"
     COMBINED_LOCATION_OUTSIDE_EU = "combined_location_outside_eu"
+    COMBINED_LOCATION_INSIDE_EU = "combined_location_inside_eu"
     MIXED_EU_LOCATION_EVIDENCE = "mixed_eu_location_evidence"
     SMALL_LOCALITY_NOT_EVALUATED = "small_locality_not_evaluated"
     POSSIBLE_EMAIL_DOMAIN_TYPO = "possible_email_domain_typo"
@@ -59,6 +61,7 @@ class ObservationStatus(str, Enum):
 
 class ScoringSignalKind(str, Enum):
     PHONE_COUNTRY = "phone_country"
+    POSTAL_COUNTRY = "postal_country"
 
 
 class Subject(str, Enum):
@@ -274,15 +277,31 @@ class DeterministicAnalysisResult:
             if set(signal.supporting_fact_ids) & reused_supporting_facts:
                 raise ValueError("supporting facts cannot be reused across categories")
             reused_supporting_facts.update(signal.supporting_fact_ids)
-            from cv_validator.phone_policy import phone_signal_graph_is_valid
+            if signal.kind is ScoringSignalKind.PHONE_COUNTRY:
+                from cv_validator.phone_policy import phone_signal_graph_is_valid
 
-            if not phone_signal_graph_is_valid(
-                self.candidates,
-                self.facts,
-                signal,
-                expected_ruleset_version=self.ruleset_version,
-            ):
-                raise ValueError("invalid phone scoring graph")
+                valid = phone_signal_graph_is_valid(
+                    self.candidates,
+                    self.facts,
+                    signal,
+                    expected_ruleset_version=self.ruleset_version,
+                )
+                invalid_message = "invalid phone scoring graph"
+            elif signal.kind is ScoringSignalKind.POSTAL_COUNTRY:
+                from cv_validator.postal_policy import postal_signal_graph_is_valid
+
+                valid = postal_signal_graph_is_valid(
+                    self.candidates,
+                    self.facts,
+                    signal,
+                    expected_ruleset_version=self.ruleset_version,
+                )
+                invalid_message = "invalid postal scoring graph"
+            else:
+                valid = False
+                invalid_message = "invalid deterministic scoring graph"
+            if not valid:
+                raise ValueError(invalid_message)
 
     def to_dict(self) -> dict[str, Any]:
         return {

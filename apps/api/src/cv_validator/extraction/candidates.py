@@ -239,6 +239,8 @@ def _from_matches(
                 explicitly_labeled and has_international_prefix
             ):
                 continue
+            if any(pattern.fullmatch(value.strip()) for pattern in _DATE_PATTERNS):
+                continue
             core = re.split(r"(?i)[ \t]*(?:ext\.?|x)[ \t]*", value, maxsplit=1)[0]
             digit_count = len(re.sub(r"\D", "", core))
             if not 7 <= digit_count <= 15:

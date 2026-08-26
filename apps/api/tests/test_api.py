@@ -79,8 +79,46 @@ def test_single_analyze_success(client):
     assert body["ruleset_version"] == {
         "version": "1.0.0",
         "weights_path": body["ruleset_version"]["weights_path"],
-        "scoring_policy_version": "deterministic-phone-comparison-v1",
+            "scoring_policy_version": "deterministic-phone-postal-comparison-v2",
     }
+
+
+def test_single_analyze_scores_independent_phone_and_postal_country(client):
+    content = _docx_bytes(
+        "Jane Example\n"
+        "jane@example.com +48 732080047 Opole, Poland 45-061\n"
+        "Software engineer"
+    )
+
+    response = client.post(
+        "/analyze",
+        files={
+            "file": (
+                "cv.docx",
+                content,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score"] == 100
+    assert body["band"] == "green"
+    assert body["signal_count"] == 2
+    assert {fact["kind"] for fact in body["deterministic"]["facts"]} >= {
+        "claimed_location",
+        "phone_country",
+        "postal_country",
+    }
+    assert {
+        signal["kind"]
+        for signal in body["deterministic"]["scoring_signals"]
+    } == {"phone_country", "postal_country"}
+    assert any(
+        observation["kind"] == "combined_location_inside_eu"
+        for observation in body["deterministic"]["observations"]
+    )
     phone_finding = next(
         finding for finding in body["findings"]
         if finding["signal"] == "phone_country"
@@ -293,7 +331,7 @@ def test_audit_entry_written(client):
     entries = store.get_audit_entries()
     assert len(entries) == 1
     assert entries[0]["ruleset_version"] == (
-        "weights:1.0.0;policy:deterministic-phone-comparison-v1"
+        "weights:1.0.0;policy:deterministic-phone-postal-comparison-v2"
     )
     output = json.loads(entries[0]["output_json"])
     assert output == response.json()
@@ -301,7 +339,7 @@ def test_audit_entry_written(client):
     assert output["band"] == "gray"
     assert (
         output["ruleset_version"]["scoring_policy_version"]
-        == "deterministic-phone-comparison-v1"
+            == "deterministic-phone-postal-comparison-v2"
     )
 
 

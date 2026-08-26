@@ -33,6 +33,9 @@ PARTIAL_VALIDATION_WARNING = (
     "Część danych nie została pokazana, ponieważ nie udało się potwierdzić "
     "ich w tekście CV."
 )
+MODEL_CONCLUSION_REVIEW_WARNING = (
+    "Model notes were preserved and require human review."
+)
 _CATEGORY_CHECK_IDS = {
     "contact_conflict": "contact",
     "missing_contact_data": "contact",
@@ -43,6 +46,7 @@ _CATEGORY_CHECK_IDS = {
     "document_artifact": "document_quality",
     "semantic_outlier": "employment",
     "internal_fact_conflict": "contact",
+    "education_outside_eu": "education",
 }
 _FORBIDDEN_AUTHORED_PATTERNS = (
     re.compile(
@@ -101,8 +105,9 @@ def validate_document_analysis_payload(
 ) -> ValidatedDocumentAnalysis:
     """Validate/materialize the v8 model-only response.
 
-    A bad root, protected-boundary violation, or unusable finding evidence is
-    a response failure.  Individual fact fields are different: an unsupported
+    A bad root or unusable finding evidence is a response failure. Model-authored
+    conclusions that cross a protected boundary are preserved with a warning
+    instead of discarding the paid response. Individual fact fields are different: an unsupported
     optional field is discarded while independently supported fields remain.
     The model supplies only values, line IDs, and reviewer prose; code owns
     excerpts, metadata, checklist counts, and research candidates.
@@ -127,15 +132,12 @@ def validate_document_analysis_payload(
             "AI document analysis response failed validation: schema"
         )
 
-    source_lines = _source_line_index(pages)
-    if any(
+    model_conclusion_requires_review = any(
         pattern.search(text)
         for text in _iter_model_authored_conclusions_lean(payload)
         for pattern in _FORBIDDEN_AUTHORED_PATTERNS
-    ):
-        raise DocumentAnalysisValidationError(
-            "AI document analysis response failed validation: protected boundary"
-        )
+    )
+    source_lines = _source_line_index(pages)
 
     # Findings are reviewer-facing claims.  An unusable finding citation
     # cannot be safely shown, so it fails closed at the response boundary.
@@ -232,6 +234,22 @@ def validate_document_analysis_payload(
         group: _dedupe_facts(items)
         for group, items in materialized_facts.items()
     }
+    accepted_education_line_ids = {
+        evidence["line_id"]
+        for education in materialized_facts["education"]
+        for evidence in education.get("field_evidence", {}).get("institution", [])
+    }
+    supported_findings = [
+        finding
+        for finding in findings
+        if finding.get("category") != "education_outside_eu"
+        or any(
+            evidence.get("line_id") in accepted_education_line_ids
+            for evidence in finding.get("evidence", [])
+        )
+    ]
+    partial = partial or supported_findings != findings
+    findings = supported_findings
     if rejected_values:
         # Fact fields have already been validated independently above.  Do
         # not scrub accepted facts by literal value: a supported value may be
@@ -278,10 +296,15 @@ def validate_document_analysis_payload(
         "checklist": checklist,
         "analysis_limitations": analysis_limitations,
     }
+    validation_warnings: list[str] = []
     if partial:
+        validation_warnings.append(PARTIAL_VALIDATION_WARNING)
+    if model_conclusion_requires_review:
+        validation_warnings.append(MODEL_CONCLUSION_REVIEW_WARNING)
+    if validation_warnings:
         # This is code-owned presentation metadata; it is intentionally not
         # accepted from the model schema.
-        result["validation_warnings"] = [PARTIAL_VALIDATION_WARNING]
+        result["validation_warnings"] = validation_warnings
     return ValidatedDocumentAnalysis(schema_version=SCHEMA_VERSION, payload=result)
 
 
