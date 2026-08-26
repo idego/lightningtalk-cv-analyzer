@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { aiStatusMessage, aiValidationState, aiValidationWarning, partitionReviewFlags, presentReviewFlag } from "./review-findings.ts";
+import { aiStatusMessage, aiValidationState, aiValidationWarning, partitionReviewFlags, presentReviewFlag, structuredFactLines } from "./review-findings.ts";
 
 const flag = (id, importance) => ({ id, importance });
 
@@ -30,6 +30,51 @@ test("describes disabled, refusal and technical failure without a verdict", () =
   assert.match(aiStatusMessage("failed", "timeout"), /failed/i);
   assert.match(aiStatusMessage("disabled", null, "pl"), /wyłączona/i);
   assert.equal(aiStatusMessage("succeeded", null), null);
+  assert.match(aiStatusMessage("pending", null), /adding AI/i);
+});
+
+test("shows deterministic facts before AI and merges AI facts afterward", () => {
+  const baseReport = {
+    deterministic: {
+      candidates: [
+        { kind: "phone", value: "+48 732 080 047", subject: "person" },
+      ],
+      facts: [
+        { kind: "phone_country", value: "PL", subject: "person", resolved_name: null },
+      ],
+      observations: [],
+    },
+    ai_analysis: {
+      facts: { contact: [], education: [], employment: [] },
+    },
+  };
+
+  assert.deepEqual(structuredFactLines(baseReport), [
+    "Phone: +48 732 080 047",
+    "Phone country: Poland (PL)",
+  ]);
+
+  const enriched = structuredFactLines({
+    ...baseReport,
+    ai_analysis: {
+      facts: {
+        contact: [
+          { kind: "phone", value: "+48 732 080 047" },
+          { kind: "stated_location", value: "Opole, Poland" },
+        ],
+        education: [{ institution: "Example University", program: "Computer Science", study_dates: "2020-2024" }],
+        employment: [{ organization: "Example Ltd", role: "Engineer", employment_dates: "2024-present" }],
+      },
+    },
+  });
+
+  assert.deepEqual(enriched, [
+    "Phone: +48 732 080 047",
+    "Phone country: Poland (PL)",
+    "Stated location: Opole, Poland",
+    "Example University — Computer Science — 2020-2024",
+    "Example Ltd — Engineer — 2024-present",
+  ]);
 });
 
 test("surfaces partial AI validation without hiding valid output", () => {

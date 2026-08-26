@@ -58,6 +58,21 @@ export function UploadPanel() {
     return payload.results?.[0] ?? { filename: file.name, status: "error", error: "No result was returned" };
   }
 
+  async function enrichWithAi(
+    result: Extract<AnalyzeItemResult, { status: "ok" }>,
+  ): Promise<Extract<AnalyzeItemResult, { status: "ok" }>> {
+    if (result.report.ai_analysis.status !== "pending") return result;
+    const response = await fetch(
+      `/api/analyses/${encodeURIComponent(result.report.analysis_id)}/ai/retry`,
+      { method: "POST" },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error ?? payload.detail ?? "AI analysis failed");
+    }
+    return { ...result, report: payload };
+  }
+
   async function submit() {
     setError(null); if (!acceptedFiles.length) { setError("Add at least one PDF or DOCX file."); return; }
     setLoading(true); setEntries([]); setCurrentIndex(0); setElapsedSeconds(0);
@@ -65,7 +80,43 @@ export function UploadPanel() {
       const file = acceptedFiles[index]; setCurrentIndex(index); let result: AnalyzeItemResult;
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : "Unexpected analysis error" }; }
       setEntries((previous) => [...previous, { file, result }]);
-      if (result.status === "ok") void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+      if (result.status === "ok") {
+        try {
+          const enriched = await enrichWithAi(result);
+          result = enriched;
+          setEntries((previous) => previous.map((entry) =>
+            entry.result.status === "ok"
+              && entry.result.report.analysis_id === enriched.report.analysis_id
+              ? { ...entry, result: enriched }
+              : entry,
+          ));
+          if (enriched.report.ai_analysis.status === "succeeded") {
+            void getAutoResearchOrchestrator()?.schedule(enriched.report, settings);
+          }
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : "AI analysis failed";
+          const failed: typeof result = {
+            ...result,
+            report: {
+              ...result.report,
+              ai_analysis: {
+                ...result.report.ai_analysis,
+                status: "failed",
+                failure_reason: "client_error",
+                manual_retry_available: true,
+              },
+            },
+          };
+          result = failed;
+          setEntries((previous) => previous.map((entry) =>
+            entry.result.status === "ok"
+              && entry.result.report.analysis_id === failed.report.analysis_id
+              ? { ...entry, result: failed }
+              : entry,
+          ));
+          setError(message);
+        }
+      }
     }
     setLoading(false);
   }

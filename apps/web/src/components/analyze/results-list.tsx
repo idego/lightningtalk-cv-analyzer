@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ThinkingOrb } from "thinking-orbs";
 import type {
   AIAnalysis,
   AnalyzeItemResult,
@@ -9,7 +10,7 @@ import type {
 } from "@/lib/analyze-types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { aiStatusMessage, aiValidationState, partitionReviewFlags, presentReviewFlag } from "@/lib/review-findings";
+import { aiStatusMessage, aiValidationState, partitionReviewFlags, presentReviewFlag, structuredFactLines } from "@/lib/review-findings";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
@@ -59,22 +60,9 @@ const CHECK_LABELS: Record<ChecklistId, { en: string; pl: string }> = {
   protected_boundaries: { en: "Safe inference boundaries", pl: "Granice bezpiecznych wniosków" },
 };
 
-function StructuredFacts({ analysis }: { analysis: AIAnalysis }) {
+function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"] }) {
   const { t } = useCopy();
-  const contactLabels = {
-    candidate_name: "Candidate name",
-    phone: "Phone",
-    stated_location: "Stated location",
-  } as const;
-  const facts = [
-    ...analysis.facts.contact.map((fact) => `${contactLabels[fact.kind]}: ${fact.value}`),
-    ...analysis.facts.education.map((fact) =>
-      [fact.institution, fact.program, fact.study_dates].filter(Boolean).join(" — "),
-    ),
-    ...analysis.facts.employment.map((fact) =>
-      [fact.organization, fact.role, fact.employment_dates].filter(Boolean).join(" — "),
-    ),
-  ];
+  const facts = structuredFactLines(report);
 
   return (
     <details className="rounded-md border p-3">
@@ -87,7 +75,7 @@ function StructuredFacts({ analysis }: { analysis: AIAnalysis }) {
         </ul>
       ) : (
         <p className="mt-3 text-sm text-muted-foreground">
-          AI did not return structured CV data.
+          No structured CV data was found yet.
         </p>
       )}
     </details>
@@ -178,7 +166,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
             <CardContent className="space-y-3">
               {statusMessage ? (
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3"><span>{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? (settings.uiLanguage === "pl" ? "Ponawianie…" : "Retrying…") : (settings.uiLanguage === "pl" ? "Ponów analizę AI" : "Retry AI analysis")}</Button> : null}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2">{report.ai_analysis.status === "pending" ? <ThinkingOrb state="working" size={20} theme="auto" aria-label="AI analysis in progress" /> : null}{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? (settings.uiLanguage === "pl" ? "Ponawianie…" : "Retrying…") : (settings.uiLanguage === "pl" ? "Ponów analizę AI" : "Retry AI analysis")}</Button> : null}</div>
                   {retryError[report.analysis_id] ? <p className="mt-2 text-xs text-destructive">{retryError[report.analysis_id]}</p> : null}
                 </div>
               ) : null}
@@ -198,9 +186,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 <FlagList flags={grouped.worthKnowing} emptyText={t("noWorth")} reportLanguage={report.ai_analysis.report_language} />
               </section>
 
-              {validationState.showAcceptedOutput ? (
-                <StructuredFacts analysis={report.ai_analysis} />
-              ) : null}
+              <StructuredFacts report={report} />
 
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-medium">

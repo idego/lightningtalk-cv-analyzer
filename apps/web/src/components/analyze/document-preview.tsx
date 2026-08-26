@@ -16,7 +16,25 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isPdf && containerRef.current) { containerRef.current.replaceChildren(); void import("docx-preview").then(({ renderAsync }) => renderAsync(file, containerRef.current!, undefined, { breakPages: true, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, ignoreLastRenderedPageBreak: true })).then(() => setLoading(false)).catch(() => { setLoading(false); setError("This DOCX could not be previewed. You can still open the original file."); }); }
+    if (!isPdf && containerRef.current) {
+      containerRef.current.replaceChildren();
+      void import("docx-preview")
+        .then(({ renderAsync }) => renderAsync(file, containerRef.current!, undefined, {
+          breakPages: true,
+          ignoreWidth: false,
+          // Keep the in-app preview continuous. docx-preview otherwise turns
+          // continuous Word sections into separate, mostly empty pages.
+          ignoreHeight: true,
+          renderHeaders: true,
+          renderFooters: true,
+          ignoreLastRenderedPageBreak: false,
+        }))
+        .then(() => setLoading(false))
+        .catch(() => {
+          setLoading(false);
+          setError("This DOCX could not be previewed. You can still open the original file.");
+        });
+    }
     return () => URL.revokeObjectURL(url);
   }, [file, isPdf, url]);
 
