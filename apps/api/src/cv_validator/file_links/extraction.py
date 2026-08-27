@@ -5,6 +5,8 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
+from docx.opc.constants import RELATIONSHIP_TYPE
+
 from cv_validator.domain import (
     ComponentVersion,
     DocumentLink,
@@ -73,7 +75,7 @@ def extract_pdf_file_details(pdf: Any) -> FileDetails:
 
 
 def extract_docx_file_details(document: Any) -> FileDetails:
-    properties = getattr(document, "core_properties", None)
+    properties = _docx_core_properties(document)
     values = {
         FileDetailField.AUTHOR: _docx_property_text(properties, "author"),
         FileDetailField.LAST_MODIFIER: _object_text(properties, "last_modified_by"),
@@ -323,6 +325,17 @@ def _object_value(value: Any, attribute: str) -> Any:
         return getattr(value, attribute, None)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _docx_core_properties(document: Any) -> Any:
+    package = _object_value(_object_value(document, "part"), "package")
+    if package is None:
+        return None
+    try:
+        core_part = package.part_related_by(RELATIONSHIP_TYPE.CORE_PROPERTIES)
+    except (AttributeError, KeyError):
+        return None
+    return _object_value(core_part, "core_properties")
 
 
 def _object_text(value: Any, attribute: str) -> str | None:
