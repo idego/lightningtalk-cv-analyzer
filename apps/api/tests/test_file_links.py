@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 from docx import Document
+from docx.opc.constants import RELATIONSHIP_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from fastapi.testclient import TestClient
@@ -486,6 +487,21 @@ def test_docx_hyperlinks_inside_a_paragraph_keep_explicit_page_association() -> 
 
 def test_default_docx_tool_metadata_is_not_reporter_metadata() -> None:
     details = extract_docx_file_details(Document())
+
+    assert all(field.status is FileDetailStatus.UNAVAILABLE for field in details.fields)
+
+
+def test_docx_without_core_properties_does_not_report_library_defaults() -> None:
+    document = Document()
+    package = document.part.package
+    core_relationship_id = next(
+        relationship_id
+        for relationship_id, relationship in package.rels.items()
+        if relationship.reltype == RELATIONSHIP_TYPE.CORE_PROPERTIES
+    )
+    package.rels.pop(core_relationship_id)
+
+    details = extract_docx_file_details(document)
 
     assert all(field.status is FileDetailStatus.UNAVAILABLE for field in details.fields)
 
