@@ -70,9 +70,9 @@ immutable weights version and a separate immutable scoring-policy version.
 - **WHEN** deterministic signal weights are updated in configuration
 - **THEN** scoring reflects the new weights without code changes
 
-#### Scenario: Slice 2 runs without approved calibration
-- **WHEN** a future Slice 2 input is removed or replaced and no separately
-  approved calibration exists for that change
+#### Scenario: Scoring inputs change without approved calibration
+- **WHEN** an eligible deterministic scoring input is removed or replaced and
+  no separately approved calibration exists for that change
 - **THEN** the configured weights, minimum evidence requirement, and band
   thresholds remain unchanged
 - **AND** insufficient mechanically defensible evidence produces the
