@@ -52,7 +52,6 @@ def _documents():
 
 def _valid_response() -> dict:
     return {
-        "schema_version": SCHEMA_VERSION,
         "facts": {
             "contact": [],
             "education": [
