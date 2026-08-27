@@ -30,7 +30,6 @@ from cv_validator.serialization import serialize_report_payload
 
 def _empty_response() -> dict:
     return {
-        "schema_version": SCHEMA_VERSION,
         "facts": {"contact": [], "education": [], "employment": []},
         "findings": [],
         "unknowns": [],

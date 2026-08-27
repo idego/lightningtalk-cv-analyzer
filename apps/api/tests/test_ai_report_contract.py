@@ -119,7 +119,6 @@ class _Analyzer:
         self.requests.append(request)
         return DocumentAnalyzerResponse(
             payload={
-                "schema_version": SCHEMA_VERSION,
                 "facts": {"contact": [], "education": [], "employment": []},
                 "findings": [],
                 "unknowns": [],
@@ -769,7 +768,6 @@ def test_outside_eu_context_is_zero_weight_but_recruiter_visible() -> None:
 
 def test_partial_validation_never_persists_rejected_model_text(tmp_path) -> None:
     payload = {
-        "schema_version": SCHEMA_VERSION,
         "facts": {
             "contact": [],
             "education": [

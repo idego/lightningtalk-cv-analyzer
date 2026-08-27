@@ -38,7 +38,7 @@ from cv_validator.ingestion import SourcePage  # noqa: E402
 PRIVATE_EVAL_ROOT = (ROOT / "data/ai-eval").resolve()
 CONTRACT_ROOT = ROOT / "apps/api/src/cv_validator/ai/contracts"
 PROMPT_PATH = CONTRACT_ROOT / "prompt.md"
-SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.v8.json"
+SCHEMA_PATH = CONTRACT_ROOT / "document-analysis.schema.v9.json"
 CHECK_IDS = set(REQUIRED_CHECK_IDS)
 MANUAL_LABELS = {
     "useful",
@@ -342,7 +342,8 @@ def dematerialize_code_owned_excerpts(
     pages: dict[str, str],
 ) -> dict[str, Any]:
     candidate = deepcopy(result)
-    if candidate.get("schema_version") == SCHEMA_VERSION:
+    is_current_materialized_result = candidate.get("schema_version") == SCHEMA_VERSION
+    if is_current_materialized_result:
         _dematerialize_v8_envelope(candidate)
     source_lines = {
         line.line_id: (page.page_id, line.text)
@@ -358,10 +359,12 @@ def dematerialize_code_owned_excerpts(
                 and source[0] == evidence.get("page_id")
                 and source[1] == evidence.get("excerpt")
             ):
-                if candidate.get("schema_version") == SCHEMA_VERSION:
+                if is_current_materialized_result:
                     evidence.pop("excerpt", None)
                 else:
                     evidence["excerpt"] = None
+    if is_current_materialized_result:
+        candidate.pop("schema_version", None)
     return candidate
 
 
@@ -605,7 +608,9 @@ def score(
     ]
     evidence_sections = evidence_items_by_section(result)
     evidence_items = evidence_sections["findings"]
-    allow_unmaterialized_line = result.get("schema_version") == SCHEMA_VERSION
+    allow_unmaterialized_line = all(
+        "excerpt" not in evidence for evidence in evidence_items
+    )
     accurate = sum(
         evidence_is_exact(
             evidence,

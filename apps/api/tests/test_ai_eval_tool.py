@@ -36,7 +36,6 @@ def model_evidence(page_id="page-0001", line_id="page-0001-line-0001"):
 
 def valid_result():
     return {
-        "schema_version": SCHEMA_VERSION,
         "facts": {
             "contact": [{"kind": "phone", "value": "source evidence", "status": "present", "evidence": [model_evidence()]}],
             "education": [],

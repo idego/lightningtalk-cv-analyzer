@@ -1,11 +1,8 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "document-analysis-schema-v9",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "facts", "findings", "unknowns", "analysis_limitations"],
+  "required": ["facts", "findings", "unknowns", "analysis_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "document-analysis-schema-v9"},
     "facts": {
       "type": "object",
       "additionalProperties": false,
