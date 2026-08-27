@@ -15,7 +15,6 @@ import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   aiStatusMessage,
-  locationConsistencyPresentation,
   mergeCompletedResearch,
   partitionReviewFlags,
   presentReviewFlag,
@@ -24,6 +23,7 @@ import {
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
+import { FileDetailsDisclosure, LinkInspectionPanel } from "@/components/analyze/file-inspection";
 import { useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
 
@@ -312,7 +312,6 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         }
 
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
-        const claimed = report.claimed_location.raw ?? report.claimed_location.country_code ?? "Unknown";
         const grouped = partitionReviewFlags(recruiterReviewFlags(report));
         const statusMessage = aiStatusMessage(
           report.ai_analysis.status,
@@ -322,7 +321,6 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         const checkedCount = Object.values(report.checklist.checks).filter(
           (check) => check.checked,
         ).length;
-        const locationConsistency = locationConsistencyPresentation(report);
         const reportDescription = report.ai_analysis.status === "succeeded"
           ? null
           : (settings.uiLanguage === "pl" ? "Analiza AI nie zwróciła pełnego wyniku." : "AI analysis did not return a complete result.");
@@ -364,22 +362,9 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 </section> : null}
 
                 <StructuredFacts report={report} />
+                <FileDetailsDisclosure details={report.file_details} />
+                <LinkInspectionPanel inspection={report.link_inspection} />
               </div>
-
-              {report.signal_count > 0 && report.band !== "gray" ? <HoverDisclosure
-                className="rounded-md border p-3"
-                triggerClassName="text-sm font-medium"
-                title={`Location consistency check: ${locationConsistency.status.toLowerCase()}`}
-                contentClassName="pt-3"
-              >
-                <div className="space-y-3 text-sm">
-                  <p className="text-muted-foreground">{locationConsistency.description}</p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div><span className="text-muted-foreground">Claimed:</span> {claimed}</div>
-                    <div><span className="text-muted-foreground">Independent checks:</span> {report.signal_count}</div>
-                  </div>
-                </div>
-              </HoverDisclosure> : null}
 
               <CompanyResearchPanel
                 report={report}

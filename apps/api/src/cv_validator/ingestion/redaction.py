@@ -68,6 +68,8 @@ def redact_national_ids(document: RawDocument) -> RedactedDocument:
         pages=tuple(redacted_pages),
         source_format=document.source_format,
         redactions=tuple(redactions),
+        file_details=document.file_details,
+        document_links=document.document_links,
     )
 
 

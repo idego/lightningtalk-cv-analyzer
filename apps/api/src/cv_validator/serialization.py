@@ -57,6 +57,7 @@ def serialize_analysis_payload(
                     payload["findings"],
                     ai_payload["findings"],
                     payload.get("deterministic", {}).get("observations", []),
+                    payload.get("link_inspection"),
                 ),
             },
         }
@@ -141,6 +142,7 @@ def _serialize_flags(
     deterministic_findings: list[dict[str, Any]],
     ai_findings: list[dict[str, Any]],
     deterministic_observations: list[dict[str, Any]],
+    link_inspection: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
     finding_categories = {
@@ -201,7 +203,62 @@ def _serialize_flags(
                 "evidence": deepcopy(observation.get("evidence", [])),
             }
         )
+    for index, link in enumerate(
+        (link_inspection or {}).get("links", []),
+        start=1,
+    ):
+        if link.get("status") not in {"SUSPICIOUS", "UNAVAILABLE"}:
+            continue
+        reason_code = link.get("reason_code", "invalid_link_target")
+        flags.append(
+            {
+                "id": f"link-{index:04d}",
+                "source": "code",
+                "authority": "code",
+                "category": f"link_{reason_code}",
+                "status": str(link.get("status", "UNAVAILABLE")).lower(),
+                "importance": (
+                    "attention"
+                    if link.get("status") == "SUSPICIOUS"
+                    else "remaining"
+                ),
+                "confidence": "deterministic",
+                "observation": link.get("title") or reason_code,
+                "reason": _link_flag_reason(reason_code),
+                "limitation": (
+                    "Review the declared link and its source evidence; this is not a candidate-level verdict."
+                ),
+                "evidence": deepcopy(link.get("source_evidence", [])),
+                "presentation_context": {
+                    "observed": link.get("displayed_value"),
+                    "claimed": link.get("sanitized_target"),
+                    "direction": str(link.get("status", "UNAVAILABLE")).lower(),
+                },
+            }
+        )
     return flags
+
+
+def _link_flag_reason(reason_code: str) -> str:
+    return {
+        "hyperlink_target_mismatch": "The displayed value and embedded target point to different normalized destinations.",
+        "service_domain_lookalike": "The hostname resembles a recognized profile or portfolio service without being an approved host.",
+        "declared_link_not_found": "The declared CV link returned a terminal not-found response.",
+        "unrelated_cross_domain_redirect": "The link terminated on a domain unrelated to its original destination.",
+        "unsafe_scheme": "The link uses a scheme outside the approved public HTTP(S) boundary.",
+        "unsafe_destination": "The link resolves to an address space that the checker does not request.",
+        "unsafe_redirect": "A redirect destination failed the same safe public-destination checks.",
+    }.get(
+        reason_code,
+        "The link check produced a deterministic document-review result.",
+    )
+
+
+def deserialize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read old and new stored payloads without requiring new nullable fields."""
+    result = deepcopy(payload)
+    _validate_json(result)
+    return result
 
 
 def _deterministic_importance(finding: dict[str, Any]) -> str:

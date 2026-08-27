@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 from pathlib import Path
 
 from cv_validator.ai.application import DocumentAnalyzer, run_document_analysis
@@ -12,11 +13,19 @@ from cv_validator.ai.domain import (
 from cv_validator.config import (
     IngestionConfig,
     WeightsConfig,
+    load_link_check_config,
     load_ingestion_config,
     load_small_locality_population_max,
     load_weights,
 )
 from cv_validator.domain import DeterministicAnalysisResult, Report
+from cv_validator.file_links.checker import (
+    DNSResolver,
+    LinkCheckConfig,
+    LinkHTTPClient,
+    LinkInspector,
+    inspect_document_links,
+)
 from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.ingestion import (
     RawDocument,
@@ -49,6 +58,11 @@ def analyze_cv_text(
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> Report:
     return analyze_cv_text_result(
         text,
@@ -57,6 +71,11 @@ def analyze_cv_text(
         location_resolver=location_resolver,
         ai_settings=ai_settings,
         document_analyzer=document_analyzer,
+        link_check_config=link_check_config,
+        link_inspector=link_inspector,
+        link_dns_resolver=link_dns_resolver,
+        link_http_client=link_http_client,
+        link_metrics=link_metrics,
     ).report
 
 
@@ -70,6 +89,11 @@ def analyze_cv_text_result(
     document_analyzer: DocumentAnalyzer | None = None,
     report_language: str = "en",
     defer_ai: bool = False,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = RawDocument(
@@ -85,6 +109,11 @@ def analyze_cv_text_result(
         document_analyzer,
         report_language,
         defer_ai,
+        link_check_config,
+        link_inspector,
+        link_dns_resolver,
+        link_http_client,
+        link_metrics,
     )
 
 
@@ -97,6 +126,11 @@ def analyze_cv_bytes(
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> Report:
     return analyze_cv_bytes_result(
         content,
@@ -106,6 +140,11 @@ def analyze_cv_bytes(
         location_resolver=location_resolver,
         ai_settings=ai_settings,
         document_analyzer=document_analyzer,
+        link_check_config=link_check_config,
+        link_inspector=link_inspector,
+        link_dns_resolver=link_dns_resolver,
+        link_http_client=link_http_client,
+        link_metrics=link_metrics,
     ).report
 
 
@@ -120,6 +159,11 @@ def analyze_cv_bytes_result(
     document_analyzer: DocumentAnalyzer | None = None,
     report_language: str = "en",
     defer_ai: bool = False,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> PipelineResult:
     cfg = weights or load_weights()
     parsed = ingest_cv(content, filename=filename, config=ingestion_config)
@@ -131,6 +175,11 @@ def analyze_cv_bytes_result(
         document_analyzer,
         report_language,
         defer_ai,
+        link_check_config,
+        link_inspector,
+        link_dns_resolver,
+        link_http_client,
+        link_metrics,
     )
 
 
@@ -142,6 +191,11 @@ def analyze_cv_file(
     location_resolver: LocationResolver | None = None,
     ai_settings: AISettings | None = None,
     document_analyzer: DocumentAnalyzer | None = None,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> Report:
     content = path.read_bytes()
     return analyze_cv_bytes(
@@ -152,6 +206,11 @@ def analyze_cv_file(
         location_resolver=location_resolver,
         ai_settings=ai_settings,
         document_analyzer=document_analyzer,
+        link_check_config=link_check_config,
+        link_inspector=link_inspector,
+        link_dns_resolver=link_dns_resolver,
+        link_http_client=link_http_client,
+        link_metrics=link_metrics,
     )
 
 
@@ -163,7 +222,32 @@ def _analyze_raw(
     document_analyzer: DocumentAnalyzer | None,
     report_language: str = "en",
     defer_ai: bool = False,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
+    link_metrics: Any | None = None,
 ) -> PipelineResult:
+    file_details = parsed.file_details
+    if file_details is not None and not any(
+        field.status.value == "available" for field in file_details.fields
+    ) and not parsed.document_links:
+        # Keep the legacy payload shape for ordinary documents with no file
+        # details while the nullable contract remains available to new reports.
+        file_details = None
+    link_inspection = None
+    if parsed.document_links:
+        selected_link_config = link_check_config or load_link_check_config()
+        if link_inspector is not None:
+            link_inspection = link_inspector.inspect(parsed.document_links)
+        else:
+            link_inspection = inspect_document_links(
+                parsed.document_links,
+                selected_link_config,
+                dns_resolver=link_dns_resolver,
+                http_client=link_http_client,
+                metrics=link_metrics,
+            )
     redacted = redact_national_ids(parsed)
     deterministic = analyze_deterministically(
         redacted,
@@ -172,6 +256,11 @@ def _analyze_raw(
         small_locality_population_max=load_small_locality_population_max(),
     )
     report = score_deterministic(deterministic, weights)
+    report = replace(
+        report,
+        file_details=file_details,
+        link_inspection=link_inspection,
+    )
     selected_ai_settings = ai_settings or AISettings()
     if selected_ai_settings.enabled and defer_ai:
         ai_outcome = AIDocumentAnalysisOutcome(

@@ -23,7 +23,17 @@ from cv_validator.ai.application import run_document_analysis
 from cv_validator.ai.config import AISettings, load_ai_settings
 from cv_validator.ai.openai_client import OpenAIResponsesDocumentAnalyzer
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
-from cv_validator.config import load_ingestion_config, load_location_resolver
+from cv_validator.config import (
+    load_ingestion_config,
+    load_link_check_config,
+    load_location_resolver,
+)
+from cv_validator.file_links.checker import (
+    DNSResolver,
+    LinkCheckConfig,
+    LinkHTTPClient,
+    LinkInspector,
+)
 from cv_validator.ingestion import IngestionError
 from cv_validator.pipeline import PipelineResult, analyze_cv_bytes_result
 from cv_validator.ai.domain import AIAnalysisStatus
@@ -109,8 +119,13 @@ def create_app(
     linkedin_max_profiles: int | None = None,
     research_cache_ttl_days: int | None = None,
     require_location_resolver: bool = False,
+    link_check_config: LinkCheckConfig | None = None,
+    link_inspector: LinkInspector | None = None,
+    link_dns_resolver: DNSResolver | None = None,
+    link_http_client: LinkHTTPClient | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
+    selected_link_check_config = link_check_config or load_link_check_config()
     selected_ai_settings = ai_settings or load_ai_settings()
     selected_document_analyzer = document_analyzer
     if selected_ai_settings.enabled and selected_document_analyzer is None:
@@ -239,6 +254,11 @@ def create_app(
             "company_research": {"ready": selected_company_researcher is not None},
             "education_research": {"ready": selected_education_researcher is not None},
             "linkedin_research": {"ready": selected_linkedin_researcher is not None},
+            "link_checks": {
+                "ready": selected_link_check_config.enabled,
+                "enabled": selected_link_check_config.enabled,
+                "version": selected_link_check_config.configuration_version,
+            },
         }
         ready = all(item["ready"] for item in capabilities.values())
         return {
@@ -262,6 +282,18 @@ def create_app(
             },
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
             "batch": {"max_files": selected_batch_max_files, "max_bytes": selected_batch_max_bytes},
+            "link_checks": {
+                "enabled": selected_link_check_config.enabled,
+                "protocols": selected_link_check_config.allowed_protocols,
+                "ports": selected_link_check_config.allowed_ports,
+                "timeout_seconds": selected_link_check_config.timeout_seconds,
+                "max_response_bytes": selected_link_check_config.max_response_bytes,
+                "max_redirects": selected_link_check_config.max_redirects,
+                "max_concurrency": selected_link_check_config.max_concurrency,
+                "max_retries": selected_link_check_config.max_retries,
+                "total_budget_seconds": selected_link_check_config.total_budget_seconds,
+                "configuration_version": selected_link_check_config.configuration_version,
+            },
             "document_ai": {
                 "timeout_seconds": selected_ai_settings.timeout_seconds,
                 "max_output_tokens": selected_ai_settings.max_output_tokens,
@@ -289,6 +321,11 @@ def create_app(
                 document_analyzer=selected_document_analyzer,
                 report_language=_report_language(x_report_language),
                 defer_ai=selected_ai_settings.enabled,
+                link_check_config=selected_link_check_config,
+                link_inspector=link_inspector,
+                link_dns_resolver=link_dns_resolver,
+                link_http_client=link_http_client,
+                link_metrics=telemetry,
             )
             analysis_id = str(uuid4())
             access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -357,6 +394,11 @@ def create_app(
                     document_analyzer=selected_document_analyzer,
                     report_language=_report_language(x_report_language),
                     defer_ai=selected_ai_settings.enabled,
+                    link_check_config=selected_link_check_config,
+                    link_inspector=link_inspector,
+                    link_dns_resolver=link_dns_resolver,
+                    link_http_client=link_http_client,
+                    link_metrics=telemetry,
                 )
                 analysis_id = str(uuid4())
                 access_token = x_analysis_access_token or secrets.token_urlsafe(32)
@@ -701,6 +743,7 @@ def create_app(
     app.state.document_analyzer = selected_document_analyzer
     app.state.batch_max_files = selected_batch_max_files
     app.state.batch_max_bytes = selected_batch_max_bytes
+    app.state.link_check_config = selected_link_check_config
     app.state.company_researcher = selected_company_researcher
     app.state.education_researcher = selected_education_researcher
     app.state.linkedin_researcher = selected_linkedin_researcher

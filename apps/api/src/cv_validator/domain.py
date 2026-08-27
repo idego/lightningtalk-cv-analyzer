@@ -373,6 +373,452 @@ class Finding:
     supporting_fact_ids: tuple[str, ...] = ()
 
 
+FILE_DETAILS_CONTRACT_VERSION = "file-details-v1"
+LINK_INSPECTION_CONTRACT_VERSION = "link-inspection-v1"
+
+
+class FileDetailField(str, Enum):
+    AUTHOR = "author"
+    CREATOR = "creator"
+    PRODUCER = "producer"
+    TITLE = "title"
+    SUBJECT = "subject"
+    CREATION_TIME = "creation_time"
+    MODIFICATION_TIME = "modification_time"
+    CREATED = "created"
+    MODIFIED = "modified"
+    LAST_MODIFIER = "last_modifier"
+    REVISION = "revision"
+
+
+class FileDetailStatus(str, Enum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+@dataclass(frozen=True)
+class FileDetail:
+    field: FileDetailField
+    value: str | None
+    status: FileDetailStatus
+    source_format: str
+    extractor_version: ComponentVersion
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.field, FileDetailField):
+            raise ValueError("file detail field is invalid")
+        if not isinstance(self.status, FileDetailStatus):
+            raise ValueError("file detail status is invalid")
+        if not isinstance(self.source_format, str) or not self.source_format.strip():
+            raise ValueError("file detail source_format must not be empty")
+        if not isinstance(self.extractor_version, ComponentVersion):
+            raise ValueError("file detail extractor_version is invalid")
+        if self.value is not None and not isinstance(self.value, str):
+            raise ValueError("file detail value must be a string or null")
+        if self.status is FileDetailStatus.AVAILABLE and not self.value:
+            raise ValueError("available file details require a value")
+        if self.status is FileDetailStatus.UNAVAILABLE and self.value is not None:
+            raise ValueError("unavailable file details must not have a value")
+        if self.value is not None and len(self.value) > 1024:
+            raise ValueError("file detail values are bounded to 1024 characters")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "field": self.field.value,
+            "value": self.value,
+            "status": self.status.value,
+            "source_format": self.source_format,
+            "extractor_version": _component_version_to_dict(self.extractor_version),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> FileDetail:
+        if not isinstance(payload, dict):
+            raise ValueError("file detail payload must be an object")
+        version = payload.get("extractor_version")
+        if not isinstance(version, dict):
+            raise ValueError("file detail extractor_version is required")
+        return cls(
+            field=FileDetailField(payload["field"]),
+            value=payload.get("value"),
+            status=FileDetailStatus(payload["status"]),
+            source_format=str(payload["source_format"]),
+            extractor_version=_component_version_from_dict(version),
+        )
+
+
+@dataclass(frozen=True)
+class FileDetails:
+    source_format: str
+    extractor_version: ComponentVersion
+    fields: tuple[FileDetail, ...]
+    contract_version: str = FILE_DETAILS_CONTRACT_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_format, str) or not self.source_format.strip():
+            raise ValueError("file details source_format must not be empty")
+        if not isinstance(self.extractor_version, ComponentVersion):
+            raise ValueError("file details extractor_version is invalid")
+        if self.contract_version != FILE_DETAILS_CONTRACT_VERSION:
+            raise ValueError("unsupported file details contract version")
+        if any(not isinstance(field, FileDetail) for field in self.fields):
+            raise ValueError("file details fields must contain file details")
+        field_names = [field.field for field in self.fields]
+        if len(field_names) != len(set(field_names)):
+            raise ValueError("file detail fields must be unique")
+
+    @property
+    def metadata(self) -> tuple[FileDetail, ...]:
+        return self.fields
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "source_format": self.source_format,
+            "extractor_version": _component_version_to_dict(self.extractor_version),
+            "fields": {field.field.value: {
+                "value": field.value,
+                "status": field.status.value,
+                "source_format": field.source_format,
+                "extractor_version": _component_version_to_dict(
+                    field.extractor_version
+                ),
+            } for field in self.fields},
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> FileDetails:
+        if not isinstance(payload, dict):
+            raise ValueError("file details payload must be an object")
+        version = payload.get("extractor_version")
+        fields = payload.get("fields")
+        if not isinstance(version, dict) or not isinstance(fields, dict):
+            raise ValueError("file details payload is incomplete")
+        field_records = tuple(
+            FileDetail.from_dict({
+                "field": field_name,
+                **field_payload,
+            })
+            for field_name, field_payload in fields.items()
+            if isinstance(field_payload, dict)
+        )
+        if len(field_records) != len(fields):
+            raise ValueError("file details fields must be objects")
+        return cls(
+            source_format=str(payload["source_format"]),
+            extractor_version=_component_version_from_dict(version),
+            fields=field_records,
+            contract_version=str(payload.get("contract_version", "")),
+        )
+
+
+class LinkSource(str, Enum):
+    VISIBLE_URL = "visible_url"
+    EMBEDDED_HYPERLINK = "embedded_hyperlink"
+    VISIBLE_AND_EMBEDDED = "visible_and_embedded"
+
+
+class LinkAssociation(str, Enum):
+    VISIBLE_ONLY = "visible_only"
+    EMBEDDED_ONLY = "embedded_only"
+    MATCHED = "matched"
+    MISMATCHED = "mismatched"
+    UNKNOWN = "unknown"
+
+
+class LinkRole(str, Enum):
+    PROFILE = "profile"
+    PORTFOLIO = "portfolio"
+    PROJECT = "project"
+    PUBLICATION = "publication"
+    CREDENTIAL = "credential"
+    CV_CLAIM = "cv_claim"
+    GENERIC = "generic"
+
+
+class LinkOutcomeStatus(str, Enum):
+    REACHABLE = "REACHABLE"
+    SUSPICIOUS = "SUSPICIOUS"
+    UNAVAILABLE = "UNAVAILABLE"
+    NOT_CHECKED = "NOT_CHECKED"
+
+
+class LinkReasonCode(str, Enum):
+    REACHABLE = "reachable"
+    HYPERLINK_TARGET_MISMATCH = "hyperlink_target_mismatch"
+    SERVICE_DOMAIN_LOOKALIKE = "service_domain_lookalike"
+    UNSAFE_SCHEME = "unsafe_scheme"
+    EMBEDDED_CREDENTIALS = "embedded_credentials"
+    INVALID_HOST = "invalid_host"
+    DISALLOWED_PORT = "disallowed_port"
+    UNSAFE_DESTINATION = "unsafe_destination"
+    UNSAFE_REDIRECT = "unsafe_redirect"
+    UNRELATED_CROSS_DOMAIN_REDIRECT = "unrelated_cross_domain_redirect"
+    DECLARED_LINK_NOT_FOUND = "declared_link_not_found"
+    INVALID_LINK_TARGET = "invalid_link_target"
+    INSPECTION_DISABLED = "inspection_disabled"
+    DNS_FAILURE = "dns_failure"
+    CONNECTION_FAILURE = "connection_failure"
+    TIMEOUT = "timeout"
+    TLS_FAILURE = "tls_failure"
+    RESPONSE_LIMIT = "response_limit"
+    REDIRECT_LIMIT = "redirect_limit"
+    HTTP_FORBIDDEN = "http_forbidden"
+    RATE_LIMITED = "rate_limited"
+    ANTI_BOT = "anti_bot"
+    REQUEST_BUDGET_EXCEEDED = "request_budget_exceeded"
+    METHOD_NOT_ALLOWED = "method_not_allowed"
+    HTTP_STATUS_UNAVAILABLE = "http_status_unavailable"
+    REDIRECT_WITHOUT_LOCATION = "redirect_without_location"
+
+
+@dataclass(frozen=True)
+class DocumentLink:
+    id: str
+    displayed_value: str | None
+    target: str | None
+    source_format: str
+    source: LinkSource
+    association: LinkAssociation
+    role: LinkRole
+    page_number: int | None
+    evidence: tuple[Evidence, ...] = ()
+    source_location: str = "body"
+    invalid_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("document link id must not be empty")
+        if not isinstance(self.source_format, str) or not self.source_format.strip():
+            raise ValueError("document link source_format must not be empty")
+        if not isinstance(self.source, LinkSource):
+            raise ValueError("document link source is invalid")
+        if not isinstance(self.association, LinkAssociation):
+            raise ValueError("document link association is invalid")
+        if not isinstance(self.role, LinkRole):
+            raise ValueError("document link role is invalid")
+        if not isinstance(self.source_location, str) or not self.source_location.strip():
+            raise ValueError("document link source_location must not be empty")
+        if any(
+            value is not None and not isinstance(value, str)
+            for value in (self.displayed_value, self.target, self.invalid_reason)
+        ):
+            raise ValueError("document link text values must be strings or null")
+        if self.page_number is not None:
+            if isinstance(self.page_number, bool) or not isinstance(self.page_number, int):
+                raise ValueError("document link page_number must be an integer")
+            if self.page_number < 1:
+                raise ValueError("document link page_number must be positive")
+        for value in (self.displayed_value, self.target, self.invalid_reason):
+            if value is not None and len(value) > 4096:
+                raise ValueError("document link values are bounded to 4096 characters")
+        if self.target is None and not self.invalid_reason:
+            raise ValueError("invalid document links require a reason")
+        if any(not isinstance(evidence, Evidence) for evidence in self.evidence):
+            raise ValueError("document link evidence must contain evidence records")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "displayed_value": self.displayed_value,
+            "target": self.target,
+            "source_format": self.source_format,
+            "source": self.source.value,
+            "association": self.association.value,
+            "role": self.role.value,
+            "page_number": self.page_number,
+            "evidence": _evidence_list(self.evidence),
+            "source_location": self.source_location,
+            "invalid_reason": self.invalid_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> DocumentLink:
+        if not isinstance(payload, dict):
+            raise ValueError("document link payload must be an object")
+        return cls(
+            id=str(payload["id"]),
+            displayed_value=payload.get("displayed_value"),
+            target=payload.get("target"),
+            source_format=str(payload["source_format"]),
+            source=LinkSource(payload["source"]),
+            association=LinkAssociation(payload["association"]),
+            role=LinkRole(payload["role"]),
+            page_number=payload.get("page_number"),
+            evidence=tuple(_evidence_from_dict(item) for item in payload.get("evidence", [])),
+            source_location=str(payload.get("source_location", "body")),
+            invalid_reason=payload.get("invalid_reason"),
+        )
+
+
+@dataclass(frozen=True)
+class LinkCheckResult:
+    link_id: str
+    status: LinkOutcomeStatus
+    displayed_value: str | None
+    sanitized_target: str | None
+    source: LinkSource
+    association: LinkAssociation
+    role: LinkRole
+    source_page: int | None
+    source_evidence: tuple[Evidence, ...]
+    reason_code: LinkReasonCode
+    source_location: str = "body"
+    terminal_status: int | None = None
+    terminal_registrable_domain: str | None = None
+    checked_at: str | None = None
+    configuration_version: str = ""
+    title: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.link_id, str) or not self.link_id.strip():
+            raise ValueError("link check result link_id must not be empty")
+        if not isinstance(self.status, LinkOutcomeStatus):
+            raise ValueError("link check status is invalid")
+        if not isinstance(self.source, LinkSource):
+            raise ValueError("link check source is invalid")
+        if not isinstance(self.association, LinkAssociation):
+            raise ValueError("link check association is invalid")
+        if not isinstance(self.role, LinkRole):
+            raise ValueError("link check role is invalid")
+        if not isinstance(self.reason_code, LinkReasonCode):
+            raise ValueError("link check reason code is invalid")
+        if any(
+            value is not None and not isinstance(value, str)
+            for value in (
+                self.displayed_value,
+                self.sanitized_target,
+                self.source_location,
+                self.terminal_registrable_domain,
+                self.checked_at,
+            )
+        ):
+            raise ValueError("link check text values must be strings or null")
+        if not isinstance(self.configuration_version, str) or not isinstance(self.title, str):
+            raise ValueError("link check metadata must be strings")
+        if self.source_page is not None:
+            if isinstance(self.source_page, bool) or not isinstance(self.source_page, int):
+                raise ValueError("link check source_page must be an integer")
+            if self.source_page < 1:
+                raise ValueError("link check source_page must be positive")
+        if self.terminal_status is not None:
+            if isinstance(self.terminal_status, bool) or not isinstance(self.terminal_status, int):
+                raise ValueError("terminal HTTP status must be an integer")
+            if not 100 <= self.terminal_status <= 599:
+                raise ValueError("terminal HTTP status must be between 100 and 599")
+        if any(not isinstance(evidence, Evidence) for evidence in self.source_evidence):
+            raise ValueError("link check source evidence must contain evidence records")
+        if self.status is LinkOutcomeStatus.REACHABLE and self.reason_code is not LinkReasonCode.REACHABLE:
+            raise ValueError("reachable links require the reachable reason code")
+        if self.status is LinkOutcomeStatus.SUSPICIOUS and self.reason_code in {
+            LinkReasonCode.DNS_FAILURE,
+            LinkReasonCode.CONNECTION_FAILURE,
+            LinkReasonCode.TIMEOUT,
+            LinkReasonCode.TLS_FAILURE,
+            LinkReasonCode.RESPONSE_LIMIT,
+            LinkReasonCode.REDIRECT_LIMIT,
+            LinkReasonCode.HTTP_FORBIDDEN,
+            LinkReasonCode.RATE_LIMITED,
+            LinkReasonCode.ANTI_BOT,
+            LinkReasonCode.REQUEST_BUDGET_EXCEEDED,
+            LinkReasonCode.HTTP_STATUS_UNAVAILABLE,
+        }:
+            raise ValueError("network-limited outcomes must be unavailable")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "link_id": self.link_id,
+            "status": self.status.value,
+            "displayed_value": self.displayed_value,
+            "sanitized_target": self.sanitized_target,
+            "source": self.source.value,
+            "association": self.association.value,
+            "role": self.role.value,
+            "source_page": self.source_page,
+            "source_evidence": _evidence_list(self.source_evidence),
+            "source_location": self.source_location,
+            "reason_code": self.reason_code.value,
+            "terminal_status": self.terminal_status,
+            "terminal_registrable_domain": self.terminal_registrable_domain,
+            "checked_at": self.checked_at,
+            "configuration_version": self.configuration_version,
+            "title": self.title,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> LinkCheckResult:
+        if not isinstance(payload, dict):
+            raise ValueError("link check result payload must be an object")
+        return cls(
+            link_id=str(payload["link_id"]),
+            status=LinkOutcomeStatus(payload["status"]),
+            displayed_value=payload.get("displayed_value"),
+            sanitized_target=payload.get("sanitized_target"),
+            source=LinkSource(payload["source"]),
+            association=LinkAssociation(payload["association"]),
+            role=LinkRole(payload["role"]),
+            source_page=payload.get("source_page"),
+            source_evidence=tuple(
+                _evidence_from_dict(item) for item in payload.get("source_evidence", [])
+            ),
+            reason_code=LinkReasonCode(payload["reason_code"]),
+            source_location=str(payload.get("source_location", "body")),
+            terminal_status=payload.get("terminal_status"),
+            terminal_registrable_domain=payload.get("terminal_registrable_domain"),
+            checked_at=payload.get("checked_at"),
+            configuration_version=str(payload.get("configuration_version", "")),
+            title=str(payload.get("title", "")),
+        )
+
+
+@dataclass(frozen=True)
+class LinkInspection:
+    links: tuple[LinkCheckResult, ...]
+    checked_at: str
+    configuration_version: str
+    contract_version: str = LINK_INSPECTION_CONTRACT_VERSION
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.checked_at, str) or not self.checked_at.strip():
+            raise ValueError("link inspection checked_at must not be empty")
+        if not isinstance(self.configuration_version, str) or not self.configuration_version.strip():
+            raise ValueError("link inspection configuration_version must not be empty")
+        if self.contract_version != LINK_INSPECTION_CONTRACT_VERSION:
+            raise ValueError("unsupported link inspection contract version")
+        if any(not isinstance(link, LinkCheckResult) for link in self.links):
+            raise ValueError("link inspection links must contain check results")
+        link_ids = [link.link_id for link in self.links]
+        if len(link_ids) != len(set(link_ids)):
+            raise ValueError("link inspection link IDs must be unique")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "checked_at": self.checked_at,
+            "configuration_version": self.configuration_version,
+            "links": [link.to_dict() for link in self.links],
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> LinkInspection:
+        if not isinstance(payload, dict):
+            raise ValueError("link inspection payload must be an object")
+        links = payload.get("links", [])
+        if not isinstance(links, list):
+            raise ValueError("link inspection links must be a list")
+        if any(not isinstance(item, dict) for item in links):
+            raise ValueError("link inspection links must be objects")
+        return cls(
+            links=tuple(
+                LinkCheckResult.from_dict(item)
+                for item in links
+            ),
+            checked_at=str(payload["checked_at"]),
+            configuration_version=str(payload["configuration_version"]),
+            contract_version=str(payload.get("contract_version", "")),
+        )
+
+
 @dataclass(frozen=True)
 class ClaimedLocation:
     raw: str | None
@@ -394,6 +840,8 @@ class Report:
     supporting_count: int
     conflicting_count: int
     deterministic: DeterministicAnalysisResult | None = None
+    file_details: FileDetails | None = None
+    link_inspection: LinkInspection | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -443,6 +891,10 @@ class Report:
         }
         if self.deterministic is not None:
             payload["deterministic"] = self.deterministic.to_dict()
+        if self.file_details is not None:
+            payload["file_details"] = self.file_details.to_dict()
+        if self.link_inspection is not None:
+            payload["link_inspection"] = self.link_inspection.to_dict()
         return payload
 
 
@@ -546,6 +998,31 @@ def _component_version_to_dict(
     if version.source_url is not None:
         value["source_url"] = version.source_url
     return value
+
+
+def _component_version_from_dict(payload: dict[str, Any]) -> ComponentVersion:
+    name = payload.get("name")
+    version = payload.get("version")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("component version name must not be empty")
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("component version version must not be empty")
+    source_url = payload.get("source_url")
+    if source_url is not None and not isinstance(source_url, str):
+        raise ValueError("component version source_url must be a string")
+    return ComponentVersion(name=name, version=version, source_url=source_url)
+
+
+def _evidence_from_dict(payload: dict[str, Any]) -> Evidence:
+    if not isinstance(payload, dict):
+        raise ValueError("evidence must be an object")
+    return Evidence(
+        page_id=str(payload["page_id"]),
+        page_number=int(payload["page_number"]),
+        start_offset=int(payload["start_offset"]),
+        end_offset=int(payload["end_offset"]),
+        excerpt=str(payload["excerpt"]),
+    )
 
 
 def _enum_value(value: Enum | None) -> str | None:

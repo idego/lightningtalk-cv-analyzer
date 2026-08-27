@@ -9,7 +9,9 @@ Decision-support tool that checks whether a candidate's **stated location** on t
 - **Inputs:** text-extractable PDF and DOCX, English-primary
 - **Not supported:** scanned/image PDFs (no OCR), non-English CVs, live online enrichment
 - **Enrichment:** offline only (`phonenumbers`, static TLD→country table)
-- **Output:** JSON report with score (0–100), band (`green` / `amber` / `red` / `gray`), itemized findings, and plain-language summary
+- **Output:** JSON report with legacy-compatible score/band fields, itemized findings, file details, declared-link inspection outcomes, and a plain-language summary
+- **File details:** bounded PDF/DOCX standard metadata shown as reviewer context only; metadata never proves authenticity or location
+- **Declared links:** visible HTTP(S) URLs and embedded PDF/DOCX hyperlinks are deduplicated, provenance-aware, and optionally checked against a safe public-link policy
 
 ## Monorepo Layout
 
@@ -66,6 +68,16 @@ Optional environment variables (via shell or `.env`):
 - `OPENAI_API_KEY` — required only when `CV_VALIDATOR_AI_ENABLED=true`; keep it outside Git
 - `CV_VALIDATOR_BATCH_MAX_FILES` — maximum files accepted by one sequential batch request (default `4`)
 - `CV_VALIDATOR_BATCH_MAX_BYTES` — maximum combined readable upload bytes in one batch (default `20971520`, 20 MiB)
+- `CV_VALIDATOR_LINK_CHECK_ENABLED` — enables bounded public HTTP(S) link checks (default `true`; set `false` for offline/degraded operation)
+- `CV_VALIDATOR_LINK_CHECK_PROTOCOLS` — comma-separated allowed protocols, limited to `http,https` (default `https,http`)
+- `CV_VALIDATOR_LINK_CHECK_PORTS` — comma-separated allowlisted TCP ports (default `80,443`)
+- `CV_VALIDATOR_LINK_CHECK_TIMEOUT_SECONDS` — per-request timeout (default `5`)
+- `CV_VALIDATOR_LINK_CHECK_MAX_RESPONSE_BYTES` — maximum streamed GET response bytes (default `65536`)
+- `CV_VALIDATOR_LINK_CHECK_MAX_REDIRECTS` — maximum manually validated redirects (default `3`)
+- `CV_VALIDATOR_LINK_CHECK_MAX_CONCURRENCY` — maximum concurrent link checks per file (default `4`)
+- `CV_VALIDATOR_LINK_CHECK_MAX_RETRIES` — bounded retry count for transient network failures (default `0`)
+- `CV_VALIDATOR_LINK_CHECK_TOTAL_BUDGET_SECONDS` — total link-check budget per file (default `20`)
+- `CV_VALIDATOR_LINK_CHECK_USER_AGENT` — fixed non-candidate-specific checker user agent
 - `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` — public, cited count-completeness threshold (default `500`; unknown counts are never negative evidence)
 - `CV_VALIDATOR_LINKEDIN_MAX_PROFILES` — maximum number of sourced, plausible name-matched profiles retained by one discovery run (default `3`, maximum `20`)
 - `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` — reusable public research-fact cache TTL (development default `30`)
@@ -147,6 +159,28 @@ uvicorn cv_validator.api.app:app --reload
 - `POST /analyses/{analysis_id}/research/company` — bounded, synchronous company research for a stored analysis
 - `GET /health` — health check
 
+Completed reports may contain two optional sections:
+
+- `file_details` contains only the allowlisted PDF/DOCX fields and their
+  availability/extractor versions. It is neutral document context and never
+  contributes to score or band.
+- `link_inspection` contains deduplicated visible/embedded link outcomes. A
+  `SUSPICIOUS` result is a concrete document-review prompt for a mismatch,
+  lookalike, unsafe destination, unrelated redirect, or not-found CV claim.
+  `UNAVAILABLE` means the check was inconclusive, for example because of DNS,
+  timeout, rate limiting, anti-bot behavior, or access control. Neither state
+  is a candidate-level verdict or an automated hiring action.
+
+Link checking is deliberately bounded and privacy-preserving: only public
+HTTP(S) destinations are eligible; credentials, non-allowlisted ports, private
+or metadata addresses, unsafe redirects, cookies, and candidate credentials
+are rejected. Redirects are followed manually with per-hop DNS/IP validation,
+automatic redirects disabled, a fixed user agent, and discarded response
+bodies. Persistence stores only sanitized report fields, not response bodies,
+request headers, cookies, or URL query/fragment material. The checker does not
+use AI or a paid service. Link outcomes can be false-positive attention prompts
+and require human review.
+
 The V1 batch endpoint remains deliberately sequential. Its default cap is four
 files and 20 MiB of readable upload data, checked before any CV analysis starts.
 The four-file cap is based on the existing four-CV Luna measurement: about
@@ -155,6 +189,11 @@ synchronous limit, not a throughput guarantee: the configured per-model-call
 timeout is still 120 seconds, so production concurrency and larger batches must
 be measured separately before raising it. Both limits are configurable through
 the environment and do not introduce a background queue.
+
+The frontend retains score and band in API/history compatibility types, but the
+recruiter-facing report does not present them as the overall CV or candidate
+assessment. It leads with concrete findings, structured facts, file details,
+link outcomes, and the decision-support disclaimer.
 
 ## Calibration fixtures
 

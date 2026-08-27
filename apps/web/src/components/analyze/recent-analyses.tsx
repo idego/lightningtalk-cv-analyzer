@@ -5,7 +5,6 @@ import { History, LoaderCircle, Trash2 } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/app-settings";
-import { historyLocationSummary } from "@/lib/review-findings";
 
 type Props = {
   onOpen: (filename: string, report: AnalysisReport) => void;
@@ -65,12 +64,10 @@ export function RecentAnalyses({ onOpen }: Props) {
     {loading ? <div className="flex items-center justify-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
     {!loading && !items.length ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noHistory")}</p> : null}
     {items.length ? <ul className="divide-y">{items.map((item) => {
-      const locationSummary = historyLocationSummary(item.band);
       return <li key={item.analysis_id} className="flex min-w-0 items-center gap-2 px-3 py-2">
         <button type="button" onClick={() => void open(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
           <span className="flex items-baseline justify-between gap-3"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
           {item.candidate_name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.filename}</span> : null}
-          {locationSummary ? <span className="mt-1 block truncate text-xs text-muted-foreground">{locationSummary}</span> : null}
         </button>
         <Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={openingId === item.analysis_id} onClick={() => void remove(item)} aria-label={t("deleteAnalysis")}><Trash2 className="size-4" /></Button>
       </li>;

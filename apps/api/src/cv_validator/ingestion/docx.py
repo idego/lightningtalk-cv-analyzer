@@ -9,6 +9,11 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from cv_validator.config import IngestionConfig, load_ingestion_config
+from cv_validator.file_links.extraction import (
+    extract_docx_file_details,
+    extract_docx_hyperlinks,
+    merge_document_links,
+)
 from cv_validator.ingestion import IngestionError, RawDocument, SourcePage
 from cv_validator.ingestion.text import validate_text_sufficiency
 
@@ -30,7 +35,16 @@ def extract_docx(
         )
         for page_number, text in enumerate(page_texts, start=1)
     )
-    parsed = RawDocument(pages=pages, source_format="docx")
+    parsed = RawDocument(
+        pages=pages,
+        source_format="docx",
+        file_details=extract_docx_file_details(document),
+        document_links=merge_document_links(
+            pages,
+            extract_docx_hyperlinks(document, pages),
+            source_format="docx",
+        ),
+    )
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed
 

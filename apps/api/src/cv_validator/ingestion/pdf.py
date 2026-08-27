@@ -5,6 +5,11 @@ import io
 import pdfplumber
 
 from cv_validator.config import IngestionConfig, load_ingestion_config
+from cv_validator.file_links.extraction import (
+    extract_pdf_file_details,
+    extract_pdf_hyperlinks,
+    merge_document_links,
+)
 from cv_validator.ingestion import IngestionError, RawDocument, SourcePage
 from cv_validator.ingestion.text import validate_text_sufficiency
 
@@ -22,9 +27,20 @@ def extract_pdf(
                 )
                 for page_number, page in enumerate(pdf.pages, start=1)
             )
+            file_details = extract_pdf_file_details(pdf)
+            embedded_links = extract_pdf_hyperlinks(pdf, pages)
     except Exception as exc:  # noqa: BLE001
         raise IngestionError(f"Failed to read PDF: {exc}") from exc
 
-    parsed = RawDocument(pages=pages, source_format="pdf")
+    parsed = RawDocument(
+        pages=pages,
+        source_format="pdf",
+        file_details=file_details,
+        document_links=merge_document_links(
+            pages,
+            embedded_links,
+            source_format="pdf",
+        ),
+    )
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed

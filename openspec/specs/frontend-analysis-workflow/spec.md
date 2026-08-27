@@ -30,22 +30,16 @@ The web app SHALL expose `POST /api/analyze` that verifies session and forwards 
 - **THEN** the route forwards all files to backend `/analyze/batch` and returns backend JSON response
 
 ### Requirement: Explainable per-file result rendering
-The analyze UI SHALL render one card per file, including band, score, claimed location, summary, findings table, and disclaimer.
+The analyze UI SHALL render one card per file, including structured CV facts, a concise summary, the complete finding checklist, available research, file details, link-inspection outcomes, evidence, and the decision-support disclaimer. It MUST NOT present the deprecated location score or band as the overall assessment of the CV or candidate.
 
 #### Scenario: Successful file result
 - **WHEN** backend returns `status: ok` for a file
-- **THEN** the UI shows band, score, claimed location, summary, and expandable findings (`signal`, `observed`, `claimed`, `direction`, `weight`, `rationale`)
+- **THEN** the UI shows structured facts, summary, compact findings, available research, file/link inspection, expandable evidence, and the decision-support disclaimer
+- **AND** does not lead with or require a numeric score or color band
 
 #### Scenario: Failed file result
 - **WHEN** backend returns `status: error` for a file
 - **THEN** the UI shows the file-level error while preserving successful results for other files
-
-### Requirement: Distinct gray-band treatment
-The UI SHALL render gray (insufficient evidence) as a distinct neutral warning state, not a positive/pass state.
-
-#### Scenario: Gray band card
-- **WHEN** a report band is `gray`
-- **THEN** the card style and badge clearly communicate insufficient evidence and route to human review
 
 ### Requirement: Synchronous AI-assisted analysis experience
 The analyze UI SHALL keep the current upload flow. After submission it SHALL
@@ -141,14 +135,10 @@ file to any additional service or persist the original file.
 - **THEN** the report uses the available width and a visible control can restore the preview
 
 ### Requirement: Compact finding hierarchy
-The UI SHALL retain separate `Needs attention` and `Worth knowing` groups, plus
-collapsed remaining signals, without hiding ordinary finding explanations
-behind mandatory extra clicks. Counts MAY remain as compact inline metadata but
-MUST NOT consume a separate dashboard-metric row. Deterministic gray assessment
-SHALL remain secondary rather than presenting the AI-assisted report as empty.
+The UI SHALL retain separate `Needs attention` and `Worth knowing` groups, plus collapsed remaining signals, without hiding ordinary finding explanations behind mandatory extra clicks. Counts MAY remain as compact inline metadata but MUST NOT consume a separate dashboard-metric row. Deprecated deterministic score/band output SHALL NOT be presented as the overall CV or candidate assessment.
 
 #### Scenario: Report contains findings
-- **WHEN** one candidate report is rendered
+- **WHEN** one CV report is rendered
 - **THEN** visible findings show their title, explanation, authority, confidence, and first evidence without opening another surface
 
 ### Requirement: Settings and readiness surface
@@ -211,3 +201,25 @@ When AI analysis is unavailable after bounded attempts, the UI SHALL retain the 
 #### Scenario: AI attempts are exhausted
 - **WHEN** AI analysis remains unavailable after its bounded attempts
 - **THEN** the deterministic report stays visible and the recruiter can retry AI analysis manually
+
+### Requirement: Collapsed file-detail disclosure
+The completed CV report SHALL provide a collapsed `File details` disclosure containing available standard metadata. The disclosure SHALL distinguish missing values from extracted values and SHALL NOT present metadata as proof of authenticity, fraud, or candidate behavior.
+
+#### Scenario: Recruiter opens file details
+- **WHEN** a completed report contains file-detail data and the recruiter opens the disclosure
+- **THEN** the UI shows compact labels and values for available metadata without a suspicious badge
+
+### Requirement: Compact suspicious link flags
+The recruiter-facing checklist SHALL show each suspicious link anomaly as a compact `SUSPICIOUS` flag attached to the affected declaration. The collapsed row SHALL contain a short code-owned title; disclosure SHALL show the displayed value, sanitized target, outcome, reason code, source location, and available check evidence. It MUST NOT show a candidate-level fraud or lying verdict.
+
+#### Scenario: Declared portfolio returns not found
+- **WHEN** the report contains `declared_link_not_found` for a portfolio link
+- **THEN** the visible row shows `SUSPICIOUS` and a short not-found title
+- **AND** the disclosure shows the sanitized URL and terminal status
+
+### Requirement: Neutral unavailable link results
+The UI SHALL keep inconclusive link checks available under a neutral `UNAVAILABLE` state and MUST NOT count or style them as suspicious.
+
+#### Scenario: Link check is blocked
+- **WHEN** a report link check is unavailable because of HTTP `403`, HTTP `429`, anti-bot behavior, or a network limit
+- **THEN** the UI shows a neutral unavailable result with a retry-independent explanation
