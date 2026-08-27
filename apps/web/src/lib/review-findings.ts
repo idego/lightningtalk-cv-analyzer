@@ -401,6 +401,7 @@ export function recruiterReviewFlags(
   }));
   const seen = new Set<string>();
   const flags = [...report.checklist.flags, ...researchFlags].filter((flag) => {
+    if (flag.category.startsWith("link_")) return false;
     if (seen.has(flag.id)) return false;
     seen.add(flag.id);
     return true;

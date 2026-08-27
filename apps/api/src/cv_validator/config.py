@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from cv_validator.domain import SignalStrength
+from cv_validator.file_links.checker import LinkCheckConfig
 from cv_validator.location import (
     LocationIndexValidationError,
     SQLiteLocationResolver,
@@ -62,6 +63,10 @@ def load_ingestion_config() -> IngestionConfig:
             "CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS must be a positive integer"
         )
     return IngestionConfig(minimum_meaningful_tokens=threshold)
+
+
+def load_link_check_config() -> LinkCheckConfig:
+    return LinkCheckConfig.from_env()
 
 
 def load_small_locality_population_max() -> int:

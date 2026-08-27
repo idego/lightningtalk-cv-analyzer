@@ -14,6 +14,91 @@ export type Evidence = {
   excerpt: string;
 };
 
+export type FileDetailField =
+  | "author"
+  | "creator"
+  | "producer"
+  | "title"
+  | "subject"
+  | "creation_time"
+  | "modification_time"
+  | "created"
+  | "modified"
+  | "last_modifier"
+  | "revision";
+
+export type FileDetail = {
+  value: string | null;
+  status: "available" | "unavailable";
+  source_format: "pdf" | "docx" | string;
+  extractor_version: ComponentVersion | null;
+};
+
+export type FileDetails = {
+  contract_version: "file-details-v1";
+  source_format: "pdf" | "docx" | string;
+  extractor_version: ComponentVersion;
+  fields: Partial<Record<FileDetailField, FileDetail>>;
+};
+
+export type LinkSource = "visible_url" | "embedded_hyperlink" | "visible_and_embedded";
+export type LinkAssociation = "visible_only" | "embedded_only" | "matched" | "mismatched" | "unknown";
+export type LinkRole = "profile" | "portfolio" | "project" | "publication" | "credential" | "cv_claim" | "generic";
+export type LinkOutcomeStatus = "REACHABLE" | "SUSPICIOUS" | "UNAVAILABLE" | "NOT_CHECKED";
+export type LinkReasonCode =
+  | "reachable"
+  | "hyperlink_target_mismatch"
+  | "service_domain_lookalike"
+  | "unsafe_scheme"
+  | "embedded_credentials"
+  | "invalid_host"
+  | "disallowed_port"
+  | "unsafe_destination"
+  | "unsafe_redirect"
+  | "unrelated_cross_domain_redirect"
+  | "declared_link_not_found"
+  | "invalid_link_target"
+  | "inspection_disabled"
+  | "dns_failure"
+  | "connection_failure"
+  | "timeout"
+  | "tls_failure"
+  | "response_limit"
+  | "redirect_limit"
+  | "http_forbidden"
+  | "rate_limited"
+  | "anti_bot"
+  | "request_budget_exceeded"
+  | "method_not_allowed"
+  | "http_status_unavailable"
+  | "redirect_without_location";
+
+export type LinkCheckResult = {
+  link_id: string;
+  status: LinkOutcomeStatus;
+  displayed_value: string | null;
+  sanitized_target: string | null;
+  source: LinkSource;
+  association: LinkAssociation;
+  role: LinkRole;
+  source_page: number | null;
+  source_evidence: Evidence[];
+  source_location: "body" | "header" | "footer" | string;
+  reason_code: LinkReasonCode;
+  terminal_status: number | null;
+  terminal_registrable_domain: string | null;
+  checked_at: string | null;
+  configuration_version: string;
+  title: string;
+};
+
+export type LinkInspection = {
+  contract_version: "link-inspection-v1";
+  checked_at: string;
+  configuration_version: string;
+  links: LinkCheckResult[];
+};
+
 export type ReviewEvidence = {
   page_id: string;
   page_number?: number;
@@ -299,6 +384,8 @@ export type AnalysisReport = {
   signal_count: number;
   supporting_count: number;
   conflicting_count: number;
+  file_details?: FileDetails | null;
+  link_inspection?: LinkInspection | null;
   deterministic: {
     ruleset_version: string;
     candidates: DeterministicCandidate[];

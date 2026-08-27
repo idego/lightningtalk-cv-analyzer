@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from cv_validator.domain import DocumentLink, FileDetails
+
 
 class IngestionError(Exception):
     """Raised when a CV cannot be ingested."""
@@ -84,12 +86,16 @@ class _PageDocument:
 
     pages: tuple[SourcePage, ...]
     source_format: str
+    file_details: FileDetails | None
+    document_links: tuple[DocumentLink, ...]
 
     def __init__(
         self,
         *,
         pages: tuple[SourcePage, ...],
         source_format: str,
+        file_details: FileDetails | None = None,
+        document_links: tuple[DocumentLink, ...] = (),
     ) -> None:
         canonical_pages = tuple(pages)
         page_ids = [page.page_id for page in canonical_pages]
@@ -97,6 +103,8 @@ class _PageDocument:
             raise ValueError("page IDs must be unique within a document")
         object.__setattr__(self, "pages", canonical_pages)
         object.__setattr__(self, "source_format", source_format)
+        object.__setattr__(self, "file_details", file_details)
+        object.__setattr__(self, "document_links", tuple(document_links))
 
     @property
     def source_lines(self) -> tuple[SourceLine, ...]:
@@ -119,8 +127,15 @@ class RedactedDocument(_PageDocument):
         pages: tuple[SourcePage, ...],
         source_format: str,
         redactions: tuple[NationalIdRedaction, ...] = (),
+        file_details: FileDetails | None = None,
+        document_links: tuple[DocumentLink, ...] = (),
     ) -> None:
-        super().__init__(pages=pages, source_format=source_format)
+        super().__init__(
+            pages=pages,
+            source_format=source_format,
+            file_details=file_details,
+            document_links=document_links,
+        )
         object.__setattr__(self, "redactions", tuple(redactions))
 
     @property

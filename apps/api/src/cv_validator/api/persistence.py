@@ -4,6 +4,7 @@ import json
 import sqlite3
 import hashlib
 import hmac
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -11,16 +12,24 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from cv_validator.domain import Report
+from cv_validator.domain import (
+    LinkAssociation,
+    LinkReasonCode,
+    LinkRole,
+    LinkSource,
+    Report,
+)
 from cv_validator.errors import PersistenceError
+from cv_validator.file_links.normalization import URLNormalizationError, normalize_url
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
-from cv_validator.serialization import serialize_report_payload
+from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
 
 
 _SAFE_NATIONAL_ID_TYPES = frozenset(
     {"LABELED_NATIONAL_ID", "PL_PESEL", "UK_NINO", "US_SSN"}
 )
+_URL_TOKEN_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"']+")
 
 
 @dataclass
@@ -63,7 +72,9 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     analysis_id TEXT,
                     access_token_hash TEXT,
-                    source_filename TEXT
+                    source_filename TEXT,
+                    file_details_json TEXT,
+                    link_inspection_json TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,6 +168,8 @@ class PersistenceStore:
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
             _ensure_column(conn, "reports", "access_token_hash", "TEXT")
             _ensure_column(conn, "reports", "source_filename", "TEXT")
+            _ensure_column(conn, "reports", "file_details_json", "TEXT")
+            _ensure_column(conn, "reports", "link_inspection_json", "TEXT")
             _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
             conn.execute(
                 "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
@@ -198,9 +211,10 @@ class PersistenceStore:
                     """
                     INSERT INTO reports (
                         input_hash, ruleset_version, score, band, findings_json,
-                        created_at, analysis_id, access_token_hash, source_filename
+                        created_at, analysis_id, access_token_hash, source_filename,
+                        file_details_json, link_inspection_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -212,6 +226,8 @@ class PersistenceStore:
                         selected_analysis_id,
                         _token_hash(access_token) if access_token else None,
                         source_filename,
+                        _json_or_none(findings.get("file_details")),
+                        _json_or_none(findings.get("link_inspection")),
                     ),
                 )
                 conn.execute(
@@ -261,7 +277,9 @@ class PersistenceStore:
                 "SELECT output_json FROM audit_log WHERE analysis_id = ?",
                 (analysis_id,),
             ).fetchone()
-        return None if row is None else json.loads(row["output_json"])
+        return None if row is None else deserialize_analysis_payload(
+            json.loads(row["output_json"])
+        )
 
     def replace_ai_analysis(
         self,
@@ -281,6 +299,15 @@ class PersistenceStore:
                 conn.execute(
                     "UPDATE audit_log SET output_json = ? WHERE analysis_id = ?",
                     (json.dumps(_sanitize_findings(payload)), analysis_id),
+                )
+                sanitized = _sanitize_findings(payload)
+                conn.execute(
+                    "UPDATE reports SET file_details_json = ?, link_inspection_json = ? WHERE analysis_id = ?",
+                    (
+                        _json_or_none(sanitized.get("file_details")),
+                        _json_or_none(sanitized.get("link_inspection")),
+                        analysis_id,
+                    ),
                 )
                 conn.execute("DELETE FROM ai_analyses WHERE analysis_id = ?", (analysis_id,))
                 _insert_ai_analysis(
@@ -707,7 +734,9 @@ def _insert_ai_analysis(
 
 def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
     sanitized = deepcopy(report_dict)
-    for finding in sanitized["findings"]:
+    for finding in sanitized.get("findings", []):
+        if not isinstance(finding, dict):
+            continue
         if finding.get("signal") == "national_id":
             if not _is_safe_national_id_metadata(finding.get("observed")):
                 finding["observed"] = "present:REDACTED"
@@ -720,7 +749,244 @@ def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
                         if isinstance(excerpt, str)
                         else ""
                     )
+    if "file_details" in sanitized:
+        sanitized["file_details"] = _sanitize_file_details(sanitized["file_details"])
+    if "link_inspection" in sanitized:
+        sanitized["link_inspection"] = _sanitize_link_inspection(
+            sanitized["link_inspection"]
+        )
     return sanitized
+
+
+def _sanitize_file_details(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return None
+    allowed_fields = {
+        "author",
+        "creator",
+        "producer",
+        "title",
+        "subject",
+        "creation_time",
+        "modification_time",
+        "created",
+        "modified",
+        "last_modifier",
+        "revision",
+    }
+    fields = value.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    clean_fields: dict[str, Any] = {}
+    for field_name, field in fields.items():
+        if field_name not in allowed_fields or not isinstance(field, dict):
+            continue
+        status = field.get("status")
+        raw_value = field.get("value")
+        if status == "available" and isinstance(raw_value, str):
+            clean_value = _safe_text(raw_value, limit=1024)
+            if clean_value:
+                clean_fields[field_name] = {
+                    "value": clean_value,
+                    "status": "available",
+                    "source_format": _safe_text(field.get("source_format"), limit=32),
+                    "extractor_version": _safe_version(field.get("extractor_version")),
+                }
+                continue
+        clean_fields[field_name] = {
+            "value": None,
+            "status": "unavailable",
+            "source_format": _safe_text(field.get("source_format"), limit=32),
+            "extractor_version": _safe_version(field.get("extractor_version")),
+        }
+    return {
+        "contract_version": "file-details-v1",
+        "source_format": _safe_text(value.get("source_format"), limit=16),
+        "extractor_version": _safe_version(value.get("extractor_version")),
+        "fields": clean_fields,
+    }
+
+
+def _sanitize_link_inspection(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return None
+    links = value.get("links", [])
+    if not isinstance(links, list):
+        return None
+    clean_links: list[dict[str, Any]] = []
+    for index, link in enumerate(links):
+        if not isinstance(link, dict):
+            continue
+        link_id = _safe_text(link.get("link_id"), limit=256)
+        if not link_id:
+            link_id = f"link:invalid:{index:04d}"
+        sanitized_target = _sanitize_url(link.get("sanitized_target"))
+        displayed_value = _sanitize_display_value(link.get("displayed_value"))
+        source_evidence = []
+        for evidence in link.get("source_evidence", []):
+            if not isinstance(evidence, dict):
+                continue
+            excerpt = _sanitize_evidence_excerpt(evidence.get("excerpt"))
+            start_offset = _safe_int(evidence.get("start_offset"))
+            end_offset = _safe_int(evidence.get("end_offset"))
+            if start_offset is None or end_offset is None or end_offset < start_offset:
+                continue
+            source_evidence.append(
+                {
+                    "page_id": _safe_text(evidence.get("page_id"), limit=128),
+                    "page_number": _safe_int(evidence.get("page_number")),
+                    "start_offset": start_offset,
+                    "end_offset": end_offset,
+                    "excerpt": excerpt,
+                }
+            )
+        status = link.get("status")
+        reason_code = link.get("reason_code")
+        if status not in {"REACHABLE", "SUSPICIOUS", "UNAVAILABLE", "NOT_CHECKED"}:
+            status = "UNAVAILABLE"
+        if reason_code not in {reason.value for reason in LinkReasonCode}:
+            reason_code = "invalid_link_target"
+        source = link.get("source")
+        if source not in {item.value for item in LinkSource}:
+            source = LinkSource.EMBEDDED_HYPERLINK.value
+        association = link.get("association")
+        if association not in {item.value for item in LinkAssociation}:
+            association = LinkAssociation.UNKNOWN.value
+        role = link.get("role")
+        if role not in {item.value for item in LinkRole}:
+            role = LinkRole.GENERIC.value
+        clean_links.append(
+            {
+                "link_id": link_id,
+                "status": status,
+                "displayed_value": displayed_value,
+                "sanitized_target": sanitized_target,
+                "source": source,
+                "association": association,
+                "role": role,
+                "source_page": _safe_int(link.get("source_page")),
+                "source_location": _safe_text(link.get("source_location"), limit=32),
+                "source_evidence": source_evidence,
+                "reason_code": reason_code,
+                "terminal_status": _safe_http_status(link.get("terminal_status")),
+                "terminal_registrable_domain": _safe_domain(
+                    link.get("terminal_registrable_domain")
+                ),
+                "checked_at": _safe_text(link.get("checked_at"), limit=64),
+                "configuration_version": _safe_text(
+                    link.get("configuration_version"), limit=64
+                ),
+                "title": _safe_text(link.get("title"), limit=256),
+            }
+        )
+    return {
+        "contract_version": "link-inspection-v1",
+        "checked_at": _safe_text(value.get("checked_at"), limit=64),
+        "configuration_version": _safe_text(
+            value.get("configuration_version"), limit=64
+        ),
+        "links": clean_links,
+    }
+
+
+def _sanitize_url(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return normalize_url(value, allowed_ports=tuple(range(1, 65536))).sanitized_url
+    except URLNormalizationError:
+        return None
+
+
+def _sanitize_display_value(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if any(ord(character) < 32 for character in value):
+        return None
+    stripped = value.strip()
+    if stripped.lower().startswith(("http://", "https://")):
+        return _sanitize_url(stripped)
+    if stripped.lower().startswith("www."):
+        sanitized = _sanitize_url(stripped)
+        return sanitized.removeprefix("https://") if sanitized else None
+    return _sanitize_url_tokens(value, limit=2048)
+
+
+def _sanitize_evidence_excerpt(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    stripped = value.strip()
+    if stripped.lower().startswith(("http://", "https://")):
+        return _sanitize_url(stripped) or ""
+    if stripped.lower().startswith("www."):
+        sanitized = _sanitize_url(stripped)
+        return sanitized.removeprefix("https://") if sanitized else ""
+    return _sanitize_url_tokens(value, limit=512)
+
+
+def _sanitize_url_tokens(value: str, *, limit: int) -> str:
+    """Remove query/fragment data from URLs embedded in reviewer evidence."""
+
+    def replace_token(match: re.Match[str]) -> str:
+        token = match.group(0)
+        trailing = ""
+        while token and token[-1] in ".,;:!?)]}":
+            trailing = token[-1] + trailing
+            token = token[:-1]
+        sanitized = _sanitize_url(token)
+        if sanitized is None:
+            return "[invalid-link]" + trailing
+        if token.lower().startswith("www."):
+            sanitized = sanitized.removeprefix("https://")
+        return sanitized + trailing
+
+    return _safe_text(_URL_TOKEN_RE.sub(replace_token, value), limit=limit)
+
+
+def _safe_version(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    name = _safe_text(value.get("name"), limit=64)
+    version = _safe_text(value.get("version"), limit=64)
+    if not name or not version:
+        return None
+    return {"name": name, "version": version}
+
+
+def _safe_text(value: Any, *, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    if any(ord(character) < 32 for character in value):
+        return ""
+    return value.strip()[:limit]
+
+
+def _safe_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _safe_http_status(value: Any) -> int | None:
+    return value if isinstance(value, int) and 100 <= value <= 599 else None
+
+
+def _safe_domain(value: Any) -> str | None:
+    if not isinstance(value, str) or any(ord(character) < 33 for character in value):
+        return None
+    domain = value.strip().lower().rstrip(".")
+    if not domain or any(character in domain for character in "/?#@[]:"):
+        return None
+    try:
+        return normalize_url(f"https://{domain}").registrable_domain
+    except URLNormalizationError:
+        return None
+
+
+def _json_or_none(value: Any) -> str | None:
+    return None if value is None else json.dumps(value, ensure_ascii=False)
 
 
 def _is_safe_national_id_metadata(value: Any) -> bool:
