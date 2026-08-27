@@ -72,9 +72,7 @@ Optional environment variables (via shell or `.env`):
 
 Retention is runtime-configurable and applies to the complete candidate-analysis
 graph. Production cost limits are intentionally not approved yet. See
-[`docs/operations.md`](docs/operations.md),
-[`docs/v1-measurements.md`](docs/v1-measurements.md), and the external
-[`acceptance checklist`](docs/v1-acceptance-checklist.md).
+[`docs/operations.md`](docs/operations.md).
 
 The Slice 3 AI foundation pins `gpt-5.6-luna` with medium reasoning, a 120-second
 request timeout, zero provider-SDK retries, `store=false`, no tools, and a 4,096
@@ -89,17 +87,14 @@ retry context remains available; this does not repeat upload or research.
 The API stores the validated AI result, model and contract versions, token
 usage, and audit payload under one stable analysis ID. AI findings are review
 notes and never change the deterministic score, band, facts, or rule findings.
-Reviewer-facing copy follows [`docs/report-writing-style.md`](docs/report-writing-style.md).
 The neutral-name boundary is documented in
-[`docs/candidate-name-boundary.md`](docs/candidate-name-boundary.md). The next
-score/band design is calibration-only and lives in
-[`docs/scoring-calibration-proposal.md`](docs/scoring-calibration-proposal.md).
+[`docs/candidate-name-boundary.md`](docs/candidate-name-boundary.md).
 
 The tracked Document Analyzer prompt and strict output schema live in
 `apps/api/src/cv_validator/ai/contracts/`. Runtime request construction and the
 private eval harness read those same bundled files. The current base-report
-contract is prompt `3202` with `document-analysis-schema-v8`: the model cites
-line IDs and code materializes excerpts, owns bookkeeping, and may yield a
+contract uses a date-versioned prompt and a strict response schema: the model
+cites line IDs and code materializes excerpts, owns bookkeeping, and may yield a
 partial result with a neutral validation warning while preserving supported
 output.
 
