@@ -1,0 +1,92 @@
+{
+  "aliases": [
+    {
+      "alias": "JavaScript",
+      "canonical_id": "http://data.europa.eu/esco/skill/3cd569a2-4f88-4c1e-9995-8dce8c5e51a7",
+      "display_label": "JavaScript",
+      "language": "en"
+    },
+    {
+      "alias": "R",
+      "canonical_id": "http://data.europa.eu/esco/skill/51586df8-1c46-4b47-8583-773cb63bf00b",
+      "display_label": "R",
+      "language": "en"
+    },
+    {
+      "alias": "SQL",
+      "canonical_id": "http://data.europa.eu/esco/skill/598de5b0-5b58-4ea7-8058-a4bc4d18c742",
+      "display_label": "SQL",
+      "language": "en"
+    },
+    {
+      "alias": "project management",
+      "canonical_id": "http://data.europa.eu/esco/skill/7111b95d-0ce3-441a-9d92-4c75d05c4388",
+      "display_label": "project management",
+      "language": "en"
+    },
+    {
+      "alias": "TypeScript",
+      "canonical_id": "http://data.europa.eu/esco/skill/867137fb-ff1b-4ca3-99f3-cb6969aa2c68",
+      "display_label": "TypeScript",
+      "language": "en"
+    },
+    {
+      "alias": "Python",
+      "canonical_id": "http://data.europa.eu/esco/skill/ccd0a1d9-afda-43d9-b901-96344886e14d",
+      "display_label": "Python (computer programming)",
+      "language": "en"
+    },
+    {
+      "alias": "JavaScript",
+      "canonical_id": "http://data.europa.eu/esco/skill/3cd569a2-4f88-4c1e-9995-8dce8c5e51a7",
+      "display_label": "JavaScript",
+      "language": "pl"
+    },
+    {
+      "alias": "SQL",
+      "canonical_id": "http://data.europa.eu/esco/skill/598de5b0-5b58-4ea7-8058-a4bc4d18c742",
+      "display_label": "SQL",
+      "language": "pl"
+    },
+    {
+      "alias": "zarządzanie projektami",
+      "canonical_id": "http://data.europa.eu/esco/skill/7111b95d-0ce3-441a-9d92-4c75d05c4388",
+      "display_label": "project management",
+      "language": "pl"
+    },
+    {
+      "alias": "TypeScript",
+      "canonical_id": "http://data.europa.eu/esco/skill/867137fb-ff1b-4ca3-99f3-cb6969aa2c68",
+      "display_label": "TypeScript",
+      "language": "pl"
+    },
+    {
+      "alias": "Python",
+      "canonical_id": "http://data.europa.eu/esco/skill/ccd0a1d9-afda-43d9-b901-96344886e14d",
+      "display_label": "Python (computer programming)",
+      "language": "pl"
+    }
+  ],
+  "manifest": {
+    "alias_count": 11,
+    "build_version": "esco-index-v1",
+    "filtering_rules": [
+      "languages=en,pl",
+      "non-empty-aliases",
+      "exact-normalized-token-boundaries"
+    ],
+    "input_checksum": "8487d8db1061d1ea07ba89ba322e5416b6333641c054fa5fbde8722e4b8f704a",
+    "language_alias_counts": {
+      "en": 6,
+      "pl": 5
+    },
+    "languages": [
+      "en",
+      "pl"
+    ],
+    "license_url": "https://esco.ec.europa.eu/en/about-esco/escopedia/escopedia/european-union-public-licence",
+    "output_checksum": "909db11155b8b0fae575c643e1e711664d27e12f495c5825419ba5e8f9ac9e0b",
+    "source_url": "https://esco.ec.europa.eu/en/use-esco/download",
+    "source_version": "ESCO-1.2.0-reviewed-subset-v1"
+  }
+}
