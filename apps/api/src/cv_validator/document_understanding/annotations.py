@@ -236,10 +236,10 @@ def _group_presentation_spans(spans):
     from dataclasses import replace
     grouped = []
     for span in spans:
-        signature = (span.page_id, span.association, span.font_size_points, span.foreground_luminance, span.background_luminance, span.opacity, span.explicit_hidden, span.redaction_type_hints, span.paragraph_path)
+        signature = (span.page_id, span.association, span.font_size_points, span.bold, span.foreground_luminance, span.background_luminance, span.opacity, span.explicit_hidden, span.redaction_type_hints, span.paragraph_path)
         if grouped:
             previous = grouped[-1]
-            previous_signature = (previous.page_id, previous.association, previous.font_size_points, previous.foreground_luminance, previous.background_luminance, previous.opacity, previous.explicit_hidden, previous.redaction_type_hints, previous.paragraph_path)
+            previous_signature = (previous.page_id, previous.association, previous.font_size_points, previous.bold, previous.foreground_luminance, previous.background_luminance, previous.opacity, previous.explicit_hidden, previous.redaction_type_hints, previous.paragraph_path)
             contiguous = previous.end_offset is not None and span.start_offset is not None and span.start_offset == previous.end_offset
             if signature == previous_signature and contiguous:
                 bbox = None

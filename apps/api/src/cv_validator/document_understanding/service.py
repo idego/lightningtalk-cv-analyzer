@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -33,6 +34,20 @@ _LABELS = {
     "location": re.compile(rf"(?i){_LABEL_PREFIX}(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>[^|;]+)"),
     "result": re.compile(rf"(?i){_LABEL_PREFIX}(?:result|grade|wynik|ocena)\s*:\s*(?P<value>[^|;]+)"),
 }
+
+
+@dataclass(frozen=True)
+class _EmploymentCandidate:
+    page_id: str
+    page_number: int
+    line_id: str
+    text: str
+    start_offset: int
+    end_offset: int
+    source_order: int
+    date_side: str | None = None
+    bold: bool = False
+    font_size: float | None = None
 
 
 def understand_document(document, deterministic_ruleset_version: str, *, snapshot_month: str | None = None, location_resolver: LocationResolver | None = None, small_locality_population_max: int = 10_000, skill_index_path: Path = DEFAULT_INDEX) -> DocumentUnderstandingResult:
@@ -152,10 +167,13 @@ def _education(document,section,entry,lines,dates,exclusion):
 
 
 def _employment(document,section,entry,lines,dates,exclusion):
-    relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role") or _unique(lines,lambda s:any(m in normalize_text(s) for m in _ROLES)); client=_label(lines,"client"); organization=_label(lines,"organization")
-    remaining=[line for line in lines if line not in {relationship,role,client} and not _has_date(line,dates) and not _LABELS["location"].search(line.text.strip())]
-    if organization is None:
-        names=[line for line in remaining if _looks_org(line.text)]; organization=names[0] if len(names)==1 else None
+    relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role"); client=_label(lines,"client"); organization=_label(lines,"organization")
+    # Unlabelled layout inference is anchored to a shared date annotation.  This
+    # prevents descriptive text in an employment section from becoming a record
+    # merely because two short, styled fragments happen to be adjacent.
+    if dates:
+        candidates=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")})
+        role,organization=_pair_employment_candidates(candidates,role,organization)
     issues=_issue(document,(client,),"employer_client_ambiguity",entry.source_order,exclusion) if client and organization is None else ()
     org_field=_field(document,"organization",organization,exclusion); rel_field=_field(document,"relationship_type",relationship,exclusion); role_field=_field(document,"role",role,exclusion)
     if org_field.status!="supported" and rel_field.status!="supported": return None,(*issues,*_issue(document,lines,"unsupported_employment_identity",entry.source_order,exclusion))
@@ -184,6 +202,124 @@ def _has_date(line,dates): return any(d.evidence and d.evidence[0].line_id==line
 def _looks_org(value):
     text=value.strip(); words=text.split()
     return not is_self_employment_label(text) and not _LABELS["client"].search(text) and bool(_ORG_SUFFIX.search(text))
+
+
+def _employment_candidates(document,lines,dates,exclusion,excluded):
+    line_order={line.line_id:index for index,line in enumerate(lines)}
+    date_intervals={}
+    for item in dates:
+        for evidence in item.evidence:
+            if evidence.line_id and evidence.start_offset is not None and evidence.end_offset is not None:
+                date_intervals.setdefault(evidence.line_id,[]).append((evidence.start_offset,evidence.end_offset))
+    result=[]
+    for line in lines:
+        if line in excluded or any(pattern.search(line.text) for pattern in _LABELS.values()):
+            continue
+        intervals=sorted(date_intervals.get(line.line_id,()))
+        spans=[]
+        if intervals:
+            cursor=line.start_offset
+            for start,end in intervals:
+                if cursor<start:spans.extend(_candidate_fragments(document,line,cursor,start,"before"))
+                cursor=max(cursor,end)
+            if cursor<line.end_offset:spans.extend(_candidate_fragments(document,line,cursor,line.end_offset,"after"))
+        else:
+            spans.extend(_candidate_fragments(document,line,line.start_offset,line.end_offset,None))
+        for start,end,value,date_side in spans:
+            normalized=normalize_text(value); words=value.split()
+            if not normalized or len(value)>110 or len(words)>12 or len(words)>0 and len(words)==1 and not any(ch.isalpha() for ch in value):continue
+            if any(marker in normalized for marker in _INSTITUTIONS) or is_self_employment_label(value):continue
+            if re.search(r"(?i)(?:https?://|www\.|@|\+?\d[\d ()./-]{6,})",value):continue
+            if value.rstrip().endswith((".",";")) and len(words)>5:continue
+            if exclusion.intersects(line.page_id,start,end):continue
+            presentation=[span for span in document.presentation_spans if span.page_id==line.page_id and span.start_offset is not None and span.end_offset is not None and span.start_offset<end and start<span.end_offset]
+            bold_chars=sum(max(0,min(end,span.end_offset)-max(start,span.start_offset)) for span in presentation if span.bold)
+            sizes=[span.font_size_points for span in presentation if span.font_size_points is not None]
+            page=next(page for page in document.pages if page.page_id==line.page_id)
+            result.append(_EmploymentCandidate(line.page_id,page.page_number,line.line_id,value,start,end,line_order[line.line_id],date_side,bold_chars>=max(1,(end-start)//2),max(sizes) if sizes else None))
+    unique={}
+    for candidate in result:unique[(candidate.page_id,candidate.start_offset,candidate.end_offset)]=candidate
+    return tuple(sorted(unique.values(),key=lambda item:(item.source_order,item.start_offset,item.end_offset)))
+
+
+def _candidate_fragments(document,line,start,end,date_side):
+    page=next(page for page in document.pages if page.page_id==line.page_id)
+    raw=page.text[start:end]
+    base=start
+    result=[]
+    for match in re.finditer(r"[^|;\t•]+",raw):
+        value=match.group().strip(" ,:–—-\u00a0")
+        if not value:continue
+        relative=match.start()+match.group().find(value)
+        result.append((base+relative,base+relative+len(value),value,date_side))
+    styled=[]
+    presentation=sorted((span for span in document.presentation_spans if span.page_id==line.page_id and span.start_offset is not None and span.end_offset is not None and start<span.end_offset and span.start_offset<end),key=lambda span:(span.start_offset or 0,span.end_offset or 0))
+    for span in presentation:
+        left=max(start,span.start_offset or start);right=min(end,span.end_offset or end)
+        if left>=right:continue
+        signature=(span.bold,span.font_size_points)
+        if styled and styled[-1][3]==signature and left<=styled[-1][1]+1:
+            styled[-1]=(styled[-1][0],right,page.text[styled[-1][0]:right],signature)
+        else:styled.append((left,right,page.text[left:right],signature))
+    meaningful=[]
+    for left,right,value,_ in styled:
+        cleaned=value.strip(" |;,:–—-\u00a0")
+        if not cleaned or not any(ch.isalpha() for ch in cleaned):continue
+        relative=value.find(cleaned);meaningful.append((left+relative,left+relative+len(cleaned),cleaned,date_side))
+    if 2<=len(meaningful)<=4:
+        # A paragraph whose runs deliberately change emphasis carries its own
+        # field boundaries.  Do not retain a larger fragment that merely wraps
+        # multiple styled fields, because that creates a duplicate composite
+        # employer/role candidate.
+        result=[fragment for fragment in result if not sum(fragment[0]<=part[0] and part[1]<=fragment[1] for part in meaningful)>=2]
+        result.extend(meaningful)
+    return result
+
+
+def _pair_employment_candidates(candidates,role,organization):
+    if not candidates:return role,organization
+    max_size=max((item.font_size or 0 for item in candidates),default=0)
+    def role_score(item):
+        normalized=normalize_text(item.text)
+        return (4 if any(marker in normalized for marker in _ROLES) else 0)+(2 if item.bold else 0)+(2 if item.font_size and item.font_size==max_size and max_size>0 else 0)+(1 if item.date_side is None else 0)+(1 if len(item.text.split())<=6 else 0)
+    def org_score(item):
+        normalized=normalize_text(item.text)
+        role_like=any(marker in normalized for marker in _ROLES)
+        return (6 if _looks_org(item.text) else 0)+(3 if item.date_side=="before" else 2 if item.date_side=="after" else 0)+(1 if item.bold else 0)+(1 if len(item.text.split())<=5 else 0)-(4 if role_like and not _looks_org(item.text) else 0)
+    if role is not None:
+        ranked=sorted(candidates,key=lambda item:(org_score(item),-item.source_order),reverse=True)
+        if organization is None and ranked and org_score(ranked[0])>=3:organization=ranked[0]
+        return role,organization
+    if organization is not None:
+        ranked=sorted(candidates,key=lambda item:(role_score(item),item.source_order),reverse=True)
+        if ranked and role_score(ranked[0])>=3:role=ranked[0]
+        return role,organization
+    strongest_organizations=[item for item in candidates if org_score(item)==max(org_score(candidate) for candidate in candidates)]
+    distinct_strongest={normalize_text(item.text) for item in strongest_organizations}
+    if len(distinct_strongest)>1 and org_score(strongest_organizations[0])>=6:
+        return None,None
+    role_like=[item for item in candidates if any(marker in normalize_text(item.text) for marker in _ROLES)]
+    non_role_like=[item for item in candidates if item not in role_like]
+    if len(role_like)==1 and len(non_role_like)==1 and role_score(role_like[0])>=4 and org_score(non_role_like[0])>=1:
+        # A date-anchored entry with exactly one independently role-like field
+        # and one other short, styled/source-bounded identity field supplies a
+        # complementary employer relationship without treating arbitrary Title
+        # Case text elsewhere as an organization.
+        return role_like[0],non_role_like[0]
+    pairs=[]
+    for role_candidate in candidates:
+        for org_candidate in candidates:
+            if role_candidate is org_candidate:continue
+            rs,os=role_score(role_candidate),org_score(org_candidate)
+            if rs<4 or os<2:continue
+            same_line=int(role_candidate.line_id==org_candidate.line_id)
+            gap=min(abs(role_candidate.start_offset-org_candidate.end_offset),abs(org_candidate.start_offset-role_candidate.end_offset))
+            pairs.append((rs+os,rs,os,same_line,-abs(role_candidate.source_order-org_candidate.source_order),-gap,role_candidate,org_candidate))
+    pairs.sort(key=lambda item:item[:6],reverse=True)
+    if not pairs:return None,None
+    best=pairs[0]
+    if len(pairs)>1 and best[:6]==pairs[1][:6] and (best[6],best[7])!=(pairs[1][6],pairs[1][7]):return None,None
+    return best[6],best[7]
 
 
 def _field(document,name,line,exclusion):

@@ -39,12 +39,14 @@ def extract_docx(
     )
     try:
         presentation_spans, presentation_truncated = _presentation_spans(document, pages, body_blocks)
-        source_blocks, source_blocks_partial = _source_blocks(document, pages, body_blocks)
         presentation_omitted = ()
     except Exception:  # Presentation inspection must not break text ingestion.
         presentation_spans, presentation_truncated = (), False
-        source_blocks, source_blocks_partial = (), True
         presentation_omitted = ("docx_body_runs_unavailable",)
+    try:
+        source_blocks, source_blocks_partial = _source_blocks(document, pages, body_blocks)
+    except Exception:  # Structural adapters fail independently of presentation styling.
+        source_blocks, source_blocks_partial = (), True
     omitted_parts = _omitted_parts(document) + presentation_omitted
     parsed = RawDocument(
         pages=pages,
@@ -144,39 +146,38 @@ def _presentation_spans(document, pages, body_blocks):
     page_index = 0
     offset = 0
     run_count = 0
-    for block_index, block in enumerate(body_blocks):
-        paragraphs = [block] if isinstance(block, Paragraph) else [paragraph for row in block.rows for cell in row.cells for paragraph in cell.paragraphs]
-        for paragraph_index, paragraph in enumerate(paragraphs):
-            if _has_page_break_before(paragraph) and offset and page_index + 1 < len(pages):
-                page_index += 1; offset = 0
-            for run_index, run in enumerate(paragraph.runs):
-                run_count += 1
-                if run_count > cfg.max_docx_runs:
-                    return tuple(spans), True
-                text = run.text
-                if not text:
-                    continue
-                page = pages[page_index]
-                found = page.text.find(text, offset)
-                exact = found >= 0
-                if exact:
-                    offset = found + len(text)
-                color = run.font.color.rgb or (run.style.font.color.rgb if run.style is not None else None) or (paragraph.style.font.color.rgb if paragraph.style is not None else None)
-                foreground = _rgb_luminance(str(color)) if color is not None else None
-                shading = paragraph._p.pPr.find(qn("w:shd")) if paragraph._p.pPr is not None else None
-                fill = shading.get(qn("w:fill")) if shading is not None else None
-                background = _rgb_luminance(fill) if fill and fill.lower() != "auto" else None
-                partial_offset = page.text.find(text[:1], offset) if not exact and text else -1
-                association = "exact" if exact else "partial" if partial_offset >= 0 else "unmapped"
-                spans.append(PresentationSpan(
-                    page_id=page.page_id, page_number=page.page_number, text=text,
-                    start_offset=found if exact else partial_offset if partial_offset >= 0 else None, end_offset=found + len(text) if exact else partial_offset + 1 if partial_offset >= 0 else None,
-                    paragraph_path=f"body/{block_index}/paragraph/{paragraph_index}/run/{run_index}",
-                    association=association,
-                    font_size_points=_resolved_size(run, paragraph, document),
-                    foreground_luminance=foreground, background_luminance=background,
-                    explicit_hidden=bool(run.font.hidden or (run.style.font.hidden if run.style is not None else False) or (paragraph.style.font.hidden if paragraph.style is not None else False)),
-                ))
+    for paragraph, paragraph_path, _, _, _ in _iter_body_paragraphs(body_blocks):
+        if _has_page_break_before(paragraph) and offset and page_index + 1 < len(pages):
+            page_index += 1; offset = 0
+        for run_index, run in enumerate(paragraph.runs):
+            run_count += 1
+            if run_count > cfg.max_docx_runs:
+                return tuple(spans), True
+            text = run.text
+            if not text:
+                continue
+            page = pages[page_index]
+            found = page.text.find(text, offset)
+            exact = found >= 0
+            if exact:
+                offset = found + len(text)
+            color = run.font.color.rgb or (run.style.font.color.rgb if run.style is not None else None) or (paragraph.style.font.color.rgb if paragraph.style is not None else None)
+            foreground = _rgb_luminance(str(color)) if color is not None else None
+            shading = paragraph._p.pPr.find(qn("w:shd")) if paragraph._p.pPr is not None else None
+            fill = shading.get(qn("w:fill")) if shading is not None else None
+            background = _rgb_luminance(fill) if fill and fill.lower() != "auto" else None
+            partial_offset = page.text.find(text[:1], offset) if not exact and text else -1
+            association = "exact" if exact else "partial" if partial_offset >= 0 else "unmapped"
+            spans.append(PresentationSpan(
+                page_id=page.page_id, page_number=page.page_number, text=text,
+                start_offset=found if exact else partial_offset if partial_offset >= 0 else None, end_offset=found + len(text) if exact else partial_offset + 1 if partial_offset >= 0 else None,
+                paragraph_path=f"{paragraph_path}/run/{run_index}",
+                association=association,
+                font_size_points=_resolved_size(run, paragraph, document),
+                bold=_resolved_bold(run, paragraph),
+                foreground_luminance=foreground, background_luminance=background,
+                explicit_hidden=bool(run.font.hidden or (run.style.font.hidden if run.style is not None else False) or (paragraph.style.font.hidden if paragraph.style is not None else False)),
+            ))
     return tuple(spans), False
 
 
@@ -212,18 +213,26 @@ def _source_blocks(document, pages, body_blocks):
             list_level=level, association="exact" if exact else "unmapped",
         ))
 
-    for block_index, block in enumerate(body_blocks):
+    for paragraph, paragraph_path, kind, table_id, row_index in _iter_body_paragraphs(body_blocks):
+        append_paragraph(paragraph, kind=kind, table_id=table_id, row_index=row_index, paragraph_path=paragraph_path)
+    return tuple(blocks), any(block.association != "exact" for block in blocks)
+
+
+def _iter_body_paragraphs(body_blocks):
+    def walk(block, path, table_id=None, row_index=None):
         if isinstance(block, Paragraph):
-            append_paragraph(block, paragraph_path=f"body/{block_index}/paragraph")
-            continue
+            yield block, f"{path}/paragraph", "table_cell" if table_id is not None else "paragraph", table_id, row_index
+            return
+        current_table_id = f"table:{path}"
         seen_cells: set[object] = set()
-        for row_index, row in enumerate(block.rows):
+        for current_row, row in enumerate(block.rows):
             for cell_index, cell in enumerate(row.cells):
                 if cell._tc in seen_cells: continue
                 seen_cells.add(cell._tc)
-                for paragraph_index, paragraph in enumerate(cell.paragraphs):
-                    append_paragraph(paragraph, kind="table_cell", table_id=f"table-{block_index:04d}", row_index=row_index, paragraph_path=f"body/{block_index}/row/{row_index}/cell/{cell_index}/paragraph/{paragraph_index}")
-    return tuple(blocks), any(block.association != "exact" for block in blocks)
+                for child_index, child in enumerate(cell.iter_inner_content()):
+                    yield from walk(child, f"{path}/row/{current_row}/cell/{cell_index}/child/{child_index}", current_table_id, current_row)
+    for block_index, block in enumerate(body_blocks):
+        yield from walk(block, f"body/{block_index}")
 
 
 def _omitted_parts(document):
@@ -245,7 +254,33 @@ def _rgb_luminance(value):
 
 
 def _resolved_size(run, paragraph, document):
-    for size in (run.font.size, run.style.font.size if run.style is not None else None, paragraph.style.font.size if paragraph.style is not None else None, document.styles["Normal"].font.size):
+    getters = (
+        lambda: run.font.size,
+        lambda: run.style.font.size if run.style is not None else None,
+        lambda: paragraph.style.font.size if paragraph.style is not None else None,
+        lambda: document.styles["Normal"].font.size,
+    )
+    for getter in getters:
+        try:
+            size = getter()
+        except (TypeError, ValueError):
+            continue
         if size is not None:
             return float(size.pt)
+    return None
+
+
+def _resolved_bold(run, paragraph):
+    getters = (
+        lambda: run.font.bold,
+        lambda: run.style.font.bold if run.style is not None else None,
+        lambda: paragraph.style.font.bold if paragraph.style is not None else None,
+    )
+    for getter in getters:
+        try:
+            value = getter()
+        except (TypeError, ValueError):
+            continue
+        if value is not None:
+            return bool(value)
     return None

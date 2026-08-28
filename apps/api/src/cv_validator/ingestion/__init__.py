@@ -84,6 +84,7 @@ class PresentationSpan:
     bbox: tuple[float, float, float, float] | None = None
     association: str = "unmapped"
     font_size_points: float | None = None
+    bold: bool | None = None
     foreground_luminance: float | None = None
     background_luminance: float | None = None
     opacity: float | None = None
