@@ -369,6 +369,24 @@ export type StructuralTimelineObservation = { id: string; kind: "invalid_period"
 export type StructuralVisibilityObservation = { id: string; kind: "hidden_text" | "near_zero_text" | "zero_opacity_text" | "low_contrast_text"; status: "needs_review"; confidence: "high" | "medium"; source_location: StructuralSourceLocation; trigger_codes: string[]; character_count: number; word_count: number; redaction: { present: boolean; type_hints: string[] } | null; threshold_version: string };
 export type StructuralAudits = { contract_version: "structural-audits-v1"; status: "completed" | "partial" | "unavailable" | "not_applicable"; snapshot_month: string | null; coverage: { status: string; source_format: string; audited_parts: string[]; omitted_parts: string[] }; timeline: { status: string; parser_version: string; entries: StructuralTimelineEntry[]; summaries: Array<{ category: string; entry_count: number; earliest_month: string | null; latest_month: string | null; non_overlapping_months: number }>; observations: StructuralTimelineObservation[]; reported_entry_count: number; additional_entry_count: number; truncated: boolean }; visibility: { status: string; detector_version: string; threshold_version: string; observations: StructuralVisibilityObservation[]; reported_observation_count: number; additional_observation_count: number; truncated: boolean } };
 
+export type UnderstandingEvidence = { page_id: string; page_number: number; line_id: string | null; start_offset: number | null; end_offset: number | null; association: "exact" | "partial"; excerpt: string | null };
+export type UnderstandingField = { name: string; status: "supported" | "unknown" | "ambiguous"; value: string | null; authority: "code"; confidence: "high" | "medium" | "low"; evidence: UnderstandingEvidence[] };
+export type UnderstandingRecord = { id: string; kind: "education" | "employment"; section_id: string; confidence: "high" | "medium" | "low"; fields: UnderstandingField[]; date_range_ids: string[] };
+export type UnderstandingSkill = { id: string; canonical_id: string; display_label: string; taxonomy: "esco"; taxonomy_version: string; confidence: "high" | "medium" | "low"; evidence: UnderstandingEvidence[] };
+export type DocumentUnderstanding = {
+  contract_version: "document-understanding-v1";
+  status: "completed" | "partial" | "unavailable" | "not_applicable";
+  parser_version: string; ruleset_version: string; snapshot_month: string;
+  coverage: { status: string; source_format: string; audited_parts: string[]; omitted_parts: string[] };
+  sections: Array<{ id: string; kind: string; confidence: string; heading: string; start_line_id: string; end_line_id: string; evidence: UnderstandingEvidence[] }>;
+  date_ranges: Array<{ id: string; source_literal: string; start_month: string | null; end_month: string | null; start_precision: string; end_precision: string; status: string; snapshot_month: string; evidence: UnderstandingEvidence[] }>;
+  records: UnderstandingRecord[]; skills: UnderstandingSkill[];
+  ambiguous_spans: Array<{ id: string; category: string; reason_code: string; evidence: UnderstandingEvidence[] }>;
+  timeline_record_links: Array<{ timeline_entry_id: string; record_id: string }>;
+  code_research_subjects: Array<{ id: string; category: "company" | "education"; subject: string; record_id: string; field_name: "organization" | "institution" }>;
+  truncation: Record<string, { reported_count: number; additional_count: number; truncated: boolean }>;
+};
+
 export type AnalysisReport = {
   analysis_id: string;
   ai_features_enabled?: boolean;
@@ -401,6 +419,7 @@ export type AnalysisReport = {
   file_details?: FileDetails | null;
   link_inspection?: LinkInspection | null;
   structural_audits?: StructuralAudits | null;
+  document_understanding?: DocumentUnderstanding | null;
   deterministic: {
     ruleset_version: string;
     candidates: DeterministicCandidate[];

@@ -9,6 +9,7 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy, type CopyKey } from "@/lib/app-settings";
+import { researchEligibility } from "@/lib/understanding-selectors";
 
 function institutionStatusKey(status: string): CopyKey {
   return ({
@@ -38,7 +39,7 @@ export function EducationResearchPanel({
   const automatic = useAutoResearchState(report.analysis_id, "education");
   const notifiedAutomatic = useRef<EducationResearch | null>(null);
   const onResearchChangeRef = useRef(onResearchChange);
-  const enabled = report.ai_analysis.status === "succeeded" && report.ai_analysis.research_candidates.some((candidate) => candidate.category === "education_or_certification");
+  const enabled = settings.aiEnabled && researchEligibility(report).education;
   const visibleResearch = research ?? automatic?.result as EducationResearch | undefined;
   const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
   const completed = state === "completed" || automatic?.status === "succeeded";

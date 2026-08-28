@@ -27,6 +27,7 @@ import { FileDetailsDisclosure, LinkInspectionPanel } from "@/components/analyze
 import { useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
 import { StructuralAuditPanel } from "@/components/analyze/structural-audit-panel";
+import { selectStructuredRecords } from "@/lib/understanding-selectors";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
   const { t } = useCopy();
@@ -147,14 +148,9 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
     : report.deterministic.observations.some((observation) => observation.kind === "combined_location_inside_eu")
       ? t("insideEu")
       : null;
-  const education = Array.from(new Map(report.ai_analysis.facts.education.map((fact) => [
-    `${fact.institution}:${fact.program ?? ""}:${fact.study_dates ?? ""}`,
-    fact,
-  ])).values());
-  const employment = Array.from(new Map(report.ai_analysis.facts.employment.map((fact) => [
-    `${fact.organization}:${fact.role}:${fact.employment_dates ?? ""}`,
-    fact,
-  ])).values());
+  const selectedRecords = selectStructuredRecords(report);
+  const education = selectedRecords.filter((record) => record.kind === "education");
+  const employment = selectedRecords.filter((record) => record.kind === "employment");
   const timelineNow = new Date();
   const educationTimeline = summarizeDateRanges(education.map((fact) => fact.study_dates), timelineNow, settings.uiLanguage);
   const employmentTimeline = summarizeDateRanges(employment.map((fact) => fact.employment_dates), timelineNow, settings.uiLanguage);
@@ -208,12 +204,12 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
               {educationTimeline ? <span className="text-xs font-normal text-muted-foreground">{educationTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {education.map((fact, index) => <OverviewRow
-                key={`${fact.institution}:${fact.program ?? ""}:${index}`}
+              {education.map((fact) => <OverviewRow
+                key={fact.id}
                 icon={<GraduationCap className="size-4" />}
                 label={t("educationEntry")}
-                value={fact.institution}
-                detail={[fact.program, fact.study_dates].filter(Boolean).join(" · ")}
+                value={fact.institution ?? t("educationEntry")}
+                detail={[fact.program, fact.study_dates, `${fact.authority} · ${fact.confidence}`, fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
                 tone={educationTone}
               />)}
             </div>
@@ -225,12 +221,12 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
               {employmentTimeline ? <span className="text-xs font-normal text-muted-foreground">{employmentTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {employment.map((fact, index) => <OverviewRow
-                key={`${fact.organization}:${fact.role}:${index}`}
+              {employment.map((fact) => <OverviewRow
+                key={fact.id}
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
-                value={fact.role}
-                detail={employmentDetail(fact.organization, fact.location, fact.employment_dates)}
+                value={fact.role ?? t("employmentEntry")}
+                detail={[employmentDetail(fact.organization ?? "", fact.location, fact.employment_dates), `${fact.authority} · ${fact.confidence}`, fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
                 tone={employmentTone}
               />)}
             </div>
@@ -353,6 +349,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   language={settings.uiLanguage}
                   employment={report.ai_analysis.facts.employment}
                   education={report.ai_analysis.facts.education}
+                  understanding={report.document_understanding}
                 />
 
                 {grouped.attention.length ? <HoverDisclosure

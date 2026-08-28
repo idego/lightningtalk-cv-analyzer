@@ -1,5 +1,5 @@
 import { AlertCircle, EyeOff, Timer } from "lucide-react";
-import type { AIEducationFact, AIEmploymentFact, StructuralAudits, StructuralSourceLocation, StructuralTimelineEntry, StructuralTimelineObservation } from "@/lib/analyze-types";
+import type { AIEducationFact, AIEmploymentFact, DocumentUnderstanding, StructuralAudits, StructuralSourceLocation, StructuralTimelineEntry, StructuralTimelineObservation, UnderstandingRecord } from "@/lib/analyze-types";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 
 const COPY = {
@@ -40,8 +40,15 @@ function entryDescription(
   employment: AIEmploymentFact[],
   education: AIEducationFact[],
   copy: typeof COPY.en | typeof COPY.pl,
+  linkedRecord?: UnderstandingRecord,
 ) {
   if (!entry) return copy.unknownPeriod;
+  if (linkedRecord) {
+    const values = Object.fromEntries(linkedRecord.fields.filter(field => field.status === "supported").map(field => [field.name, field.value]));
+    return linkedRecord.kind === "employment"
+      ? [values.role, values.organization].filter(Boolean).join(" · ") || copy.workPeriod
+      : [values.program, values.institution].filter(Boolean).join(" · ") || copy.educationPeriod;
+  }
   const range = normalizedDate(`${entry.start_text ?? ""} - ${entry.end_text ?? ""}`);
   if (entry.category === "employment") {
     const fact = employment.find(item => normalizedDate(item.employment_dates) === range);
@@ -96,12 +103,14 @@ function timelineGroups(audits: StructuralAudits, entryById: Map<string, Structu
   return groups;
 }
 
-export function StructuralAuditPanel({ audits, language, employment = [], education = [] }: { audits: StructuralAudits | null | undefined; language: "en" | "pl"; employment?: AIEmploymentFact[]; education?: AIEducationFact[] }) {
+export function StructuralAuditPanel({ audits, language, employment = [], education = [], understanding }: { audits: StructuralAudits | null | undefined; language: "en" | "pl"; employment?: AIEmploymentFact[]; education?: AIEducationFact[]; understanding?: DocumentUnderstanding | null }) {
   const copy = COPY[language];
   if (!audits) return <HoverDisclosure className="rounded-md border p-3" title={<span className="font-medium">{copy.title}</span>} contentClassName="pt-3"><p className="text-sm text-muted-foreground">{copy.legacy}</p></HoverDisclosure>;
 
   const status = copy[audits.status as keyof typeof copy] ?? audits.status;
   const entryById = new Map(audits.timeline.entries.map(entry => [entry.id, entry]));
+  const recordById = new Map((understanding?.records ?? []).map(record => [record.id, record]));
+  const linkedRecordByTimeline = new Map((understanding?.timeline_record_links ?? []).map(link => [link.timeline_entry_id, recordById.get(link.record_id)]));
   const groups = timelineGroups(audits, entryById);
   const visibilityNames = { hidden_text: copy.hidden, near_zero_text: copy.nearZero, zero_opacity_text: copy.opacity, low_contrast_text: copy.contrast };
   const count = groups.length + audits.visibility.observations.length;
@@ -135,10 +144,10 @@ export function StructuralAuditPanel({ audits, language, employment = [], educat
             <span className="flex items-center gap-2 font-medium"><Timer className="size-4" />{title}</span>
             <span className="text-xs text-muted-foreground">{group.entries.length} {copy.entries} · {group.observations.length} {copy.relationships}</span>
           </div>
-          {group.category === "employment" && anchorConnections > 1 ? <p className="mt-1 text-xs text-muted-foreground">{entryDescription(anchor, employment, education, copy)} {copy.overlapsOthers.replace("{count}", String(anchorConnections))}.</p> : null}
+          {group.category === "employment" && anchorConnections > 1 ? <p className="mt-1 text-xs text-muted-foreground">{entryDescription(anchor, employment, education, copy, anchor ? linkedRecordByTimeline.get(anchor.id) : undefined)} {copy.overlapsOthers.replace("{count}", String(anchorConnections))}.</p> : null}
           <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
             {group.entries.map(entry => <div key={entry.id} className="rounded bg-muted/40 px-2.5 py-2">
-              <p className="font-medium">{entryDescription(entry, employment, education, copy)}</p>
+              <p className="font-medium">{entryDescription(entry, employment, education, copy, linkedRecordByTimeline.get(entry.id))}</p>
               <p className="text-xs text-muted-foreground">{entry.start_text ?? "?"} – {entry.end_text ?? "?"}</p>
               {entry.evidence[0] ? <p className="mt-1 text-[11px] text-muted-foreground">{location(entry.evidence[0].location)}</p> : null}
             </div>)}

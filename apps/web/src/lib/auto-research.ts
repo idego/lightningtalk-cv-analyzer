@@ -15,12 +15,13 @@ export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnable
 }
 
 function eligibleKinds(report: AnalysisReport): Set<AutoResearchKind> {
-  if (report.ai_analysis.status !== "succeeded" || !report.analysis_access_token) return new Set();
+  if (!report.analysis_access_token || report.ai_features_enabled === false) return new Set();
   const categories = new Set(report.ai_analysis.research_candidates.map((item) => item.category));
+  const codeCategories = new Set(report.document_understanding?.code_research_subjects.map((item) => item.category) ?? []);
   return new Set([
-    categories.has("company") && "company",
-    categories.has("education_or_certification") && "education",
-    categories.has("linkedin") && "linkedin",
+    (categories.has("company") || codeCategories.has("company")) && "company",
+    (categories.has("education_or_certification") || codeCategories.has("education")) && "education",
+    report.ai_analysis.status === "succeeded" && categories.has("linkedin") && "linkedin",
   ].filter(Boolean) as AutoResearchKind[]);
 }
 

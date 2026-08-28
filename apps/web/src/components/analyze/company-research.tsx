@@ -8,6 +8,7 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
+import { researchEligibility } from "@/lib/understanding-selectors";
 
 function isResearchableCompany(value: string) {
   const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
@@ -30,10 +31,7 @@ export function CompanyResearchPanel({
   const automatic = useAutoResearchState(report.analysis_id, "company");
   const notifiedAutomatic = useRef<CompanyResearch | null>(null);
   const onResearchChangeRef = useRef(onResearchChange);
-  const candidates = report.ai_analysis.research_candidates.filter(
-    (candidate) => candidate.category === "company" && isResearchableCompany(candidate.query_subject),
-  );
-  const enabled = report.ai_analysis.status === "succeeded" && candidates.length > 0;
+  const enabled = settings.aiEnabled && researchEligibility(report).company;
   const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
   const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
   const completed = state === "completed" || automatic?.status === "succeeded";
