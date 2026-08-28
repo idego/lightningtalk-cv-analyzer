@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { FilePenLine, Search, Settings } from "lucide-react";
+import { Search, Settings, UserRoundPen } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -18,7 +18,7 @@ export function buildSidebarNav(): NavGroup[] {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
-        { title: "Profile Builder", url: "/profile-builder", icon: FilePenLine },
+        { title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen },
         { title: "Settings", url: "/settings", icon: Settings },
       ],
     },

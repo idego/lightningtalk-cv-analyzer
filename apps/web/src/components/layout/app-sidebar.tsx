@@ -66,7 +66,7 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     isActive={pathname.replace(/\/+$/, "") === item.url.replace(/\/+$/, "")}
-                    tooltip={item.url === "/settings" ? t("settings") : t("analyze")}
+                    tooltip={item.url === "/settings" ? t("settings") : item.title}
                     className="group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0! [&>svg]:size-5!"
                     render={
                       <Link href={item.url}>
@@ -75,7 +75,7 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
                           data-sidebar-motion="content"
                           className="opacity-100 transition-[width,opacity,transform] duration-150 [transition-timing-function:var(--motion-ease-out)] group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden group-data-[collapsible=icon]:-translate-x-1 group-data-[collapsible=icon]:opacity-0"
                         >
-                          {item.url === "/settings" ? t("settings") : t("analyze")}
+                          {item.url === "/settings" ? t("settings") : item.title}
                         </span>
                       </Link>
                     }
