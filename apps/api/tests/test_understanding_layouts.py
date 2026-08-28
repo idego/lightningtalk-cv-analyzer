@@ -1,5 +1,6 @@
 from io import BytesIO
 
+import pytest
 from docx import Document
 
 from cv_validator.document_understanding.service import understand_document, understanding_to_payload
@@ -59,6 +60,36 @@ def test_emphasized_role_pairs_with_one_date_anchored_unlabelled_employer():
     assert fields["organization"] == "Northwind Workshop"
 
 
+@pytest.mark.parametrize("separator", [" at ", " — "])
+def test_bounded_same_line_connector_pairs_role_and_organization(separator):
+    text = f"Experience\nSoftware Engineer{separator}Example Workshop — Jan 2021 - Mar 2024"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    employment = next(record for record in payload["records"] if record["kind"] == "employment")
+    fields = {field["name"]: field["value"] for field in employment["fields"]}
+    assert fields["role"] == "Software Engineer"
+    assert fields["organization"] == "Example Workshop"
+
+
+@pytest.mark.parametrize("other", ["Remote", "Taylor Morgan", "Built APIs"])
+def test_generic_short_fragment_cannot_establish_employer_ownership(other):
+    text = f"Experience\nSoftware Engineer\n{other}\nJan 2021 - Mar 2024"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    assert [record for record in payload["records"] if record["kind"] == "employment"] == []
+    assert payload["code_research_subjects"] == []
+
+
+def test_uniform_font_size_does_not_turn_duty_text_into_role():
+    text = "Experience\nCompany: Example Labs Ltd\nBuilt APIs\nJan 2021 - Mar 2024"
+    page = SourcePage("page-0001", 1, text)
+    spans = tuple(PresentationSpan(page.page_id, 1, line.text, line.start_offset, line.end_offset, association="exact", font_size_points=11) for line in page.lines)
+    raw = RawDocument(pages=(page,), source_format="pdf", presentation_spans=spans)
+    payload = understanding_to_payload(understand_document(redact_national_ids(raw), "test", snapshot_month="2026-08"))
+    record = next(record for record in payload["records"] if record["kind"] == "employment")
+    role = next(field for field in record["fields"] if field["name"] == "role")
+    assert role["status"] == "unknown"
+    assert role["value"] is None
+
+
 def test_styled_identity_without_date_anchor_does_not_create_employment_record():
     document = Document(); document.add_paragraph("Experience")
     identity = document.add_paragraph()
@@ -78,3 +109,11 @@ def test_interleaved_pdf_column_ownership_abstains_instead_of_guessing():
     payload = understanding_to_payload(understand_document(redact_national_ids(raw), "test", snapshot_month="2026-08"))
     assert payload["records"] == []
     assert any(item["reason_code"] == "unsupported_employment_identity" for item in payload["ambiguous_spans"])
+
+
+def test_oversized_employment_entry_abstains_with_explicit_limit_issue():
+    lines = ["Experience", "Jan 2021 - Mar 2024", *[f"Responsibility item {index}" for index in range(80)]]
+    text = "\n".join(lines)
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    assert [record for record in payload["records"] if record["kind"] == "employment"] == []
+    assert any(item["reason_code"] == "employment_candidate_limit" for item in payload["ambiguous_spans"])

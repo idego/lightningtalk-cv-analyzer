@@ -83,6 +83,22 @@ def test_visibility_never_serializes_hidden_text_and_retains_redaction_metadata(
     assert "excerpt" not in payload["visibility"]["observations"][0]
 
 
+def test_visibility_grouping_ignores_bold_for_v1_compatibility():
+    text = "Hidden content"
+    page = SourcePage("page-0001", 1, text)
+    common = dict(page_id=page.page_id, page_number=1, association="exact", font_size_points=11, explicit_hidden=True, paragraph_path="body/0/paragraph")
+    differing = (
+        PresentationSpan(text="Hidden ", start_offset=0, end_offset=7, bold=False, **common),
+        PresentationSpan(text="content", start_offset=7, end_offset=14, bold=True, **common),
+    )
+    uniform = tuple(replace(span, bold=False) for span in differing)
+    def payload(spans):
+        raw = RawDocument(pages=(page,), source_format="docx", presentation_spans=spans, presentation_audited_parts=("docx_body_paragraph_runs",))
+        return audit_document(redact_national_ids(raw), snapshot_month="2026-08").to_dict()["visibility"]
+    assert payload(differing) == payload(uniform)
+    assert payload(differing)["reported_observation_count"] == 1
+
+
 def test_unknown_visibility_field_fails_closed():
     payload = _audit("Experience\nA 2020 - 2021").to_dict()
     payload["visibility"]["observations"] = [{"excerpt": "secret"}]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +25,13 @@ _INSTITUTIONS = ("university", "college", "academy", "school", "institute", "fac
 _DEGREES = ("bachelor", "master", "phd", "doctorate", "licencjat", "magister", "inzynier", "mba", "bsc", "msc")
 _ROLES = ("engineer", "developer", "manager", "consultant", "analyst", "designer", "specialist", "architect", "director", "lead", "intern", "programista", "inzynier", "konsultant", "analityk", "specjalista", "kierownik")
 _ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag|sa|s\.a\.|sp\.\s*z\s*o\.o\.|labs?|studio|group)\b")
+_IDENTITY_CONNECTOR = re.compile(r"(?i)^\s*(?P<role>[^|;\t•—–]{2,80}?)\s+(?P<connector>at|@|[—–]|-{2,}|\|)\s+(?P<organization>[^|;\t•—–]{2,80}?)\s*$")
+_WORK_MODE = frozenset({"remote", "hybrid", "onsite", "on-site", "zdalnie", "hybrydowo", "stacjonarnie"})
+_DUTY_PREFIX = re.compile(r"(?i)^(?:built|build|developed|develop|created|create|managed|manage|led|lead|designed|design|implemented|implement|maintained|maintain|responsible\s+for)\b")
+_MAX_EMPLOYMENT_ENTRY_LINES = 64
+_MAX_EMPLOYMENT_ENTRY_CHARS = 8192
+_MAX_EMPLOYMENT_CANDIDATES = 32
+_MAX_RANKED_CANDIDATES = 8
 _LABEL_PREFIX = r"(?:^\s*|[|;]\s*)"
 _LABELS = {
     "organization": re.compile(rf"(?i){_LABEL_PREFIX}(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>[^|;]+)"),
@@ -48,6 +55,8 @@ class _EmploymentCandidate:
     date_side: str | None = None
     bold: bool = False
     font_size: float | None = None
+    role_layout_signal: bool = False
+    organization_layout_signal: bool = False
 
 
 def understand_document(document, deterministic_ruleset_version: str, *, snapshot_month: str | None = None, location_resolver: LocationResolver | None = None, small_locality_population_max: int = 10_000, skill_index_path: Path = DEFAULT_INDEX) -> DocumentUnderstandingResult:
@@ -168,14 +177,20 @@ def _education(document,section,entry,lines,dates,exclusion):
 
 def _employment(document,section,entry,lines,dates,exclusion):
     relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role"); client=_label(lines,"client"); organization=_label(lines,"organization")
+    issues=();truncated=False
     # Unlabelled layout inference is anchored to a shared date annotation.  This
     # prevents descriptive text in an employment section from becoming a record
     # merely because two short, styled fragments happen to be adjacent.
     if dates:
-        candidates=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")})
-        role,organization=_pair_employment_candidates(candidates,role,organization)
-    issues=_issue(document,(client,),"employer_client_ambiguity",entry.source_order,exclusion) if client and organization is None else ()
+        candidates,truncated=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")})
+        if truncated:
+            issues=_issue(document,lines,"employment_candidate_limit",entry.source_order,exclusion)
+        else:
+            role,organization=_pair_employment_candidates(candidates,role,organization)
+    if client and organization is None:
+        issues=(*issues,*_issue(document,(client,),"employer_client_ambiguity",entry.source_order,exclusion))
     org_field=_field(document,"organization",organization,exclusion); rel_field=_field(document,"relationship_type",relationship,exclusion); role_field=_field(document,"role",role,exclusion)
+    if truncated and org_field.status!="supported" and rel_field.status!="supported":return None,issues
     if org_field.status!="supported" and rel_field.status!="supported": return None,(*issues,*_issue(document,lines,"unsupported_employment_identity",entry.source_order,exclusion))
     if role_field.status!="supported" and not dates: return None,(*issues,*_issue(document,lines,"insufficient_employment_support",entry.source_order,exclusion))
     fields=(org_field,role_field,rel_field,_date_field("employment_dates",dates),_field(document,"employment_location",_label(lines,"location"),exclusion))
@@ -205,7 +220,10 @@ def _looks_org(value):
 
 
 def _employment_candidates(document,lines,dates,exclusion,excluded):
+    if len(lines)>_MAX_EMPLOYMENT_ENTRY_LINES or sum(len(line.text) for line in lines)>_MAX_EMPLOYMENT_ENTRY_CHARS:
+        return (),True
     line_order={line.line_id:index for index,line in enumerate(lines)}
+    presentation_by_line=_presentation_by_line(document,lines)
     date_intervals={}
     for item in dates:
         for evidence in item.evidence:
@@ -216,33 +234,51 @@ def _employment_candidates(document,lines,dates,exclusion,excluded):
         if line in excluded or any(pattern.search(line.text) for pattern in _LABELS.values()):
             continue
         intervals=sorted(date_intervals.get(line.line_id,()))
+        line_presentation=presentation_by_line.get(line.line_id,())
         spans=[]
         if intervals:
             cursor=line.start_offset
             for start,end in intervals:
-                if cursor<start:spans.extend(_candidate_fragments(document,line,cursor,start,"before"))
+                if cursor<start:spans.extend(_candidate_fragments(document,line,cursor,start,"before",line_presentation))
                 cursor=max(cursor,end)
-            if cursor<line.end_offset:spans.extend(_candidate_fragments(document,line,cursor,line.end_offset,"after"))
+            if cursor<line.end_offset:spans.extend(_candidate_fragments(document,line,cursor,line.end_offset,"after",line_presentation))
         else:
-            spans.extend(_candidate_fragments(document,line,line.start_offset,line.end_offset,None))
-        for start,end,value,date_side in spans:
+            spans.extend(_candidate_fragments(document,line,line.start_offset,line.end_offset,None,line_presentation))
+        for start,end,value,date_side,role_layout,organization_layout in spans:
             normalized=normalize_text(value); words=value.split()
             if not normalized or len(value)>110 or len(words)>12 or len(words)>0 and len(words)==1 and not any(ch.isalpha() for ch in value):continue
             if any(marker in normalized for marker in _INSTITUTIONS) or is_self_employment_label(value):continue
             if re.search(r"(?i)(?:https?://|www\.|@|\+?\d[\d ()./-]{6,})",value):continue
             if value.rstrip().endswith((".",";")) and len(words)>5:continue
             if exclusion.intersects(line.page_id,start,end):continue
-            presentation=[span for span in document.presentation_spans if span.page_id==line.page_id and span.start_offset is not None and span.end_offset is not None and span.start_offset<end and start<span.end_offset]
+            presentation=[span for span in presentation_by_line.get(line.line_id,()) if span.start_offset<end and start<span.end_offset]
             bold_chars=sum(max(0,min(end,span.end_offset)-max(start,span.start_offset)) for span in presentation if span.bold)
             sizes=[span.font_size_points for span in presentation if span.font_size_points is not None]
             page=next(page for page in document.pages if page.page_id==line.page_id)
-            result.append(_EmploymentCandidate(line.page_id,page.page_number,line.line_id,value,start,end,line_order[line.line_id],date_side,bold_chars>=max(1,(end-start)//2),max(sizes) if sizes else None))
+            role_layout=role_layout or _has_role_marker(value)
+            result.append(_EmploymentCandidate(line.page_id,page.page_number,line.line_id,value,start,end,line_order[line.line_id],date_side,bold_chars>=max(1,(end-start)//2),max(sizes) if sizes else None,role_layout,organization_layout))
+            if len(result)>_MAX_EMPLOYMENT_CANDIDATES:return (),True
     unique={}
-    for candidate in result:unique[(candidate.page_id,candidate.start_offset,candidate.end_offset)]=candidate
-    return tuple(sorted(unique.values(),key=lambda item:(item.source_order,item.start_offset,item.end_offset)))
+    for candidate in result:
+        key=(candidate.page_id,candidate.start_offset,candidate.end_offset)
+        previous=unique.get(key)
+        unique[key]=replace(candidate,role_layout_signal=candidate.role_layout_signal or bool(previous and previous.role_layout_signal),organization_layout_signal=candidate.organization_layout_signal or bool(previous and previous.organization_layout_signal))
+    candidates=tuple(sorted(unique.values(),key=lambda item:(item.source_order,item.start_offset,item.end_offset)))
+    return _sequence_layout_signals(candidates,date_intervals,line_order),False
 
 
-def _candidate_fragments(document,line,start,end,date_side):
+def _presentation_by_line(document,lines):
+    by_page={}
+    for span in document.presentation_spans:
+        if span.start_offset is not None and span.end_offset is not None:
+            by_page.setdefault(span.page_id,[]).append(span)
+    result={}
+    for line in lines:
+        result[line.line_id]=tuple(span for span in by_page.get(line.page_id,()) if span.start_offset<line.end_offset and line.start_offset<span.end_offset)
+    return result
+
+
+def _candidate_fragments(document,line,start,end,date_side,presentation_spans=()):
     page=next(page for page in document.pages if page.page_id==line.page_id)
     raw=page.text[start:end]
     base=start
@@ -251,9 +287,15 @@ def _candidate_fragments(document,line,start,end,date_side):
         value=match.group().strip(" ,:–—-\u00a0")
         if not value:continue
         relative=match.start()+match.group().find(value)
-        result.append((base+relative,base+relative+len(value),value,date_side))
+        result.append((base+relative,base+relative+len(value),value,date_side,False,False))
+    connector=_IDENTITY_CONNECTOR.match(raw.strip(" ,:–—-\u00a0"))
+    if connector and _has_role_marker(connector.group("role")) and not _inadmissible_organization_fragment(connector.group("organization")):
+        stripped=raw.strip(" ,:–—-\u00a0"); stripped_offset=raw.find(stripped)
+        for group in ("role","organization"):
+            value=connector.group(group).strip(); relative=stripped_offset+connector.start(group)+connector.group(group).find(value)
+            result.append((base+relative,base+relative+len(value),value,date_side,group=="role",group=="organization"))
     styled=[]
-    presentation=sorted((span for span in document.presentation_spans if span.page_id==line.page_id and span.start_offset is not None and span.end_offset is not None and start<span.end_offset and span.start_offset<end),key=lambda span:(span.start_offset or 0,span.end_offset or 0))
+    presentation=sorted((span for span in presentation_spans if start<span.end_offset and span.start_offset<end),key=lambda span:(span.start_offset or 0,span.end_offset or 0))
     for span in presentation:
         left=max(start,span.start_offset or start);right=min(end,span.end_offset or end)
         if left>=right:continue
@@ -265,7 +307,7 @@ def _candidate_fragments(document,line,start,end,date_side):
     for left,right,value,_ in styled:
         cleaned=value.strip(" |;,:–—-\u00a0")
         if not cleaned or not any(ch.isalpha() for ch in cleaned):continue
-        relative=value.find(cleaned);meaningful.append((left+relative,left+relative+len(cleaned),cleaned,date_side))
+        relative=value.find(cleaned);meaningful.append((left+relative,left+relative+len(cleaned),cleaned,date_side,False,False))
     if 2<=len(meaningful)<=4:
         # A paragraph whose runs deliberately change emphasis carries its own
         # field boundaries.  Do not retain a larger fragment that merely wraps
@@ -276,19 +318,61 @@ def _candidate_fragments(document,line,start,end,date_side):
     return result
 
 
+def _has_role_marker(value):
+    normalized=normalize_text(value)
+    return any(marker in normalized for marker in _ROLES)
+
+
+def _inadmissible_organization_fragment(value):
+    normalized=normalize_text(value)
+    return normalized in _WORK_MODE or bool(_DUTY_PREFIX.search(value.strip()))
+
+
+def _sequence_layout_signals(candidates,date_intervals,line_order):
+    date_orders=sorted({line_order[line_id] for line_id in date_intervals if line_id in line_order})
+    role_candidates=[candidate for candidate in candidates if candidate.role_layout_signal]
+    if len(role_candidates)>1:
+        emphasized=[candidate for candidate in role_candidates if candidate.bold]
+        if len(emphasized)==1:role_candidates=emphasized
+    if len(role_candidates)!=1 or not date_orders:return candidates
+    role=role_candidates[0];ordered=list(candidates);role_index=ordered.index(role);marked=[]
+    preceding=ordered[role_index-1] if role_index else None
+    following=ordered[role_index+1] if role_index+1<len(ordered) else None
+    for candidate in candidates:
+        organization_signal=candidate.organization_layout_signal
+        if candidate is not role and not _inadmissible_organization_fragment(candidate.text):
+            organization_signal=organization_signal or any(
+                candidate is preceding and (
+                    date_order<candidate.source_order<=role.source_order
+                    or candidate.source_order<=role.source_order<date_order
+                )
+                or candidate.line_id==role.line_id and candidate in {preceding,following}
+                or candidate is following and (
+                    candidate.date_side is not None
+                    or candidate.bold and candidate.font_size!=role.font_size
+                )
+                for date_order in date_orders
+            )
+        marked.append(replace(candidate,organization_layout_signal=organization_signal))
+    return tuple(marked)
+
+
 def _pair_employment_candidates(candidates,role,organization):
     if not candidates:return role,organization
-    max_size=max((item.font_size or 0 for item in candidates),default=0)
+    sizes=[item.font_size for item in candidates if item.font_size is not None]
+    max_size=max(sizes,default=0)
+    has_size_hierarchy=bool(sizes) and max_size-min(sizes)>=1.0
     def role_score(item):
         normalized=normalize_text(item.text)
-        return (4 if any(marker in normalized for marker in _ROLES) else 0)+(2 if item.bold else 0)+(2 if item.font_size and item.font_size==max_size and max_size>0 else 0)+(1 if item.date_side is None else 0)+(1 if len(item.text.split())<=6 else 0)
+        return (4 if item.role_layout_signal or any(marker in normalized for marker in _ROLES) else 0)+(2 if item.bold else 0)+(2 if has_size_hierarchy and item.font_size==max_size else 0)+(1 if item.date_side is None else 0)+(1 if len(item.text.split())<=6 else 0)
     def org_score(item):
         normalized=normalize_text(item.text)
         role_like=any(marker in normalized for marker in _ROLES)
-        return (6 if _looks_org(item.text) else 0)+(3 if item.date_side=="before" else 2 if item.date_side=="after" else 0)+(1 if item.bold else 0)+(1 if len(item.text.split())<=5 else 0)-(4 if role_like and not _looks_org(item.text) else 0)
+        positive=_looks_org(item.text) or item.organization_layout_signal
+        return (6 if positive else 0)+(2 if item.date_side and positive else 0)+(1 if item.bold and positive else 0)+(1 if len(item.text.split())<=5 and positive else 0)-(4 if role_like and not _looks_org(item.text) else 0)
     if role is not None:
         ranked=sorted(candidates,key=lambda item:(org_score(item),-item.source_order),reverse=True)
-        if organization is None and ranked and org_score(ranked[0])>=3:organization=ranked[0]
+        if organization is None and ranked and org_score(ranked[0])>=6:organization=ranked[0]
         return role,organization
     if organization is not None:
         ranked=sorted(candidates,key=lambda item:(role_score(item),item.source_order),reverse=True)
@@ -298,27 +382,20 @@ def _pair_employment_candidates(candidates,role,organization):
     distinct_strongest={normalize_text(item.text) for item in strongest_organizations}
     if len(distinct_strongest)>1 and org_score(strongest_organizations[0])>=6:
         return None,None
-    role_like=[item for item in candidates if any(marker in normalize_text(item.text) for marker in _ROLES)]
-    non_role_like=[item for item in candidates if item not in role_like]
-    if len(role_like)==1 and len(non_role_like)==1 and role_score(role_like[0])>=4 and org_score(non_role_like[0])>=1:
-        # A date-anchored entry with exactly one independently role-like field
-        # and one other short, styled/source-bounded identity field supplies a
-        # complementary employer relationship without treating arbitrary Title
-        # Case text elsewhere as an organization.
-        return role_like[0],non_role_like[0]
-    pairs=[]
-    for role_candidate in candidates:
-        for org_candidate in candidates:
+    role_candidates=sorted(candidates,key=lambda item:(role_score(item),-item.source_order,-item.start_offset),reverse=True)[:_MAX_RANKED_CANDIDATES]
+    org_candidates=sorted((item for item in candidates if org_score(item)>=6),key=lambda item:(org_score(item),-item.source_order,-item.start_offset),reverse=True)[:_MAX_RANKED_CANDIDATES]
+    best=None; tied=False
+    for role_candidate in role_candidates:
+        for org_candidate in org_candidates:
             if role_candidate is org_candidate:continue
             rs,os=role_score(role_candidate),org_score(org_candidate)
-            if rs<4 or os<2:continue
+            if rs<4:continue
             same_line=int(role_candidate.line_id==org_candidate.line_id)
             gap=min(abs(role_candidate.start_offset-org_candidate.end_offset),abs(org_candidate.start_offset-role_candidate.end_offset))
-            pairs.append((rs+os,rs,os,same_line,-abs(role_candidate.source_order-org_candidate.source_order),-gap,role_candidate,org_candidate))
-    pairs.sort(key=lambda item:item[:6],reverse=True)
-    if not pairs:return None,None
-    best=pairs[0]
-    if len(pairs)>1 and best[:6]==pairs[1][:6] and (best[6],best[7])!=(pairs[1][6],pairs[1][7]):return None,None
+            current=(rs+os,rs,os,same_line,-abs(role_candidate.source_order-org_candidate.source_order),-gap,role_candidate,org_candidate)
+            if best is None or current[:6]>best[:6]:best=current;tied=False
+            elif current[:6]==best[:6] and (current[6],current[7])!=(best[6],best[7]):tied=True
+    if best is None or tied:return None,None
     return best[6],best[7]
 
 
