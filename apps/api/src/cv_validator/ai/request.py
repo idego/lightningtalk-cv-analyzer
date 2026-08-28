@@ -34,6 +34,20 @@ class DocumentAnalysisRequest:
         return deepcopy(self.openai_payload)
 
 
+@dataclass(frozen=True)
+class ProfileExtractionRequest:
+    openai_payload: dict[str, Any]
+    page_ids: tuple[str, ...]
+    prompt_version: str
+    schema_version: str
+    input_contract_version: str
+    timeout_seconds: float
+    max_retries: int
+
+    def to_openai_payload(self) -> dict[str, Any]:
+        return deepcopy(self.openai_payload)
+
+
 def build_document_analysis_request(
     settings: AISettings,
     document: RedactedDocument,
@@ -142,3 +156,56 @@ def _contract_text(name: str) -> str:
         .joinpath(name)
         .read_text(encoding="utf-8")
     )
+
+
+PROFILE_BUILDER_PROMPT_VERSION = "profile-builder-extraction-v1"
+PROFILE_BUILDER_SCHEMA_VERSION = "candidate-profile-extraction-v1"
+
+
+def build_profile_extraction_request(
+    settings: AISettings,
+    document: RedactedDocument,
+) -> ProfileExtractionRequest:
+    if not isinstance(document, RedactedDocument):
+        raise TypeError("Profile Builder extraction requires a RedactedDocument")
+    schema = load_profile_extraction_schema()
+    input_text = (
+        "<redacted_cv_markdown>\n"
+        f"{format_line_referenced_markdown(document.pages)}\n"
+        "</redacted_cv_markdown>"
+    )
+    payload: dict[str, Any] = {
+        "model": settings.model,
+        "reasoning": {"effort": settings.reasoning_effort},
+        "instructions": _contract_text("profile-builder-prompt.md"),
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": input_text}],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "candidate_profile_extraction",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+        "tools": [],
+        "store": settings.store,
+        "max_output_tokens": settings.max_output_tokens,
+    }
+    return ProfileExtractionRequest(
+        openai_payload=payload,
+        page_ids=tuple(page.page_id for page in document.pages),
+        prompt_version=PROFILE_BUILDER_PROMPT_VERSION,
+        schema_version=PROFILE_BUILDER_SCHEMA_VERSION,
+        input_contract_version="profile-builder-input-v1",
+        timeout_seconds=settings.timeout_seconds,
+        max_retries=settings.max_retries,
+    )
+
+
+def load_profile_extraction_schema() -> dict[str, Any]:
+    return json.loads(_contract_text("profile-builder.schema.json"))

@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from cv_validator.ai.application import DocumentAnalyzer
 from cv_validator.ai.application import run_document_analysis
@@ -35,6 +35,8 @@ from cv_validator.file_links.checker import (
     LinkInspector,
 )
 from cv_validator.ingestion import IngestionError
+from cv_validator.ingestion.router import ingest_cv
+from cv_validator.ingestion.redaction import redact_national_ids
 from cv_validator.pipeline import PipelineResult, analyze_cv_bytes_result
 from cv_validator.ai.domain import AIAnalysisStatus
 from cv_validator.location import LocationResolver, SQLiteLocationResolver
@@ -59,6 +61,9 @@ from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LI
 from cv_validator.research.domain import LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearcher
 from cv_validator.operations import OperationsTelemetry, safe_log
+from cv_validator.ai.application import ProfileExtractionError, ProfileExtractor, extract_candidate_profile
+from cv_validator.ai.openai_client import OpenAIResponsesProfileExtractor
+from cv_validator.profile_builder import ProfileExportRequest, render_candidate_profile_docx
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -123,6 +128,7 @@ def create_app(
     link_inspector: LinkInspector | None = None,
     link_dns_resolver: DNSResolver | None = None,
     link_http_client: LinkHTTPClient | None = None,
+    profile_extractor: ProfileExtractor | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_link_check_config = link_check_config or load_link_check_config()
@@ -130,6 +136,11 @@ def create_app(
     selected_document_analyzer = document_analyzer
     if selected_ai_settings.enabled and selected_document_analyzer is None:
         selected_document_analyzer = OpenAIResponsesDocumentAnalyzer(
+            selected_ai_settings
+        )
+    selected_profile_extractor = profile_extractor
+    if selected_ai_settings.enabled and selected_profile_extractor is None:
+        selected_profile_extractor = OpenAIResponsesProfileExtractor(
             selected_ai_settings
         )
     selected_company_researcher = company_researcher
@@ -464,6 +475,70 @@ def create_app(
                     }
                 )
         return JSONResponse({"results": results})
+
+    @app.post("/profile-builder/extract")
+    async def profile_builder_extract(
+        file: UploadFile = File(...),
+        x_ai_enabled: bool = Header(default=True),
+    ) -> JSONResponse:
+        if not x_ai_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="profile_builder_ai_disabled_for_request",
+            )
+        if not selected_ai_settings.enabled or selected_profile_extractor is None:
+            raise HTTPException(status_code=503, detail="profile_builder_ai_disabled")
+        filename = file.filename or "candidate.pdf"
+        try:
+            content = await _read_upload(file)
+            raw_document = ingest_cv(
+                content,
+                filename=filename,
+                config=ingestion_config,
+            )
+            redacted_document = redact_national_ids(raw_document)
+            profile = extract_candidate_profile(
+                selected_ai_settings,
+                selected_profile_extractor,
+                redacted_document,
+            )
+        except IngestionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ProfileExtractionError as exc:
+            safe_log(
+                "profile_builder_extraction_failed",
+                error_code=str(exc),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="profile_extraction_failed",
+            ) from exc
+        except AnalysisRuntimeError as exc:
+            raise HTTPException(status_code=500, detail="analysis_runtime_error") from exc
+        return JSONResponse(
+            {
+                "filename": filename,
+                "profile": profile.model_dump(mode="json"),
+                "warnings": [],
+            }
+        )
+
+    @app.post("/profile-builder/export/docx")
+    def profile_builder_export_docx(request: ProfileExportRequest) -> Response:
+        content = render_candidate_profile_docx(
+            request.profile,
+            request.anonymization,
+        )
+        return Response(
+            content=content,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            headers={
+                "Content-Disposition": 'attachment; filename="candidate-profile.docx"'
+            },
+        )
 
     @app.get("/analyses")
     def list_analyses(

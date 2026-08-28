@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from time import perf_counter
 from typing import Any, Protocol
+
+from jsonschema import Draft202012Validator
 
 from cv_validator.ai.config import AISettings
 from cv_validator.ai.domain import (
@@ -10,10 +13,14 @@ from cv_validator.ai.domain import (
     AIFailureReason,
     AIReportComposition,
     DocumentAnalyzerResponse,
+    ProfileExtractionResponse,
 )
 from cv_validator.ai.request import (
     DocumentAnalysisRequest,
+    ProfileExtractionRequest,
     build_document_analysis_request,
+    build_profile_extraction_request,
+    load_profile_extraction_schema,
 )
 from cv_validator.ai.validation import (
     DocumentAnalysisValidationError,
@@ -21,6 +28,7 @@ from cv_validator.ai.validation import (
 )
 from cv_validator.domain import DeterministicAnalysisResult, Report
 from cv_validator.ingestion import RedactedDocument
+from cv_validator.profile_builder import CandidateProfile
 
 
 class DocumentAnalyzerTimeoutError(TimeoutError):
@@ -48,6 +56,17 @@ class DocumentAnalyzer(Protocol):
         self,
         request: DocumentAnalysisRequest,
     ) -> DocumentAnalyzerResponse: ...
+
+
+class ProfileExtractor(Protocol):
+    def extract(
+        self,
+        request: ProfileExtractionRequest,
+    ) -> ProfileExtractionResponse: ...
+
+
+class ProfileExtractionError(RuntimeError):
+    """Safe Profile Builder extraction failure without candidate content."""
 
 
 def analyze_report_with_ai(
@@ -198,3 +217,96 @@ def _merge_usage(total: dict[str, Any], current: dict[str, Any]) -> dict[str, An
         if isinstance(value, (int, float)) and isinstance(merged.get(key, 0), (int, float)):
             merged[key] = merged.get(key, 0) + value
     return merged
+
+
+def extract_candidate_profile(
+    settings: AISettings,
+    extractor: ProfileExtractor,
+    document: RedactedDocument,
+) -> CandidateProfile:
+    if not settings.enabled:
+        raise ProfileExtractionError("profile_builder_ai_disabled")
+    request = build_profile_extraction_request(settings, document)
+    attempts = 0
+    invalid_retries = 0
+    transport_retries = 0
+    while attempts < settings.absolute_attempt_limit:
+        attempts += 1
+        try:
+            response = extractor.extract(request)
+        except DocumentAnalyzerTimeoutError as exc:
+            if (
+                transport_retries < settings.transport_retry_limit
+                and attempts < settings.absolute_attempt_limit
+            ):
+                transport_retries += 1
+                continue
+            raise ProfileExtractionError("profile_extraction_timeout") from exc
+        except DocumentAnalyzerClientError as exc:
+            if (
+                exc.retryable
+                and transport_retries < settings.transport_retry_limit
+                and attempts < settings.absolute_attempt_limit
+            ):
+                transport_retries += 1
+                continue
+            raise ProfileExtractionError("profile_extraction_client_error") from exc
+
+        if response.refused or response.payload is None:
+            raise ProfileExtractionError("profile_extraction_refused")
+        try:
+            return _materialize_candidate_profile(response.payload)
+        except ProfileExtractionError:
+            if (
+                invalid_retries < settings.invalid_response_retry_limit
+                and attempts < settings.absolute_attempt_limit
+            ):
+                invalid_retries += 1
+                continue
+            raise
+    raise ProfileExtractionError("profile_extraction_failed")
+
+
+def _materialize_candidate_profile(payload: Any) -> CandidateProfile:
+    schema = load_profile_extraction_schema()
+    if not isinstance(payload, dict) or any(
+        Draft202012Validator(schema).iter_errors(payload)
+    ):
+        raise ProfileExtractionError("profile_extraction_invalid_response")
+    materialized = deepcopy(payload)
+    materialized["schema_version"] = "candidate-profile-v1"
+    for key in ("skills", "technologies"):
+        materialized[key] = _dedupe_profile_strings(materialized[key])
+    for prefix, key in (
+        ("experience", "experience"),
+        ("education", "education"),
+        ("language", "languages"),
+        ("certification", "certifications"),
+        ("additional", "additional_sections"),
+    ):
+        for index, item in enumerate(materialized[key], start=1):
+            item["id"] = f"{prefix}-{index:03d}"
+    for item in materialized["experience"]:
+        for key in ("responsibilities", "achievements", "technologies"):
+            item[key] = _dedupe_profile_strings(item[key])
+    for item in materialized["additional_sections"]:
+        item["items"] = _dedupe_profile_strings(item["items"])
+    try:
+        return CandidateProfile.model_validate(materialized)
+    except Exception as exc:
+        raise ProfileExtractionError(
+            "profile_extraction_materialization_failed"
+        ) from exc
+
+
+def _dedupe_profile_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in values:
+        value = raw.strip()
+        key = value.casefold()
+        if not value or key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
