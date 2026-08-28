@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from cv_validator.location import Ambiguous, LocationResolver, Resolved, ResolutionLevel
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
+from cv_validator.research.subjects import derive_subject_union
 
 RESEARCH_VERSION = "education-research-v2"
 PROMPT_VERSION = "education-research-prompt-v2"
@@ -128,17 +129,22 @@ def apply_owner_scoped_education_context(
 
 def build_education_research_request(stored_report: dict[str, Any]) -> EducationResearchRequest:
     ai = stored_report.get("ai_analysis") or {}
-    candidates = ai.get("research_candidates") or []
     education = ai.get("facts", {}).get("education", [])
-    allowed = {
-        candidate.get("query_subject", "").strip().casefold(): candidate.get("query_subject", "").strip()
-        for candidate in candidates
-        if candidate.get("category") == "education_or_certification"
-        and isinstance(candidate.get("query_subject"), str)
-        and _safe_subject(candidate["query_subject"])
-    }
+    union = derive_subject_union(stored_report, "education", ai_category="education_or_certification", limit=MAX_CREDENTIALS, safe=_safe_subject)
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    understanding = stored_report.get("document_understanding") or {}
+    records = {item.get("id"): item for item in understanding.get("records", []) if isinstance(item, dict)} if isinstance(understanding, dict) else {}
+    for candidate in union:
+        if candidate["authority"] != "code":
+            continue
+        subject = candidate["subject"]
+        record = records.get(candidate.get("record_id"), {})
+        fields = {field.get("name"): field.get("value") for field in record.get("fields", []) if isinstance(field, dict) and field.get("status") == "supported"}
+        fact = {"institution": subject}
+        if isinstance(fields.get("program"), str): fact["program"] = fields["program"][:200]
+        facts.append(fact); seen.add(_key(fact)[:2])
+    allowed = {item["subject"].strip().casefold(): item["subject"] for item in union if item["authority"] == "ai"}
     for item in education:
         if not isinstance(item, dict):
             continue

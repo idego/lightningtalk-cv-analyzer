@@ -14,6 +14,7 @@ from cv_validator.research.domain import (
     CompanyResearchInvalidResponse,
     CompanyResearchRequest,
 )
+from cv_validator.research.subjects import derive_subject_union
 
 RESEARCH_VERSION = "company-research-v1"
 PROMPT_VERSION = "company-research-prompt-v2"
@@ -48,28 +49,18 @@ class CompanyResearchService:
 
 def build_company_research_request(stored_report: dict[str, Any]) -> CompanyResearchRequest:
     ai = stored_report.get("ai_analysis") or {}
-    candidates = ai.get("research_candidates") or []
     employment = ai.get("facts", {}).get("employment", [])
     facts: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate.get("category") != "company":
-            continue
-        subject = candidate.get("query_subject")
-        if not isinstance(subject, str) or not _safe_organization_subject(subject):
-            continue
+    union = derive_subject_union(stored_report, "company", ai_category="company", limit=MAX_ORGANIZATIONS, safe=_safe_organization_subject)
+    for candidate in union:
+        subject = candidate["subject"]
         normalized = subject.strip().casefold()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
         match = next((item for item in employment if isinstance(item, dict) and str(item.get("organization", "")).strip().casefold() == normalized), None)
-        if match is None:
+        if candidate["authority"] == "ai" and match is None:
             continue
         # Reusable public-web research receives only the public organization
         # subject. Candidate dates, locations and relations stay owner-scoped.
         facts.append({"organization": subject.strip()})
-        if len(facts) == MAX_ORGANIZATIONS:
-            break
     if not facts:
         raise ValueError("no_company_research_candidates")
     return CompanyResearchRequest(tuple(facts))

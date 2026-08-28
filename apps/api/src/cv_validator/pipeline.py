@@ -285,6 +285,8 @@ def _analyze_raw(
             redacted,
             deterministic,
             report_language=report_language,
+            exclusion_intervals=understanding.annotation_index.exclusion_intervals,
+            understanding_context=report.document_understanding,
         )
     else:
         ai_outcome = AIDocumentAnalysisOutcome(

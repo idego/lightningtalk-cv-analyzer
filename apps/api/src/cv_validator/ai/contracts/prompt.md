@@ -34,8 +34,8 @@ findings.
 For employment facts, `organization` means a distinct named company, client,
 institution, or other organization. Employment modes and relationship labels
 such as "Self-Employed", "Self Employment", "Freelance", or "Freelancer" are
-not organization names. When the CV gives only such a label, set the
-organization value to `null` and preserve the literal employment mode in
+not organization names. When the CV gives only such a label, set the organization value to `null`
+and preserve the literal employment mode in
 `relationship_type` when supported. Do not invent a business name. If a
 distinct named client or business is explicitly stated, return that name as the
 organization.

@@ -80,6 +80,9 @@ def run_document_analysis(
     document: RedactedDocument,
     deterministic: DeterministicAnalysisResult,
     report_language: str = "en",
+    *,
+    exclusion_intervals: tuple[tuple[str, int, int], ...] = (),
+    understanding_context: dict[str, Any] | None = None,
 ) -> AIDocumentAnalysisOutcome:
     if not settings.enabled:
         return AIDocumentAnalysisOutcome(status=AIAnalysisStatus.DISABLED)
@@ -89,6 +92,8 @@ def run_document_analysis(
         document,
         deterministic,
         report_language=report_language,
+        exclusion_intervals=exclusion_intervals,
+        understanding_context=understanding_context,
     )
     attempts = 0
     transport_retries = 0
@@ -139,7 +144,7 @@ def run_document_analysis(
             )
 
         try:
-            validated = validate_document_analysis_response(response.payload, document)
+            validated = validate_document_analysis_response(response.payload, _masked_document(document, exclusion_intervals))
         except DocumentAnalysisValidationError as exc:
             stage = str(exc).rsplit(": ", 1)[-1]
             if invalid_retries < settings.invalid_response_retry_limit and attempts < settings.absolute_attempt_limit:
@@ -164,6 +169,21 @@ def run_document_analysis(
             latency_ms=(perf_counter() - started) * 1000,
         )
     raise AssertionError("AI attempt loop exhausted without outcome")
+
+
+def _masked_document(document: RedactedDocument, intervals: tuple[tuple[str, int, int], ...]) -> RedactedDocument:
+    if not intervals:
+        return document
+    from dataclasses import replace
+    from cv_validator.ingestion import SourcePage
+    pages = []
+    for page in document.pages:
+        chars = list(page.text)
+        for page_id, start, end in intervals:
+            if page_id == page.page_id:
+                chars[max(0, start):min(len(chars), end)] = "█" * max(0, min(len(chars), end) - max(0, start))
+        pages.append(SourcePage(page.page_id, page.page_number, "".join(chars)))
+    return replace(document, pages=tuple(pages))
 
 
 def _failed(

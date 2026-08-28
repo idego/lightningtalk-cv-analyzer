@@ -24,7 +24,7 @@ from cv_validator.ai.validation import (
 )
 from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.config import load_weights
-from cv_validator.ingestion import RawDocument, SourcePage
+from cv_validator.ingestion import PresentationSpan, RawDocument, SourcePage
 from cv_validator.ingestion.redaction import redact_national_ids
 from cv_validator.scoring.engine import score_deterministic
 from cv_validator.serialization import serialize_report_payload
@@ -970,6 +970,28 @@ def test_prompt_does_not_treat_self_employment_as_an_organization() -> None:
     assert '"Self-Employed"' in instructions
     assert "set the organization value to `null`" in instructions
     assert "preserve the literal employment mode in" in instructions
+
+
+def test_hidden_source_is_same_length_masked_and_rejected_from_ai_facts() -> None:
+    raw, redacted = _documents()
+    hidden = "Example University"
+    start = redacted.pages[1].text.index(hidden)
+    intervals = (("page-0002", start, start + len(hidden)),)
+    deterministic = analyze_deterministically(redacted, "1.0.0")
+    analyzer = FakeDocumentAnalyzer(DocumentAnalyzerResponse(
+        payload=_valid_response(), response_model="test-model", usage={}
+    ))
+    outcome = run_document_analysis(
+        AISettings(enabled=True, api_key="test-key"), analyzer, redacted, deterministic,
+        exclusion_intervals=intervals,
+        understanding_context={"status": "completed", "sections": [], "records": [], "ambiguous_spans": []},
+    )
+    request_text = analyzer.requests[0].openai_payload["input"][0]["content"][0]["text"]
+    assert hidden not in request_text
+    assert "█" * len(hidden) in request_text
+    assert outcome.analysis is not None
+    assert outcome.analysis.payload["facts"]["education"] == []
+    assert outcome.analysis.payload["research_candidates"] == []
 
 
 def test_partial_field_validation_keeps_valid_finding_and_fact_fields() -> None:

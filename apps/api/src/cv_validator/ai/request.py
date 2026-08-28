@@ -39,6 +39,9 @@ def build_document_analysis_request(
     document: RedactedDocument,
     deterministic: DeterministicAnalysisResult,
     report_language: str = "en",
+    *,
+    exclusion_intervals: tuple[tuple[str, int, int], ...] = (),
+    understanding_context: dict[str, Any] | None = None,
 ) -> DocumentAnalysisRequest:
     if not isinstance(document, RedactedDocument):
         raise TypeError("Document Analyzer requires a RedactedDocument")
@@ -53,9 +56,10 @@ def build_document_analysis_request(
         "observations": deterministic.to_dict()["observations"],
     }
     input_text = format_document_analysis_input(
-        format_line_referenced_markdown(document.pages),
+        format_visible_line_referenced_markdown(document.pages, exclusion_intervals),
         observations,
         report_language=report_language,
+        understanding_context=understanding_context,
     )
     payload: dict[str, Any] = {
         "model": settings.model,
@@ -96,12 +100,14 @@ def format_document_analysis_input(
     page_markdown: str,
     deterministic_observations: dict[str, Any],
     report_language: str = "en",
+    understanding_context: dict[str, Any] | None = None,
 ) -> str:
     observations_json = json.dumps(
         deterministic_observations,
         ensure_ascii=False,
         sort_keys=True,
     )
+    context = json.dumps(_bounded_understanding_context(understanding_context), ensure_ascii=False, sort_keys=True)
     return (
         "<report_language>\n"
         f"{report_language}\n"
@@ -109,6 +115,9 @@ def format_document_analysis_input(
         "<deterministic_observations>\n"
         f"{observations_json}\n"
         "</deterministic_observations>\n\n"
+        "<code_owned_understanding>\n"
+        f"{context}\n"
+        "</code_owned_understanding>\n\n"
         "<redacted_cv_markdown>\n"
         f"{page_markdown}\n"
         "</redacted_cv_markdown>"
@@ -116,15 +125,39 @@ def format_document_analysis_input(
 
 
 def format_line_referenced_markdown(pages: tuple[SourcePage, ...]) -> str:
+    return format_visible_line_referenced_markdown(pages, ())
+
+
+def format_visible_line_referenced_markdown(pages: tuple[SourcePage, ...], intervals: tuple[tuple[str, int, int], ...]) -> str:
     rendered_pages: list[str] = []
     for page in pages:
         rendered_lines = [f"<!-- page: {page.page_id} -->"]
         for line in page.lines:
+            text = list(line.text)
+            for page_id, start, end in intervals:
+                if page_id != page.page_id or start >= line.end_offset or end <= line.start_offset:
+                    continue
+                left = max(start, line.start_offset) - line.start_offset
+                right = min(end, line.end_offset) - line.start_offset
+                text[left:right] = "█" * (right - left)
             rendered_lines.extend(
-                (f"<!-- line: {line.line_id} -->", line.text)
+                (f"<!-- line: {line.line_id} -->", "".join(text))
             )
         rendered_pages.append("\n".join(rendered_lines))
     return "\n\n".join(rendered_pages)
+
+
+def _bounded_understanding_context(value: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"status": "unavailable"}
+    sections = [{key: item.get(key) for key in ("id", "kind", "confidence")} for item in value.get("sections", [])[:32] if isinstance(item, dict)]
+    records = []
+    for item in value.get("records", [])[:100]:
+        if not isinstance(item, dict): continue
+        fields = [{key: field.get(key) for key in ("name", "status", "value", "authority", "confidence")} for field in item.get("fields", [])[:8] if isinstance(field, dict)]
+        records.append({"id": item.get("id"), "kind": item.get("kind"), "section_id": item.get("section_id"), "fields": fields})
+    ambiguous = [{"id": item.get("id"), "category": item.get("category"), "reason_code": item.get("reason_code")} for item in value.get("ambiguous_spans", [])[:100] if isinstance(item, dict)]
+    return {"status": value.get("status"), "sections": sections, "records": records, "ambiguous_spans": ambiguous}
 
 
 def load_document_analysis_schema() -> dict[str, Any]:
