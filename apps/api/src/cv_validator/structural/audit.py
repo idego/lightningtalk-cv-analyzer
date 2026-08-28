@@ -37,10 +37,16 @@ _EXCLUDED = re.compile(r"\b(?:birth|born|dob|date of birth|urodz|certificate|cer
 
 
 def audit_document(document: RedactedDocument, *, snapshot_month: str | None = None, config: StructuralAuditConfig | None = None) -> StructuralAuditResult:
+    """Temporary compatibility entry point delegated to shared understanding annotations."""
     cfg = config or StructuralAuditConfig()
     snapshot = snapshot_month or date.today().strftime("%Y-%m")
-    timeline = _timeline(document, snapshot, cfg)
-    visibility = _visibility(document, cfg)
+    from cv_validator.document_understanding.structural_projection import annotate_structural_surfaces
+    timeline, visibility = annotate_structural_surfaces(document, snapshot, cfg)
+    return project_structural_v1(document, snapshot, timeline, visibility)
+
+
+def project_structural_v1(document: RedactedDocument, snapshot: str, timeline: TimelineAudit, visibility: VisibilityAudit) -> StructuralAuditResult:
+    """Serialize shared annotations through the unchanged V1 domain contract."""
     omitted = document.presentation_omitted_parts
     coverage_status = AuditStatus.PARTIAL if omitted or document.presentation_truncated else AuditStatus.COMPLETED
     audited = document.presentation_audited_parts

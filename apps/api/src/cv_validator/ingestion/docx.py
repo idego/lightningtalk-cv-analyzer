@@ -14,7 +14,7 @@ from cv_validator.file_links.extraction import (
     extract_docx_hyperlinks,
     merge_document_links,
 )
-from cv_validator.ingestion import IngestionError, PresentationSpan, RawDocument, SourcePage
+from cv_validator.ingestion import IngestionError, PresentationSpan, RawDocument, SourceBlock, SourcePage
 from cv_validator.structural.config import StructuralAuditConfig
 from cv_validator.ingestion.text import validate_text_sufficiency
 
@@ -38,9 +38,11 @@ def extract_docx(
     )
     try:
         presentation_spans, presentation_truncated = _presentation_spans(document, pages)
+        source_blocks, source_blocks_partial = _source_blocks(document, pages)
         presentation_omitted = ()
     except Exception:  # Presentation inspection must not break text ingestion.
         presentation_spans, presentation_truncated = (), False
+        source_blocks, source_blocks_partial = (), True
         presentation_omitted = ("docx_body_runs_unavailable",)
     omitted_parts = _omitted_parts(document) + presentation_omitted
     parsed = RawDocument(
@@ -56,6 +58,8 @@ def extract_docx(
         presentation_audited_parts=("docx_body_paragraph_runs", "docx_table_cell_runs", "docx_logical_page_breaks"),
         presentation_omitted_parts=omitted_parts,
         presentation_truncated=presentation_truncated,
+        source_blocks=source_blocks,
+        source_blocks_partial=source_blocks_partial,
     )
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed
@@ -173,6 +177,52 @@ def _presentation_spans(document, pages):
                     explicit_hidden=bool(run.font.hidden or (run.style.font.hidden if run.style is not None else False) or (paragraph.style.font.hidden if paragraph.style is not None else False)),
                 ))
     return tuple(spans), False
+
+
+def _source_blocks(document, pages):
+    blocks: list[SourceBlock] = []
+    page_index = 0
+    offset = 0
+
+    def append_paragraph(paragraph, *, kind="paragraph", table_id=None, row_index=None, paragraph_path=None):
+        nonlocal page_index, offset
+        if _has_page_break_before(paragraph) and offset and page_index + 1 < len(pages):
+            page_index += 1; offset = 0
+        text = paragraph.text
+        if not text:
+            return
+        page = pages[page_index]
+        found = page.text.find(text, offset)
+        exact = found >= 0
+        if exact:
+            offset = found + len(text)
+        line_ids = tuple(line.line_id for line in page.lines if exact and line.start_offset < found + len(text) and line.end_offset >= found)
+        num_pr = paragraph._p.pPr.numPr if paragraph._p.pPr is not None else None
+        level = None
+        if num_pr is not None and num_pr.ilvl is not None:
+            try: level = int(num_pr.ilvl.val)
+            except (TypeError, ValueError): level = None
+        blocks.append(SourceBlock(
+            id=f"source-block-{len(blocks)+1:04d}", page_id=page.page_id,
+            page_number=page.page_number, source_order=len(blocks),
+            kind="list_item" if num_pr is not None else kind, line_ids=line_ids,
+            start_offset=found if exact else None, end_offset=found + len(text) if exact else None,
+            paragraph_path=paragraph_path, table_id=table_id, row_index=row_index,
+            list_level=level, association="exact" if exact else "unmapped",
+        ))
+
+    for block_index, block in enumerate(document.iter_inner_content()):
+        if isinstance(block, Paragraph):
+            append_paragraph(block, paragraph_path=f"body/{block_index}/paragraph")
+            continue
+        seen_cells: set[int] = set()
+        for row_index, row in enumerate(block.rows):
+            for cell_index, cell in enumerate(row.cells):
+                if id(cell._tc) in seen_cells: continue
+                seen_cells.add(id(cell._tc))
+                for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                    append_paragraph(paragraph, kind="table_cell", table_id=f"table-{block_index:04d}", row_index=row_index, paragraph_path=f"body/{block_index}/row/{row_index}/cell/{cell_index}/paragraph/{paragraph_index}")
+    return tuple(blocks), any(block.association != "exact" for block in blocks)
 
 
 def _omitted_parts(document):

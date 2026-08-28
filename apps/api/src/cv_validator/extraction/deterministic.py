@@ -20,8 +20,9 @@ def analyze_deterministically(
     *,
     location_resolver: LocationResolver | None = None,
     small_locality_population_max: int = 10_000,
+    exclusion_index=None,
 ) -> DeterministicAnalysisResult:
-    candidates = extract_candidates(document)
+    candidates = extract_candidates(document, exclusion_index=exclusion_index)
     phone_facts, phone_observations, phone_signals = classify_and_aggregate_phones(
         document,
         candidates,

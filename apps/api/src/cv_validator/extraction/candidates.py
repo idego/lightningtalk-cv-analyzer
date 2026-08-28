@@ -120,7 +120,7 @@ _RELATED_LOCATION_PATTERNS = (
 )
 
 
-def extract_candidates(document: RedactedDocument) -> tuple[Candidate, ...]:
+def extract_candidates(document: RedactedDocument, *, exclusion_index=None) -> tuple[Candidate, ...]:
     candidates: list[Candidate] = []
     seen: set[tuple[CandidateKind, str, int, int]] = set()
 
@@ -203,7 +203,7 @@ def extract_candidates(document: RedactedDocument) -> tuple[Candidate, ...]:
             )
         )
 
-    return tuple(
+    result = tuple(
         sorted(
             candidates,
             key=lambda candidate: (
@@ -212,6 +212,12 @@ def extract_candidates(document: RedactedDocument) -> tuple[Candidate, ...]:
                 candidate.kind.value,
             ),
         )
+    )
+    if exclusion_index is None:
+        return result
+    return tuple(
+        candidate for candidate in result
+        if all(not exclusion_index.intersects(e.page_id, e.start_offset, e.end_offset) for e in candidate.provenance.evidence)
     )
 
 

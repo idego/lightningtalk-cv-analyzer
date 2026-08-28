@@ -92,6 +92,25 @@ class PresentationSpan:
 
 
 @dataclass(frozen=True)
+class SourceBlock:
+    """Reusable source structure mapped to canonical page text."""
+    id: str
+    page_id: str
+    page_number: int
+    source_order: int
+    kind: str
+    line_ids: tuple[str, ...]
+    start_offset: int | None
+    end_offset: int | None
+    paragraph_path: str | None = None
+    table_id: str | None = None
+    row_index: int | None = None
+    list_level: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    association: str = "exact"
+
+
+@dataclass(frozen=True)
 class RedactedDocumentIdentity:
     algorithm: str
     format_version: str
@@ -110,6 +129,8 @@ class _PageDocument:
     presentation_audited_parts: tuple[str, ...]
     presentation_omitted_parts: tuple[str, ...]
     presentation_truncated: bool
+    source_blocks: tuple[SourceBlock, ...]
+    source_blocks_partial: bool
 
     def __init__(
         self,
@@ -122,6 +143,8 @@ class _PageDocument:
         presentation_audited_parts: tuple[str, ...] = (),
         presentation_omitted_parts: tuple[str, ...] = (),
         presentation_truncated: bool = False,
+        source_blocks: tuple[SourceBlock, ...] | None = None,
+        source_blocks_partial: bool = False,
     ) -> None:
         canonical_pages = tuple(pages)
         page_ids = [page.page_id for page in canonical_pages]
@@ -135,6 +158,20 @@ class _PageDocument:
         object.__setattr__(self, "presentation_audited_parts", tuple(presentation_audited_parts))
         object.__setattr__(self, "presentation_omitted_parts", tuple(presentation_omitted_parts))
         object.__setattr__(self, "presentation_truncated", presentation_truncated)
+        if source_blocks is None:
+            generated: list[SourceBlock] = []
+            for page in canonical_pages:
+                for line in page.lines:
+                    generated.append(SourceBlock(
+                        id=f"source-block-{len(generated)+1:04d}",
+                        page_id=page.page_id, page_number=page.page_number,
+                        source_order=len(generated), kind="line",
+                        line_ids=(line.line_id,), start_offset=line.start_offset,
+                        end_offset=line.end_offset,
+                    ))
+            source_blocks = tuple(generated)
+        object.__setattr__(self, "source_blocks", tuple(source_blocks))
+        object.__setattr__(self, "source_blocks_partial", source_blocks_partial)
 
     @property
     def source_lines(self) -> tuple[SourceLine, ...]:
@@ -163,6 +200,8 @@ class RedactedDocument(_PageDocument):
         presentation_audited_parts: tuple[str, ...] = (),
         presentation_omitted_parts: tuple[str, ...] = (),
         presentation_truncated: bool = False,
+        source_blocks: tuple[SourceBlock, ...] | None = None,
+        source_blocks_partial: bool = False,
     ) -> None:
         super().__init__(
             pages=pages,
@@ -173,6 +212,8 @@ class RedactedDocument(_PageDocument):
             presentation_audited_parts=presentation_audited_parts,
             presentation_omitted_parts=presentation_omitted_parts,
             presentation_truncated=presentation_truncated,
+            source_blocks=source_blocks,
+            source_blocks_partial=source_blocks_partial,
         )
         object.__setattr__(self, "redactions", tuple(redactions))
 

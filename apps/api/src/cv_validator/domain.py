@@ -843,6 +843,7 @@ class Report:
     file_details: FileDetails | None = None
     link_inspection: LinkInspection | None = None
     structural_audits: Any | None = None
+    document_understanding: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -901,6 +902,7 @@ class Report:
             if self.structural_audits is not None
             else None
         )
+        payload["document_understanding"] = self.document_understanding
         return payload
 
 

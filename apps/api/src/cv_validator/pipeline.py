@@ -26,7 +26,7 @@ from cv_validator.file_links.checker import (
     LinkInspector,
     inspect_document_links,
 )
-from cv_validator.extraction.deterministic import analyze_deterministically
+from cv_validator.document_understanding.service import understand_document, understanding_to_payload
 from cv_validator.ingestion import (
     RawDocument,
     RedactedDocument,
@@ -250,19 +250,21 @@ def _analyze_raw(
                 metrics=link_metrics,
             )
     redacted = redact_national_ids(parsed)
-    structural_audits = audit_document(redacted)
-    deterministic = analyze_deterministically(
+    understanding = understand_document(
         redacted,
         weights.version,
         location_resolver=location_resolver,
         small_locality_population_max=load_small_locality_population_max(),
     )
+    structural_audits = understanding.structural_audits
+    deterministic = understanding.deterministic
     report = score_deterministic(deterministic, weights)
     report = replace(
         report,
         file_details=file_details,
         link_inspection=link_inspection,
         structural_audits=structural_audits,
+        document_understanding=understanding_to_payload(understanding),
     )
     selected_ai_settings = ai_settings or AISettings()
     if selected_ai_settings.enabled and defer_ai:

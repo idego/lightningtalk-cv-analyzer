@@ -81,6 +81,7 @@ def test_report_json_is_additive_and_deterministic_serialization_is_explicit() -
         "conflicting_count",
         "deterministic",
         "structural_audits",
+        "document_understanding",
     }
     deterministic = payload["deterministic"]
     assert set(deterministic) == {

@@ -77,6 +77,8 @@ def redact_national_ids(document: RawDocument) -> RedactedDocument:
         presentation_audited_parts=document.presentation_audited_parts,
         presentation_omitted_parts=document.presentation_omitted_parts,
         presentation_truncated=document.presentation_truncated,
+        source_blocks=document.source_blocks,
+        source_blocks_partial=document.source_blocks_partial,
     )
 
 

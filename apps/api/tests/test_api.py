@@ -63,6 +63,7 @@ def test_single_analyze_success(client):
         "ai_analysis",
         "checklist",
         "structural_audits",
+        "document_understanding",
         "ai_features_enabled",
         "ai_capabilities",
     }

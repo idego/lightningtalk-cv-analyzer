@@ -258,6 +258,17 @@ def deserialize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Read old and new stored payloads without requiring new nullable fields."""
     result = deepcopy(payload)
     result.setdefault("structural_audits", None)
+    result.setdefault("document_understanding", None)
+    if result["document_understanding"] is not None:
+        from cv_validator.document_understanding.contract import (
+            UnderstandingContractError, sanitize_understanding,
+        )
+        try:
+            result["document_understanding"] = sanitize_understanding(
+                result["document_understanding"]
+            )
+        except UnderstandingContractError:
+            result["document_understanding"] = None
     _validate_json(result)
     return result
 

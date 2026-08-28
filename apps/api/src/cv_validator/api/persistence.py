@@ -306,6 +306,9 @@ class PersistenceStore:
                     payload["structural_audits"] = existing_payload.get(
                         "structural_audits"
                     )
+                    payload["document_understanding"] = existing_payload.get(
+                        "document_understanding"
+                    )
                 conn.execute(
                     "UPDATE audit_log SET output_json = ? WHERE analysis_id = ?",
                     (json.dumps(_sanitize_findings(payload)), analysis_id),
@@ -749,6 +752,15 @@ def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
     sanitized["structural_audits"] = sanitize_structural_audits(
         sanitized.get("structural_audits")
     )
+    from cv_validator.document_understanding.contract import (
+        UnderstandingContractError, sanitize_understanding,
+    )
+    try:
+        sanitized["document_understanding"] = sanitize_understanding(
+            sanitized.get("document_understanding")
+        )
+    except UnderstandingContractError:
+        sanitized["document_understanding"] = None
     for finding in sanitized.get("findings", []):
         if not isinstance(finding, dict):
             continue

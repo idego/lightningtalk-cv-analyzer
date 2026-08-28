@@ -10,7 +10,7 @@ from cv_validator.file_links.extraction import (
     extract_pdf_hyperlinks,
     merge_document_links,
 )
-from cv_validator.ingestion import IngestionError, PresentationSpan, RawDocument, SourcePage
+from cv_validator.ingestion import IngestionError, PresentationSpan, RawDocument, SourceBlock, SourcePage
 from cv_validator.structural.config import StructuralAuditConfig
 from cv_validator.ingestion.text import validate_text_sufficiency
 
@@ -41,6 +41,7 @@ def extract_pdf(
                 for page in pdf.pages
                 if page.images
             ) + tuple(presentation_omitted)
+            source_blocks = _source_blocks(pdf.pages, pages)
     except Exception as exc:  # noqa: BLE001
         raise IngestionError(f"Failed to read PDF: {exc}") from exc
 
@@ -57,6 +58,8 @@ def extract_pdf(
         presentation_audited_parts=("pdf_page_text_spans",),
         presentation_omitted_parts=omitted_parts,
         presentation_truncated=presentation_truncated,
+        source_blocks=source_blocks,
+        source_blocks_partial=any(block.association != "exact" for block in source_blocks),
     )
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed
@@ -101,6 +104,24 @@ def _presentation_spans(pdf_pages, canonical_pages):
         if truncated:
             break
     return tuple(spans), truncated
+
+
+def _source_blocks(pdf_pages, canonical_pages):
+    blocks=[]
+    for pdf_page, canonical in zip(pdf_pages, canonical_pages):
+        words=pdf_page.extract_words() or []
+        for line in canonical.lines:
+            line_words=[word for word in words if str(word.get("text") or "") in line.text]
+            bbox=None
+            if line_words:
+                bbox=(min(float(w["x0"]) for w in line_words), min(float(w["top"]) for w in line_words), max(float(w["x1"]) for w in line_words), max(float(w["bottom"]) for w in line_words))
+            blocks.append(SourceBlock(
+                id=f"source-block-{len(blocks)+1:04d}", page_id=canonical.page_id,
+                page_number=canonical.page_number, source_order=len(blocks), kind="line",
+                line_ids=(line.line_id,), start_offset=line.start_offset, end_offset=line.end_offset,
+                bbox=bbox, association="exact" if bbox is not None else "partial",
+            ))
+    return tuple(blocks)
 
 
 def _luminance(color):

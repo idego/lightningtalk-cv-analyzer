@@ -90,6 +90,8 @@ def test_pdf_text_extraction():
     parsed = extract_pdf(content)
     assert "Berlin, Germany" in parsed.pages[0].text
     assert parsed.source_lines
+    assert parsed.source_blocks
+    assert parsed.source_blocks[0].bbox is not None
 
 
 def test_pdf_preserves_two_real_pages_and_stable_ids():
@@ -164,6 +166,10 @@ def test_docx_flattens_table_text_in_document_block_order():
         "Berlin Germany",
         "Experience Software Engineer",
     ]
+    table_blocks = [block for block in parsed.source_blocks if block.kind == "table_cell"]
+    assert [block.row_index for block in table_blocks] == [0, 0]
+    assert len({block.table_id for block in table_blocks}) == 1
+    assert all(block.association == "exact" for block in table_blocks)
 
 
 def test_docx_hard_page_break_inside_table_is_preserved():
