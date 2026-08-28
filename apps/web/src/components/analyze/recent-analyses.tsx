@@ -72,7 +72,7 @@ export function RecentAnalyses({ onOpen }: Props) {
       return <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={open} onRemove={remove} />;
     })}</ul>
     <Collapsible.Root open={expanded}>
-      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-300 ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
+      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
         <ul className="divide-y border-t">{additionalItems.map((item) => (
           <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={open} onRemove={remove} />
         ))}</ul>

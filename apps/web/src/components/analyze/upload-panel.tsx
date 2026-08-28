@@ -131,7 +131,7 @@ export function UploadPanel() {
     setCompletionPhase("complete");
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     setCompletionPhase("collapsing");
-    await new Promise((resolve) => window.setTimeout(resolve, 240));
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
     setLoading(false);
     setCompletionPhase("analyzing");
   }
@@ -142,8 +142,10 @@ export function UploadPanel() {
   }
   if (loading) return <div className="space-y-6">
     <Collapsible.Root open={completionPhase !== "collapsing"}>
-      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[240ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
-        <AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} complete={completionPhase === "complete"} />
+      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
+        <div className="p-px">
+          <AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} complete={completionPhase === "complete"} />
+        </div>
       </Collapsible.Panel>
     </Collapsible.Root>
     {entries.length ? <div className="analysis-results-enter"><AnalysisWorkspace entries={entries} compact /></div> : null}

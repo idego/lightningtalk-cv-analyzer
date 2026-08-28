@@ -108,7 +108,7 @@ export function HoverDisclosure({
           <ChevronDown
             aria-hidden="true"
             className={cn(
-              "size-4 shrink-0 transition-transform duration-200 ease-[var(--motion-ease-out)] motion-reduce:transition-none",
+              "size-4 shrink-0 transition-transform duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
               open && "rotate-180",
             )}
           />
@@ -118,7 +118,7 @@ export function HoverDisclosure({
       <Collapsible.Panel
         data-disclosure-panel
         className={cn(
-          "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-200 ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none",
+          "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none",
           panelClassName,
         )}
       >

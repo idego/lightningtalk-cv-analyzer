@@ -183,7 +183,7 @@
 .analysis-flow-enter,
 .analysis-results-enter,
 .analysis-status-swap {
-  animation: report-content-enter 200ms var(--motion-ease-out) both;
+  animation: report-content-enter 180ms var(--motion-ease-out) both;
 }
 
 .analysis-results-enter {
