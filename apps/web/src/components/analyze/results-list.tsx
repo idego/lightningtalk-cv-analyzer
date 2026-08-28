@@ -28,6 +28,7 @@ import { useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
 import { StructuralAuditPanel } from "@/components/analyze/structural-audit-panel";
 import { selectStructuredRecords } from "@/lib/understanding-selectors";
+import { RecordAuthorityDetails } from "@/components/analyze/record-authority-details";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
   const { t } = useCopy();
@@ -100,7 +101,7 @@ function OverviewRow({
   icon: ReactNode;
   label: string;
   value: string;
-  detail?: string | null;
+  detail?: ReactNode;
   tone: string;
 }) {
   return (
@@ -211,7 +212,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<GraduationCap className="size-4" />}
                 label={t("educationEntry")}
                 value={fact.institution ?? t("educationEntry")}
-                detail={[fact.program, fact.study_dates, `${fact.authority} · ${fact.confidence}`, fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
+                detail={<RecordAuthorityDetails record={fact} leading={[fact.program, fact.study_dates]} />}
                 tone={educationTone}
               />)}
             </div>
@@ -228,7 +229,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
                 value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
-                detail={[employmentDetail(fact.organization ?? fact.relationship_type ?? "", fact.location, fact.employment_dates), `${fact.authority} · ${fact.confidence}`, fact.ai_enrichments?.map(item => `${item.name}: ${item.value} (ai)`).join(", "), fact.conflicts?.map(item => `conflict ${item.name}: ${item.ai_value}`).join(", "), fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
+                detail={<RecordAuthorityDetails record={fact} leading={[employmentDetail(fact.organization ?? fact.relationship_type ?? "", fact.location, fact.employment_dates)]} />}
                 tone={employmentTone}
               />)}
             </div>
