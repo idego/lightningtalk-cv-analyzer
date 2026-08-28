@@ -25,6 +25,12 @@ export function buildSidebarNav(): NavGroup[] {
   ];
 }
 
+export function isNavItemActive(pathname: string, itemUrl: string): boolean {
+  const current = pathname.replace(/\/+$/, "") || "/";
+  const target = itemUrl.replace(/\/+$/, "") || "/";
+  return current === target || (target !== "/" && current.startsWith(`${target}/`));
+}
+
 export function titleFromPathname(pathname: string): string {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/analyze") return "Analyze";
