@@ -23,6 +23,47 @@
   candidate credentials, do not execute JavaScript or download linked files,
   and discard response bodies after bounded classification.
 
+The user-facing Settings switch is a per-browser opt-out covering Document AI,
+company research, education research, and LinkedIn discovery. Turning it off
+blocks both automatic and manual execution; it does not change deterministic
+analysis or the deployment environment.
+
+## Canonical commands
+
+Local development uses an ignored `.env.local` and the approved GeoNames pair:
+
+```bash
+cp .env.example .env.local
+# set CV_VALIDATOR_AI_ENABLED=true, OPENAI_API_KEY, and the reference-data path
+make dev
+```
+
+Production uses an ignored `.env`. On the VPS, check out an exact reviewed SHA,
+place the pinned GeoNames pair at the configured path, then run:
+
+```bash
+make deploy-check
+make deploy
+```
+
+The host reverse proxy terminates TLS and forwards only to the web port bound
+on `127.0.0.1`. The API remains private to Compose. Both commands fail without
+healthy database, GeoNames, Document AI, and research capabilities.
+
+## Backups and restore
+
+Back up both named volumes before deployment or rollback. Do not copy a live
+SQLite file directly; stop the stack or use SQLite's online backup command from
+a temporary container. Store encrypted backups outside the VPS and record the
+deployed Git SHA and GeoNames snapshot with each backup.
+
+A restore rehearsal must use a separate temporary Compose project: create new
+volumes, restore both databases, start the same reviewed SHA, and verify login,
+history, `/api/health`, and one synthetic analysis. Never rehearse against the
+production volumes. Keep at least the previous reviewed image/commit and
+GeoNames snapshot. Container logs are rotated by Compose at 10 MiB with three
+files; monitor host disk and the public health URL separately.
+
 The current retry, batch, research-cache, and output limits are exposed by
 `GET /operations/status`. Request totals, durations, research failures, and
 cache metrics are exposed by `GET /operations/metrics`.
@@ -52,3 +93,8 @@ and back up SQLite. To disable only external link requests while retaining
 document link inventory, set `CV_VALIDATOR_LINK_CHECK_ENABLED=false`; this
 produces neutral `UNAVAILABLE`/inspection-disabled results and leaves the base
 report and scoring path unchanged.
+
+For an application rollback, check out the previously recorded reviewed SHA
+and run `make deploy`; named volumes are preserved. Restore databases only when
+the application rollback is insufficient or a schema rollback explicitly
+requires it.

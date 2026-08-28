@@ -31,11 +31,11 @@ Compose mounts it read-only at `/app/reference-data`. Outside Compose, point
 `CV_VALIDATOR_LOCATION_INDEX_PATH` and
 `CV_VALIDATOR_LOCATION_MANIFEST_PATH` directly at the two files.
 
-The repository does not currently distribute the large generated index. For a
-fresh clone to work for every developer, publish the compressed pair as a
-versioned repository release asset, track its URL and SHA-256 in a small lock
-file, and add a setup command that downloads and verifies it into ignored
-`data/`. Keep this download in setup only, never in CV analysis.
+The promoted snapshot is recorded in `config/geonames.lock`. Runtime artifacts
+stay outside Git under `data/geonames-build/<snapshot>/`; `make dev` and
+`make deploy-check` compare both files against the tracked SHA-256 values.
+Transfer the exact approved pair to a production host manually or from private
+artifact storage. Routine startup and deployment never download a newer copy.
 
 Refresh the snapshot manually in a new dated directory. Validate all hashes,
 SQLite integrity, resolver behavior, and tests before changing the promoted
