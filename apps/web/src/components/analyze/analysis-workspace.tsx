@@ -39,7 +39,7 @@ export function AnalysisWorkspace({
   }
   const columns = !previewVisible || !hasOriginalFiles || isMobile
     ? "minmax(0, 1fr)"
-    : `minmax(0, ${100 - previewShare}fr) 2px minmax(340px, ${previewShare}fr)`;
+    : `minmax(0, ${100 - previewShare}fr) 16px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
     <div className="mb-3 flex min-h-10 items-start justify-between gap-4">
@@ -55,7 +55,7 @@ export function AnalysisWorkspace({
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {previewVisible && active.file ? <>
-        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={0} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className="group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-2.5 -translate-x-[4px] cursor-col-resize touch-none focus-visible:outline-none"><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:w-0.5 group-focus-visible/separator:bg-primary group-active/separator:w-0.5 group-active/separator:bg-primary" /></div> : null}
+        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={0} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className="group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-full cursor-col-resize touch-none focus-visible:outline-none"><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:bg-primary group-active/separator:bg-primary" /></div> : null}
         <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
       </> : null}
     </div>
