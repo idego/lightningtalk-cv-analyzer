@@ -152,14 +152,30 @@
 }
 
 .docx-preview-host .docx-wrapper {
-  min-height: 100%;
+  min-height: 0;
+  width: max-content;
   padding: 1rem;
   background: transparent;
 }
 
 .docx-preview-host .docx {
-  margin: 0 auto 1rem;
+  margin: 0 0 1rem;
   box-shadow: 0 1px 5px rgb(0 0 0 / 0.12);
+}
+
+.document-preview-viewport {
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.document-preview-viewport[data-panning="true"] {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.document-preview-canvas[data-programmatic="true"] {
+  transition: transform 160ms var(--motion-ease-out);
 }
 
 [data-sidebar="sidebar"]::before {
@@ -203,6 +219,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .document-preview-canvas[data-programmatic="true"] {
+    transition-duration: 1ms;
+  }
+
   .report-enter,
   .report-enrichment-enter,
   .analysis-flow-enter,

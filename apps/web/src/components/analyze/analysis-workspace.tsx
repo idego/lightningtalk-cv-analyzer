@@ -30,10 +30,16 @@ export function AnalysisWorkspace({
   const [previewShare, setPreviewShare] = useState(55);
   const active = entries[Math.min(activeIndex, entries.length - 1)];
   const hasOriginalFiles = entries.some(({ file }) => file !== null);
-  function startResize(event: React.PointerEvent<HTMLDivElement>) { event.currentTarget.setPointerCapture(event.pointerId); const move = (moveEvent: PointerEvent) => { const rect = hostRef.current?.getBoundingClientRect(); if (!rect) return; const next = ((rect.right - moveEvent.clientX) / rect.width) * 100; setPreviewShare(Math.min(70, Math.max(32, next))); }; const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); }
+  function resizePreview(next: number) { setPreviewShare(Math.min(70, Math.max(32, next))); }
+  function startResize(event: React.PointerEvent<HTMLDivElement>) { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); const move = (moveEvent: PointerEvent) => { const rect = hostRef.current?.getBoundingClientRect(); if (!rect) return; resizePreview(((rect.right - moveEvent.clientX) / rect.width) * 100); }; const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop); }
+  function resizeWithKeyboard(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    resizePreview(previewShare + (event.key === "ArrowLeft" ? 2 : -2));
+  }
   const columns = !previewVisible || !hasOriginalFiles || isMobile
     ? "minmax(0, 1fr)"
-    : `minmax(0, ${100 - previewShare}fr) 10px minmax(340px, ${previewShare}fr)`;
+    : `minmax(0, ${100 - previewShare}fr) 2px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
     <div className="mb-3 flex min-h-10 items-start justify-between gap-4">
@@ -49,7 +55,7 @@ export function AnalysisWorkspace({
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {previewVisible && active.file ? <>
-        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} onPointerDown={startResize} className="sticky top-20 h-[calc(100svh-6.5rem)] cursor-col-resize touch-none rounded-full bg-border transition-colors hover:bg-primary/60" /> : null}
+        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={0} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className="group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-2.5 -translate-x-[4px] cursor-col-resize touch-none focus-visible:outline-none"><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:w-0.5 group-focus-visible/separator:bg-primary group-active/separator:w-0.5 group-active/separator:bg-primary" /></div> : null}
         <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
       </> : null}
     </div>
