@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, CircleAlert, Clock3 } from "lucide-react";
+import { Collapsible } from "@base-ui/react/collapsible";
+import { Check, CircleAlert, Clock3 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalyzeBatchResponse, AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
@@ -27,12 +28,12 @@ function ResearchNotice({ kinds }: { kinds: AutoResearchKind[] }) {
   return <p className="text-xs text-muted-foreground">{t("autoResearch", { kinds: kinds.map((kind) => t(researchLabelKeys[kind])).join(", ") })}</p>;
 }
 
-function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, researchKinds }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; researchKinds: AutoResearchKind[] }) {
+function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, researchKinds, complete }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; researchKinds: AutoResearchKind[]; complete: boolean }) {
   const { t } = useCopy();
   const completedByName = new Map(completed.map((entry) => [entry.file?.name ?? entry.result.filename, entry.result]));
   const estimatedRemaining = files.length * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
-  return <Card aria-live="polite" className="mx-auto max-w-3xl"><CardContent className="py-8">
-    <div className="flex flex-col items-center gap-4 text-center"><ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total: files.length })} /><div><h2 className="text-lg font-semibold">{t("analyzing", { current: currentIndex + 1, total: files.length })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{files[currentIndex]?.name}</p></div><div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div></div>
+  return <Card aria-live="polite" className="analysis-flow-enter mx-auto max-w-3xl"><CardContent className="py-8">
+    <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total: files.length })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current: currentIndex + 1, total: files.length })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("reportReady") : files[currentIndex]?.name}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div> : null}</div>
     {researchKinds.length ? <div className="mt-5 rounded-md bg-muted/30 p-3"><ResearchNotice kinds={researchKinds} /></div> : null}
     <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? t("completed") : t("failed")) : active ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
   </CardContent></Card>;
@@ -46,6 +47,7 @@ export function UploadPanel() {
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [completionPhase, setCompletionPhase] = useState<"analyzing" | "complete" | "collapsing">("analyzing");
 
   useEffect(() => { if (!loading) return; const startedAt = Date.now(); const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000); return () => window.clearInterval(timer); }, [loading]);
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
@@ -83,7 +85,7 @@ export function UploadPanel() {
 
   async function submit() {
     setError(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
-    setLoading(true); setEntries([]); setCurrentIndex(0); setElapsedSeconds(0);
+    setLoading(true); setCompletionPhase("analyzing"); setEntries([]); setCurrentIndex(0); setElapsedSeconds(0);
     for (let index = 0; index < acceptedFiles.length; index += 1) {
       const file = acceptedFiles[index]; setCurrentIndex(index); let result: AnalyzeItemResult;
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
@@ -126,15 +128,31 @@ export function UploadPanel() {
         }
       }
     }
+    setCompletionPhase("complete");
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
+    setCompletionPhase("collapsing");
+    await new Promise((resolve) => window.setTimeout(resolve, 240));
     setLoading(false);
+    setCompletionPhase("analyzing");
   }
 
   function reset() { setFiles([]); setEntries([]); setError(null); setElapsedSeconds(0); setCurrentIndex(0); }
   function openHistorical(filename: string, report: Extract<AnalyzeItemResult, { status: "ok" }>["report"]) {
     setEntries([{ file: null, result: { filename, status: "ok", report } }]);
   }
-  if (loading) return <div className="space-y-6"><AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} />{entries.length ? <AnalysisWorkspace entries={entries} compact /> : null}</div>;
-  if (entries.length) return <div className="space-y-4"><div className="mx-auto flex max-w-7xl items-center gap-4"><Button variant="outline" onClick={reset}><ArrowLeft data-icon="inline-start" />{t("back")}</Button>{entries.length > 1 ? <p className="ml-auto text-sm text-muted-foreground">{t("analyzedCount", { completed: entries.filter(({ result }) => result.status === "ok").length, total: entries.length })}</p> : null}</div><AnalysisWorkspace entries={entries} /></div>;
+  if (loading) return <div className="space-y-6">
+    <Collapsible.Root open={completionPhase !== "collapsing"}>
+      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[240ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
+        <AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} complete={completionPhase === "complete"} />
+      </Collapsible.Panel>
+    </Collapsible.Root>
+    {entries.length ? <div className="analysis-results-enter"><AnalysisWorkspace entries={entries} compact /></div> : null}
+  </div>;
+  if (entries.length) return <AnalysisWorkspace
+    entries={entries}
+    onBack={reset}
+    analyzedCount={entries.length > 1 ? t("analyzedCount", { completed: entries.filter(({ result }) => result.status === "ok").length, total: entries.length }) : undefined}
+  />;
 
   return <div className="mx-auto max-w-5xl space-y-6">
     <Card>

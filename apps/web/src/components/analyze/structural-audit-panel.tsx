@@ -98,7 +98,7 @@ function timelineGroups(audits: StructuralAudits, entryById: Map<string, Structu
 
 export function StructuralAuditPanel({ audits, language, employment = [], education = [] }: { audits: StructuralAudits | null | undefined; language: "en" | "pl"; employment?: AIEmploymentFact[]; education?: AIEducationFact[] }) {
   const copy = COPY[language];
-  if (!audits) return <HoverDisclosure className="rounded-md border p-3" title={<span className="font-medium">{copy.title}</span>} allowHover contentClassName="pt-3"><p className="text-sm text-muted-foreground">{copy.legacy}</p></HoverDisclosure>;
+  if (!audits) return <HoverDisclosure className="rounded-md border p-3" title={<span className="font-medium">{copy.title}</span>} contentClassName="pt-3"><p className="text-sm text-muted-foreground">{copy.legacy}</p></HoverDisclosure>;
 
   const status = copy[audits.status as keyof typeof copy] ?? audits.status;
   const entryById = new Map(audits.timeline.entries.map(entry => [entry.id, entry]));
@@ -112,7 +112,6 @@ export function StructuralAuditPanel({ audits, language, employment = [], educat
     triggerClassName="text-sm"
     title={<span><span className="font-medium">{copy.title}{count ? ` (${count})` : ""}</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">{status}</span></span>}
     contentClassName="space-y-3 pt-3"
-    allowHover
   >
     {omittedParts.length ? <p className="text-xs text-amber-700 dark:text-amber-300">{copy.omitted}: {omittedParts.join(", ")}</p> : null}
     {!count ? <p className="text-sm text-muted-foreground">{copy.noFindings}</p> : null}

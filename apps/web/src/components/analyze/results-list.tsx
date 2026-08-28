@@ -329,7 +329,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
             ref={(node) => { reportRefs.current[itemIndex] = node; }}
             className={report.ai_analysis.status === "succeeded" ? "scroll-mt-20" : "report-enter scroll-mt-20"}
           >
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-0">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle className="text-base">{item.filename}</CardTitle>
@@ -355,17 +355,20 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   education={report.ai_analysis.facts.education}
                 />
 
-                {grouped.attention.length ? <section className="space-y-2 rounded-md border border-rose-500/30 p-3">
-                  <h3 className="font-medium">{t("needsAttention")} ({grouped.attention.length})</h3>
+                {grouped.attention.length ? <HoverDisclosure
+                  className="rounded-md border border-rose-500/30 p-3"
+                  triggerClassName="text-sm font-medium"
+                  title={`${t("needsAttention")} (${grouped.attention.length})`}
+                  contentClassName="pt-3"
+                >
                   <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} />
-                </section> : null}
+                </HoverDisclosure> : null}
 
                 {grouped.worthKnowing.length ? <HoverDisclosure
                   className="rounded-md border border-sky-500/30 p-3"
                   triggerClassName="text-sm font-medium"
                   title={`${t("worthKnowing")} (${grouped.worthKnowing.length})`}
                   contentClassName="pt-3"
-                  allowHover
                 >
                   <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} />
                 </HoverDisclosure> : null}

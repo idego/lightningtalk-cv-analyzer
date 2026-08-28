@@ -175,26 +175,15 @@ export function researchChecklistItems(
   language: ReportLanguage = "en",
 ): ResearchChecklistItem[] {
   const items: ResearchChecklistItem[] = [];
+  const isNonCompanySubject = (value: string) => {
+    const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
+    return ["self employed", "self employment", "freelance", "freelancer"].includes(normalized);
+  };
 
   for (const organization of report.company_research?.organizations ?? []) {
     const companyName = organization.query_subject;
-    if (organization.existence === "supported") {
-      items.push({
-        id: `company:${companyName}:exists`,
-        importance: "worth_knowing",
-        title: language === "pl"
-          ? `Źródła publiczne potwierdzają istnienie firmy ${companyName}.`
-          : `Public sources support that ${companyName} exists.`,
-        reason: organization.official_website
-          ? language === "pl"
-            ? "Znaleziono oficjalną stronę lub inny udokumentowany wpis firmy."
-            : "An official website or other sourced company record was found."
-          : language === "pl"
-            ? "Zakończone sprawdzanie firmy zachowało publiczne dowody dotyczące tej organizacji."
-            : "The completed company research retained public evidence for this organization.",
-        source: "company",
-      });
-    } else {
+    if (isNonCompanySubject(companyName)) continue;
+    if (organization.existence !== "supported") {
       items.push({
         id: `company:${companyName}:existence-review`,
         importance: "attention",
@@ -206,20 +195,6 @@ export function researchChecklistItems(
             ? `Nie potwierdzono firmy ${companyName} w wykonanych wyszukiwaniach.`
             : `${companyName} was not confirmed by the completed searches.`,
         reason: organization.uncertainty,
-        source: "company",
-      });
-    }
-    if (organization.limited_online_presence) {
-      items.push({
-        id: `company:${companyName}:limited-presence`,
-        importance: "attention",
-        title: language === "pl"
-          ? `${companyName} ma ograniczoną potwierdzoną obecność w internecie.`
-          : `${companyName} has limited confirmed online presence.`,
-        reason: organization.limited_online_presence_reason
-          ?? (language === "pl"
-            ? "Ograniczone wyszukiwania publiczne zachowały zbyt mało dowodów, aby potwierdzić typową obecność w internecie."
-            : "The bounded public searches retained too little evidence to confirm a normal online presence."),
         source: "company",
       });
     }
@@ -237,6 +212,9 @@ export function researchChecklistItems(
         ? ({ institution: "instytucję", program: "program", degree: "stopień", certificate: "certyfikat" }[field])
         : field === "institution" ? "institution" : field;
       const supported = status === "supported";
+      // Detailed field-level outcomes remain in Education Research. The top
+      // checklist only escalates an institution identity mismatch.
+      if (supported || field !== "institution") return;
       items.push({
         id: `education:${credentialIndex}:${field}`,
         importance: supported ? "worth_knowing" : "attention",
@@ -268,28 +246,11 @@ export function researchChecklistItems(
     addEducationField("program", credential.program, credential.program_exists);
     addEducationField("degree", credential.degree, credential.degree_exists);
     addEducationField("certificate", credential.certificate, credential.certificate_exists);
-    if (credential.dates) {
-      items.push({
-        id: `education:${credentialIndex}:dates`,
-        importance: "worth_knowing",
-        title: language === "pl"
-          ? `Źródła publiczne wskazują okres edukacji: ${credential.dates}.`
-          : `Public sources show education dates: ${credential.dates}.`,
-        reason: credential.uncertainty,
-        source: "education",
-      });
-    }
-    if (credential.accreditation_status) {
+    if (credential.accreditation_status && credential.accreditation_status !== "established") {
       items.push({
         id: `education:${credentialIndex}:accreditation`,
-        importance: credential.accreditation_status === "established"
-          ? "worth_knowing"
-          : "attention",
-        title: credential.accreditation_status === "established"
-          ? language === "pl"
-            ? `Źródła publiczne potwierdzają akredytację dla ${institution}.`
-            : `Public sources establish accreditation for ${institution}.`
-          : credential.accreditation_status === "not_established"
+        importance: "attention",
+        title: credential.accreditation_status === "not_established"
             ? language === "pl"
               ? `Wykonane wyszukiwania nie potwierdziły akredytacji dla ${institution}.`
               : `The completed searches did not establish accreditation for ${institution}.`
@@ -324,57 +285,6 @@ export function researchChecklistItems(
       reason: discovery.not_found_caveat,
       source: "linkedin",
     });
-  }
-  const possibleProfiles = discovery?.possible_profiles ?? [];
-  if (possibleProfiles.length > 0) {
-    const [firstProfile] = possibleProfiles;
-    items.push({
-      id: possibleProfiles.length === 1
-        ? `linkedin:profile:${firstProfile.profile_url}`
-        : "linkedin:profiles-found",
-      importance: "worth_knowing",
-      title: possibleProfiles.length === 1
-        ? language === "pl"
-          ? "Znaleziono możliwy profil LinkedIn 1."
-          : "Possible LinkedIn profile 1 was found."
-        : language === "pl"
-          ? `Znaleziono ${possibleProfiles.length} możliwe profile LinkedIn.`
-          : `${possibleProfiles.length} possible LinkedIn profiles were found.`,
-      reason: possibleProfiles.length === 1
-        ? firstProfile.uncertainty
-        : language === "pl"
-          ? "To wyłącznie możliwe dopasowania."
-          : "These links are possible matches only.",
-      source: "linkedin",
-    });
-  }
-  for (const [index, profile] of possibleProfiles.entries()) {
-    if (profile.photo_visible === "false") {
-      items.push({
-        id: `linkedin:profile:${profile.profile_url}:photo`,
-        importance: "attention",
-        title: language === "pl"
-          ? `Możliwy profil LinkedIn ${index + 1} nie ma publicznie widocznego zdjęcia.`
-          : `Possible LinkedIn profile ${index + 1} has no publicly visible photo.`,
-        reason: language === "pl"
-          ? "To tylko szczegół dotyczący kompletności profilu. Nie mówi nic o tożsamości, dopasowaniu ani autentyczności."
-          : "This is a profile-completeness detail only. It says nothing about identity, suitability, or authenticity.",
-        source: "linkedin",
-      });
-    }
-    if (profile.connection_completeness_flag) {
-      items.push({
-        id: `linkedin:profile:${profile.profile_url}:connections`,
-        importance: "attention",
-        title: language === "pl"
-          ? `Możliwy profil LinkedIn ${index + 1} ma małą liczbę publicznych kontaktów.`
-          : `Possible LinkedIn profile ${index + 1} has a low public connection count.`,
-        reason: language === "pl"
-          ? "To tylko szczegół dotyczący kompletności profilu. Liczba kontaktów nie potwierdza tożsamości, dopasowania ani autentyczności."
-          : "This is a profile-completeness detail only. Connection counts do not establish identity, suitability, or authenticity.",
-        source: "linkedin",
-      });
-    }
   }
   return items;
 }

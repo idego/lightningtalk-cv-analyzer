@@ -56,6 +56,15 @@ export function HoverDisclosure({
     setOpen(nextOpen);
   }
 
+  function changeOpen(nextOpen: boolean) {
+    if (!nextOpen && open && !pinned && allowHover && previewFindingsOnHover) {
+      setPinned(true);
+      setOpen(true);
+      return;
+    }
+    setOpen(nextOpen);
+  }
+
   if (!collapsible) {
     return (
       <div className={className}>
@@ -72,7 +81,7 @@ export function HoverDisclosure({
   return (
     <Collapsible.Root
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={changeOpen}
       onClick={toggleFromCard}
       onPointerEnter={() => setHoverOpen(true)}
       onPointerLeave={() => setHoverOpen(false)}
@@ -81,7 +90,13 @@ export function HoverDisclosure({
       <div className="flex items-center gap-3">
         <Collapsible.Trigger
           data-disclosure-trigger
-          onClick={() => {
+          onClick={(event) => {
+            if (open && !pinned && allowHover && previewFindingsOnHover) {
+              event.preventDefault();
+              setPinned(true);
+              setOpen(true);
+              return;
+            }
             setPinned(!open);
           }}
           className={cn(

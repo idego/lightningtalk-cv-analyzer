@@ -70,10 +70,7 @@ test("builds one recruiter checklist from completed research", () => {
 
   assert.deepEqual(items.map((item) => [item.source, item.importance, item.title]), [
     ["company", "attention", "Example Ltd was not confirmed by the completed searches."],
-    ["company", "attention", "Example Ltd has limited confirmed online presence."],
-    ["education", "worth_knowing", "Public sources support that Example University exists."],
     ["education", "attention", "The location of Example University needs review."],
-    ["linkedin", "worth_knowing", "Possible LinkedIn profile 1 was found."],
   ]);
 });
 
@@ -94,7 +91,7 @@ test("does not surface legacy AI profile comparisons in the recruiter checklist"
   assert.deepEqual(items, []);
 });
 
-test("includes every assessed education and certification field", () => {
+test("keeps field-level education details in the dedicated research section", () => {
   const items = researchChecklistItems({
     company_research: null,
     linkedin_discovery: null,
@@ -121,11 +118,6 @@ test("includes every assessed education and certification field", () => {
   });
 
   assert.deepEqual(items.map((item) => [item.id, item.importance]), [
-    ["education:0:institution", "worth_knowing"],
-    ["education:0:program", "attention"],
-    ["education:0:degree", "attention"],
-    ["education:0:certificate", "worth_knowing"],
-    ["education:0:dates", "worth_knowing"],
     ["education:0:accreditation", "attention"],
   ]);
 });
@@ -184,7 +176,7 @@ test("groups repeated outside-EU details into one recruiter finding", () => {
   });
 });
 
-test("reports missing LinkedIn photo and low connections separately, but not unknowns", () => {
+test("keeps LinkedIn profile details out of the top recruiter checklist", () => {
   const base = {
     checklist: { flags: [] }, company_research: null, education_research: null,
     linkedin_comparison: null,
@@ -200,11 +192,7 @@ test("reports missing LinkedIn photo and low connections separately, but not unk
     ...base,
     linkedin_discovery: { linkedin_not_found: false, not_found_caveat: "", possible_profiles: [profile] },
   });
-  assert.deepEqual(visible.map((item) => item.id), [
-    "linkedin:profile:https://www.linkedin.com/in/example",
-    "linkedin:profile:https://www.linkedin.com/in/example:photo",
-    "linkedin:profile:https://www.linkedin.com/in/example:connections",
-  ]);
+  assert.deepEqual(visible, []);
 
   const unknown = recruiterReviewFlags({
     ...base,
@@ -212,12 +200,10 @@ test("reports missing LinkedIn photo and low connections separately, but not unk
       ...profile, photo_visible: "unknown", connection_completeness_flag: false,
     }] },
   });
-  assert.deepEqual(unknown.map((item) => item.id), [
-    "linkedin:profile:https://www.linkedin.com/in/example",
-  ]);
+  assert.deepEqual(unknown, []);
 });
 
-test("summarizes multiple possible LinkedIn profiles in one recruiter finding", () => {
+test("leaves multiple possible LinkedIn profiles in the dedicated section", () => {
   const possibleProfiles = [1, 2, 3].map((index) => ({
     profile_url: `https://www.linkedin.com/in/example-${index}`,
     uncertainty: `Public evidence for profile ${index} is limited.`,
@@ -236,9 +222,7 @@ test("summarizes multiple possible LinkedIn profiles in one recruiter finding", 
     linkedin_comparison: null,
   });
 
-  assert.deepEqual(items.map((item) => [item.id, item.title]), [
-    ["linkedin:profiles-found", "3 possible LinkedIn profiles were found."],
-  ]);
+  assert.deepEqual(items, []);
 });
 
 test("localizes frontend research checklist copy to Polish", () => {
@@ -265,7 +249,7 @@ test("localizes frontend research checklist copy to Polish", () => {
     linkedin_discovery: null,
   }, "pl");
 
-  assert.equal(items[0].title, "Źródła publiczne potwierdzają istnienie firmy Example.");
+  assert.deepEqual(items, []);
   assert.equal(
     recruiterReviewFlags({
       checklist: { flags: [] },

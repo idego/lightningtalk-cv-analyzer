@@ -2,12 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
-import { Badge } from "@/components/ui/badge";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
+import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
+
+function isResearchableCompany(value: string) {
+  const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
+  return !["self employed", "self employment", "freelance", "freelancer"].includes(normalized);
+}
 
 export function CompanyResearchPanel({
   report,
@@ -26,7 +31,7 @@ export function CompanyResearchPanel({
   const notifiedAutomatic = useRef<CompanyResearch | null>(null);
   const onResearchChangeRef = useRef(onResearchChange);
   const candidates = report.ai_analysis.research_candidates.filter(
-    (candidate) => candidate.category === "company",
+    (candidate) => candidate.category === "company" && isResearchableCompany(candidate.query_subject),
   );
   const enabled = report.ai_analysis.status === "succeeded" && candidates.length > 0;
   const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
@@ -81,7 +86,7 @@ export function CompanyResearchPanel({
 
   return (
     <HoverDisclosure
-      className="rounded-md border border-violet-500/30 p-3"
+      className="rounded-md border p-3"
       triggerClassName="font-medium"
       title={t("companyResearch")}
       collapsible={hasContent}
@@ -102,13 +107,13 @@ export function CompanyResearchPanel({
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
 
       {visibleResearch ? (
-        <div className="divide-y">
-          {visibleResearch.organizations.map((organization) => (
+        <div className="space-y-2">
+          {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => (
             <CompanyResult key={organization.query_subject} organization={organization} />
           ))}
           {visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? (
             <HoverDisclosure
-              className="py-3 text-xs text-muted-foreground"
+              className="pt-2 text-xs text-muted-foreground"
               triggerClassName="w-fit flex-none font-medium text-foreground"
               title={t("searchDetails")}
               contentClassName="pt-2"
@@ -143,7 +148,8 @@ function CompanyResult({ organization }: { organization: Organization }) {
 
   return (
     <HoverDisclosure
-      className="py-3 text-sm"
+      className="rounded-md border bg-muted/20 p-3 text-sm"
+      allowHover
       title={
         <div className="min-w-0">
           <strong className="block truncate">{organization.query_subject}</strong>
@@ -152,12 +158,12 @@ function CompanyResult({ organization }: { organization: Organization }) {
       }
       action={
         <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline">{t("confidenceWithValue", { value: t(`confidence${organization.confidence[0].toUpperCase()}${organization.confidence.slice(1)}` as "confidenceHigh" | "confidenceMedium" | "confidenceLow") })}</Badge>
+          <ResearchConfidenceBadge confidence={organization.confidence} />
         </div>
       }
       contentClassName="pt-3"
     >
-      <div className="space-y-3 pl-0 sm:pl-2">
+      <div className="space-y-3">
         <dl className="divide-y rounded-md border">
           <FactRow
             label={t("reportedOfficeOrLocation")}

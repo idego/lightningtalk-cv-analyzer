@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { History, LoaderCircle, Trash2 } from "lucide-react";
+import { Collapsible } from "@base-ui/react/collapsible";
+import { ChevronDown, ChevronUp, History, LoaderCircle, Trash2 } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/app-settings";
@@ -16,6 +17,10 @@ export function RecentAnalyses({ onOpen }: Props) {
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const primaryItems = items.slice(0, 5);
+  const additionalItems = items.slice(5, 15);
+  const canExpand = items.length > 5;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -63,15 +68,49 @@ export function RecentAnalyses({ onOpen }: Props) {
     <div className="flex items-center gap-2 border-b px-5 py-4"><History className="size-4" /><h2 className="font-medium">{t("recentAnalyses")}</h2></div>
     {loading ? <div className="flex items-center justify-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
     {!loading && !items.length ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noHistory")}</p> : null}
-    {items.length ? <ul className="divide-y">{items.map((item) => {
-      return <li key={item.analysis_id} className="flex min-w-0 items-center gap-2 px-3 py-2">
-        <button type="button" onClick={() => void open(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="flex items-baseline justify-between gap-3"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
-          {item.candidate_name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.filename}</span> : null}
-        </button>
-        <Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={openingId === item.analysis_id} onClick={() => void remove(item)} aria-label={t("deleteAnalysis")}><Trash2 className="size-4" /></Button>
-      </li>;
-    })}</ul> : null}
+    {items.length ? <div className={expanded ? "max-h-[32rem] overflow-y-auto" : undefined}><ul className="divide-y">{primaryItems.map((item) => {
+      return <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={open} onRemove={remove} />;
+    })}</ul>
+    <Collapsible.Root open={expanded}>
+      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-300 ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
+        <ul className="divide-y border-t">{additionalItems.map((item) => (
+          <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={open} onRemove={remove} />
+        ))}</ul>
+      </Collapsible.Panel>
+    </Collapsible.Root></div> : null}
+    {canExpand ? <div className="flex justify-center border-t px-5 py-3">
+      <Button
+        variant="ghost"
+        size="sm"
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {expanded ? t("showFewerAnalyses") : t("showMoreAnalyses", { count: Math.min(items.length, 15) - 5 })}
+        {expanded ? <ChevronUp data-icon="inline-end" /> : <ChevronDown data-icon="inline-end" />}
+      </Button>
+    </div> : null}
     {error ? <p className="border-t px-5 py-3 text-sm text-destructive">{error}</p> : null}
   </section>;
+}
+
+function AnalysisHistoryRow({
+  item,
+  openingId,
+  onOpen,
+  onRemove,
+}: {
+  item: AnalysisHistoryItem;
+  openingId: string | null;
+  onOpen: (item: AnalysisHistoryItem) => Promise<void>;
+  onRemove: (item: AnalysisHistoryItem) => Promise<void>;
+}) {
+  const { settings, t } = useCopy();
+  return <li className="flex min-w-0 items-center gap-2 px-3 py-2">
+    <button type="button" onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+      <span className="flex items-baseline justify-between gap-3"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
+      {item.candidate_name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.filename}</span> : null}
+    </button>
+    <Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={openingId === item.analysis_id} onClick={() => void onRemove(item)} aria-label={t("deleteAnalysis")}><Trash2 className="size-4" /></Button>
+  </li>;
 }

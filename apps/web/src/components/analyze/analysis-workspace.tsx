@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { PanelRightOpen } from "lucide-react";
+import { ArrowLeft, PanelRightOpen } from "lucide-react";
 import type { AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { ResultsList } from "@/components/analyze/results-list";
@@ -11,7 +11,17 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 export type AnalyzedFile = { file: File | null; result: AnalyzeItemResult };
 
-export function AnalysisWorkspace({ entries, compact = false }: { entries: AnalyzedFile[]; compact?: boolean }) {
+export function AnalysisWorkspace({
+  entries,
+  compact = false,
+  onBack,
+  analyzedCount,
+}: {
+  entries: AnalyzedFile[];
+  compact?: boolean;
+  onBack?: () => void;
+  analyzedCount?: string;
+}) {
   const { t } = useCopy();
   const isMobile = useIsMobile();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -26,7 +36,16 @@ export function AnalysisWorkspace({ entries, compact = false }: { entries: Analy
     : `minmax(0, ${100 - previewShare}fr) 10px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
-    {hasOriginalFiles ? (!previewVisible ? <div className="mb-2 flex justify-end"><Button variant="ghost" size="sm" onClick={() => setPreviewVisible(true)}><PanelRightOpen />{t("showCv")}</Button></div> : null) : <p className="mb-3 text-sm text-muted-foreground">{t("originalNotRetained")}</p>}
+    <div className="mb-3 flex min-h-10 items-start justify-between gap-4">
+      <div className="flex items-center gap-4">
+        {onBack ? <Button variant="outline" onClick={onBack}><ArrowLeft data-icon="inline-start" />{t("back")}</Button> : null}
+        {analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
+      </div>
+      {!hasOriginalFiles ? <div className="flex flex-col items-end gap-1.5">
+        <p className="text-sm text-foreground/75">{t("originalNotRetained")}</p>
+        <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button>
+      </div> : !previewVisible ? <Button variant="ghost" size="sm" onClick={() => setPreviewVisible(true)}><PanelRightOpen />{t("showCv")}</Button> : null}
+    </div>
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {previewVisible && active.file ? <>

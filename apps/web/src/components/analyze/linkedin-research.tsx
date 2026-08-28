@@ -8,24 +8,13 @@ import { Button } from "@/components/ui/button";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
+import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
-import { useCopy, type CopyKey } from "@/lib/app-settings";
+import { useCopy } from "@/lib/app-settings";
 
 type State = "idle" | "pending" | "error" | "timeout" | "completed";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
-
-function confidenceClass(confidence: string) {
-  if (confidence === "high") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200";
-  if (confidence === "medium") return "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200";
-  return "border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200";
-}
-
-function confidenceKey(confidence: string): CopyKey {
-  if (confidence === "high") return "confidenceHigh";
-  if (confidence === "medium") return "confidenceMedium";
-  return "confidenceLow";
-}
 
 function profileNote(uncertainty: string) {
   return uncertainty
@@ -52,7 +41,7 @@ function LinkedInProfileCard({
         title={<span className="font-medium">{t("profile", { index: profileIndex + 1 })}</span>}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Badge variant="outline" className={confidenceClass(profile.confidence)}>{t("confidenceWithValue", { value: t(confidenceKey(profile.confidence)) })}</Badge>
+            <ResearchConfidenceBadge confidence={profile.confidence} />
           </div>
         }
         contentClassName="space-y-2 pt-3"
@@ -135,7 +124,7 @@ export function LinkedInResearchPanel({
   async function discover() { setDiscoveryState("pending"); setError(null); try { const payload=await postDiscovery(); setDiscovery(payload.linkedin_discovery); onDiscoveryChange?.(payload.linkedin_discovery); setDiscoveryState("completed"); } catch (cause) { const timed=(cause as {timeout?:boolean}).timeout; setDiscoveryState(timed ? "timeout" : "error"); setError(timed ? t("researchTimedOut") : t("researchFailed")); } }
 
   return <HoverDisclosure
-    className="rounded-md border border-sky-500/30 p-3"
+    className="rounded-md border p-3"
     title={<span className="font-medium">{t("linkedinProfiles")}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
@@ -153,7 +142,7 @@ export function LinkedInResearchPanel({
     {visibleDiscovery?.linkedin_not_found ? <div className="rounded border border-amber-500/30 p-2 text-sm"><Badge variant="outline">{t("noProfileFound")}</Badge><p className="mt-2">{visibleDiscovery.not_found_caveat}</p></div> : null}
     {visibleDiscovery?.outcome === "ambiguous" ? <Badge variant="outline">{t("severalPossibleMatches")}</Badge> : null}
     <div className="space-y-2">
-      {visibleDiscovery?.possible_profiles.map((profile, profileIndex) => (
+      {sortByResearchConfidence(visibleDiscovery?.possible_profiles ?? []).map((profile, profileIndex) => (
         <LinkedInProfileCard
           key={profile.profile_url}
           profile={profile}

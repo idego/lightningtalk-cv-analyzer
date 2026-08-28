@@ -179,8 +179,15 @@
 }
 
 .report-enter,
-.report-enrichment-enter {
+.report-enrichment-enter,
+.analysis-flow-enter,
+.analysis-results-enter,
+.analysis-status-swap {
   animation: report-content-enter 200ms var(--motion-ease-out) both;
+}
+
+.analysis-results-enter {
+  animation-delay: 50ms;
 }
 
 @keyframes report-content-enter {
@@ -197,7 +204,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .report-enter,
-  .report-enrichment-enter {
+  .report-enrichment-enter,
+  .analysis-flow-enter,
+  .analysis-results-enter,
+  .analysis-status-swap {
     animation-duration: 120ms;
     animation-timing-function: ease;
   }
