@@ -285,3 +285,35 @@ organization subjects—not CV dates, locations, relations, evidence, raw CV
 text, or candidate contact data. Completed results are idempotent for the research contract version and
 persist citations, searches, access time, uncertainty, versions, and usage in
 SQLite; they never change deterministic score or band.
+
+## Document understanding
+
+New reports include a nullable `document-understanding-v1` projection. The existing
+PDF/DOCX adapters still produce the canonical redacted document once; an internal
+`document_understanding` slice then owns shared visibility exclusions, section/date
+annotations, conservative education and employment records, explicit ESCO skills,
+Structural Audit V1 projection, and code-first public research subjects. None of
+these fields enter deterministic scoring.
+
+Structural Audit remains available through its `audit_document()` compatibility
+entry point for one release, but its section/date/visibility grammar is owned by
+the document-understanding slice. Legacy reports without the new payload continue
+to use validated AI facts in the UI.
+
+The checked-in ESCO index is an offline, reviewed English/Polish subset of ESCO
+1.2.0 intended for supported explicit-skill patterns. It is built without runtime
+network access:
+
+```bash
+cd apps/api
+python scripts/build_esco_skill_index.py \
+  reference_data/esco/reviewed-skills-v1.csv \
+  src/cv_validator/document_understanding/data/esco-skills-v1.json \
+  --expected-checksum 8487d8db1061d1ea07ba89ba322e5416b6333641c054fa5fbde8722e4b8f704a \
+  --source-version ESCO-1.2.0-reviewed-subset-v1 \
+  --source-url https://esco.ec.europa.eu/en/use-esco/download
+```
+
+The compiled manifest records source and license URLs, filtering rules,
+language/alias counts, and input/output checksums. Missing or invalid data makes
+only skill coverage unavailable; analysis continues fail-closed.

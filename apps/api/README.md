@@ -20,3 +20,13 @@ query/fragment material.
 
 The legacy numeric score and band remain in the API for compatibility. The
 recruiter UI does not present them as an overall CV or candidate assessment.
+
+Document understanding runs after mandatory national-ID redaction and before
+optional AI enrichment. Its public DTO is closed and bounded; persistence, reload,
+retry replacement, and API serialization all use the same sanitizer. AI receives
+a same-length masked visible-source projection and bounded code-owned context, and
+cannot overwrite deterministic/code-owned fields or influence score/band output.
+
+Reference-data operations are build-time only. See the repository README for the
+pinned ESCO index rebuild command. Do not add runtime taxonomy downloads or send CV
+content to a taxonomy provider.
