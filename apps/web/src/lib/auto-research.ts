@@ -19,9 +19,9 @@ function eligibleKinds(report: AnalysisReport): Set<AutoResearchKind> {
   const categories = new Set(report.ai_analysis.research_candidates.map((item) => item.category));
   const codeCategories = new Set(report.document_understanding?.code_research_subjects.map((item) => item.category) ?? []);
   return new Set([
-    (categories.has("company") || codeCategories.has("company")) && "company",
-    (categories.has("education_or_certification") || codeCategories.has("education")) && "education",
-    report.ai_analysis.status === "succeeded" && categories.has("linkedin") && "linkedin",
+    report.ai_capabilities?.company_research !== false && (categories.has("company") || codeCategories.has("company")) && "company",
+    report.ai_capabilities?.education_research !== false && (categories.has("education_or_certification") || codeCategories.has("education")) && "education",
+    report.ai_capabilities?.linkedin_research !== false && report.ai_analysis.status === "succeeded" && categories.has("linkedin") && "linkedin",
   ].filter(Boolean) as AutoResearchKind[]);
 }
 

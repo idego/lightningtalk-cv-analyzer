@@ -4,6 +4,7 @@ import type {
   Band,
   ReviewFlag,
 } from "@/lib/analyze-types";
+import { isSelfEmploymentLabel } from "./relationship-labels.js";
 
 type CompletedResearchPatch = Partial<Pick<
   AnalysisReport,
@@ -177,7 +178,7 @@ export function researchChecklistItems(
   const items: ResearchChecklistItem[] = [];
   const isNonCompanySubject = (value: string) => {
     const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
-    return ["self employed", "self employment", "freelance", "freelancer"].includes(normalized);
+    return isSelfEmploymentLabel(normalized);
   };
 
   for (const organization of report.company_research?.organizations ?? []) {

@@ -19,6 +19,7 @@ function report(id, categories = ["company", "education_or_certification", "link
     analysis_id: id,
     analysis_access_token: `token-${id}`,
     ai_analysis: { status: "succeeded", research_candidates: categories.map((category) => ({ category, query_subject: "safe" })) },
+    ai_capabilities: { company_research: true, education_research: true, linkedin_research: true },
   };
 }
 
@@ -47,6 +48,29 @@ test("does not schedule any research when AI is disabled", async () => {
   await orchestrator.schedule({ ...report("server-off"), ai_features_enabled: false }, settings);
 
   assert.equal(calls, 0);
+});
+
+test("intersects automatic research with each server capability", async () => {
+  const urls = [];
+  const orchestrator = createAutoResearchOrchestrator({ storage: memoryStorage(), fetcher: async (url) => { urls.push(url); return { ok: true, json: async () => ({}) }; } });
+  await orchestrator.schedule({ ...report("caps"), ai_capabilities: { company_research: false, education_research: true, linkedin_research: false } }, { ...settings, aiEnabled: true });
+  assert.equal(urls.length, 1); assert.match(urls[0], /education/);
+});
+
+test("authorization matrix never schedules a disabled setting or capability", async () => {
+  for (const kind of ["company", "education", "linkedin"]) {
+    for (const disabledBy of ["setting", "capability"]) {
+      const urls = [];
+      const localSettings = { ...settings, aiEnabled: true };
+      const capabilities = { company_research: true, education_research: true, linkedin_research: true };
+      if (disabledBy === "setting") localSettings[{ company: "autoCompanyResearch", education: "autoEducationResearch", linkedin: "autoLinkedinDiscovery" }[kind]] = false;
+      else capabilities[`${kind}_research`] = false;
+      const orchestrator = createAutoResearchOrchestrator({ storage: memoryStorage(), fetcher: async (url) => { urls.push(url); return { ok: true, json: async () => ({}) }; } });
+      await orchestrator.schedule({ ...report(`${kind}-${disabledBy}`), ai_capabilities: capabilities }, localSettings);
+      const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
+      assert.equal(urls.some((url) => url.endsWith(`/research/${suffix}`)), false, `${kind} disabled by ${disabledBy}`);
+    }
+  }
 });
 
 test("runs eligible research with one global concurrency limit", async () => {

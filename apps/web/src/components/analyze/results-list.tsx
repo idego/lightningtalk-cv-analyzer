@@ -227,8 +227,8 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 key={fact.id}
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
-                value={fact.role ?? t("employmentEntry")}
-                detail={[employmentDetail(fact.organization ?? "", fact.location, fact.employment_dates), `${fact.authority} · ${fact.confidence}`, fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
+                value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
+                detail={[employmentDetail(fact.organization ?? fact.relationship_type ?? "", fact.location, fact.employment_dates), `${fact.authority} · ${fact.confidence}`, fact.ai_enrichments?.map(item => `${item.name}: ${item.value} (ai)`).join(", "), fact.conflicts?.map(item => `conflict ${item.name}: ${item.ai_value}`).join(", "), fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
                 tone={employmentTone}
               />)}
             </div>

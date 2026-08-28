@@ -41,6 +41,7 @@ function entryDescription(
   education: AIEducationFact[],
   copy: typeof COPY.en | typeof COPY.pl,
   linkedRecord?: UnderstandingRecord,
+  allowLegacyDateFallback = false,
 ) {
   if (!entry) return copy.unknownPeriod;
   if (linkedRecord) {
@@ -49,6 +50,7 @@ function entryDescription(
       ? [values.role, values.organization].filter(Boolean).join(" · ") || copy.workPeriod
       : [values.program, values.institution].filter(Boolean).join(" · ") || copy.educationPeriod;
   }
+  if (!allowLegacyDateFallback) return entry.category === "employment" ? copy.workPeriod : entry.category === "education" ? copy.educationPeriod : copy.unknownPeriod;
   const range = normalizedDate(`${entry.start_text ?? ""} - ${entry.end_text ?? ""}`);
   if (entry.category === "employment") {
     const fact = employment.find(item => normalizedDate(item.employment_dates) === range);
@@ -115,6 +117,7 @@ export function StructuralAuditPanel({ audits, language, employment = [], educat
   const visibilityNames = { hidden_text: copy.hidden, near_zero_text: copy.nearZero, zero_opacity_text: copy.opacity, low_contrast_text: copy.contrast };
   const count = groups.length + audits.visibility.observations.length;
   const omittedParts = audits.coverage.omitted_parts.filter(part => part !== "docx_comments");
+  const allowLegacyDateFallback = understanding == null;
 
   return <HoverDisclosure
     className="rounded-md border p-3"
@@ -144,10 +147,10 @@ export function StructuralAuditPanel({ audits, language, employment = [], educat
             <span className="flex items-center gap-2 font-medium"><Timer className="size-4" />{title}</span>
             <span className="text-xs text-muted-foreground">{group.entries.length} {copy.entries} · {group.observations.length} {copy.relationships}</span>
           </div>
-          {group.category === "employment" && anchorConnections > 1 ? <p className="mt-1 text-xs text-muted-foreground">{entryDescription(anchor, employment, education, copy, anchor ? linkedRecordByTimeline.get(anchor.id) : undefined)} {copy.overlapsOthers.replace("{count}", String(anchorConnections))}.</p> : null}
+          {group.category === "employment" && anchorConnections > 1 ? <p className="mt-1 text-xs text-muted-foreground">{entryDescription(anchor, employment, education, copy, anchor ? linkedRecordByTimeline.get(anchor.id) : undefined, allowLegacyDateFallback)} {copy.overlapsOthers.replace("{count}", String(anchorConnections))}.</p> : null}
           <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
             {group.entries.map(entry => <div key={entry.id} className="rounded bg-muted/40 px-2.5 py-2">
-              <p className="font-medium">{entryDescription(entry, employment, education, copy, linkedRecordByTimeline.get(entry.id))}</p>
+              <p className="font-medium">{entryDescription(entry, employment, education, copy, linkedRecordByTimeline.get(entry.id), allowLegacyDateFallback)}</p>
               <p className="text-xs text-muted-foreground">{entry.start_text ?? "?"} – {entry.end_text ?? "?"}</p>
               {entry.evidence[0] ? <p className="mt-1 text-[11px] text-muted-foreground">{location(entry.evidence[0].location)}</p> : null}
             </div>)}

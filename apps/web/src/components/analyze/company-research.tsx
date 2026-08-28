@@ -9,10 +9,11 @@ import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/understanding-selectors";
+import { isSelfEmploymentLabel } from "@/lib/relationship-labels";
 
 function isResearchableCompany(value: string) {
   const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
-  return !["self employed", "self employment", "freelance", "freelancer"].includes(normalized);
+  return !isSelfEmploymentLabel(normalized);
 }
 
 export function CompanyResearchPanel({
