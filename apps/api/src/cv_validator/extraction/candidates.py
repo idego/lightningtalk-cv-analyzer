@@ -20,7 +20,7 @@ from cv_validator.extraction.postal import POSTAL_PATTERNS
 from cv_validator.ingestion import RedactedDocument, SourcePage
 from cv_validator.ingestion.redaction import NATIONAL_ID_REDACTION_VERSION
 from cv_validator.phone_policy import PHONE_CANDIDATE_EXTRACTOR
-from cv_validator.document_understanding.annotations import date_range_spans
+from cv_validator.document_understanding.annotations import date_range_spans, disclosure_date_spans
 
 CANDIDATE_EXTRACTOR_VERSION = PHONE_CANDIDATE_EXTRACTOR.version
 
@@ -41,21 +41,6 @@ _PHONE = re.compile(
 )
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _URL = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>]+")
-_DATE_PATTERNS = (
-    re.compile(r"\b\d{1,2}[/.]\d{4}\b"),
-    re.compile(r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"),
-    re.compile(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"),
-    re.compile(
-        r"(?i)\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
-        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|"
-        r"Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b"
-    ),
-    re.compile(
-        r"(?i)\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|"
-        r"Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|"
-        r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b"
-    ),
-)
 _POSTAL = re.compile(
     "|".join(f"(?:{pattern})" for pattern in POSTAL_PATTERNS.values()),
     re.IGNORECASE,
@@ -140,15 +125,7 @@ def extract_candidates(document: RedactedDocument, *, exclusion_index=None) -> t
         candidates.extend(
             _from_matches(page, CandidateKind.URL, _URL.finditer(page.text), seen)
         )
-        for pattern in _DATE_PATTERNS:
-            candidates.extend(
-                _from_matches(
-                    page,
-                    CandidateKind.DATE,
-                    pattern.finditer(page.text),
-                    seen,
-                )
-            )
+        candidates.extend(_from_spans(page, CandidateKind.DATE, disclosure_date_spans(page.text), seen))
         candidates.extend(
             _from_matches(page, CandidateKind.POSTAL, _POSTAL.finditer(page.text), seen)
         )
@@ -257,7 +234,9 @@ def _from_matches(
                 explicitly_labeled and has_international_prefix
             ):
                 continue
-            if any(pattern.fullmatch(value.strip()) for pattern in _DATE_PATTERNS):
+            stripped_start = start_offset + len(value) - len(value.lstrip())
+            stripped_end = end_offset - (len(value) - len(value.rstrip()))
+            if (stripped_start, stripped_end) in disclosure_date_spans(page.text):
                 continue
             core = re.split(r"(?i)[ \t]*(?:ext\.?|x)[ \t]*", value, maxsplit=1)[0]
             digit_count = len(re.sub(r"\D", "", core))
@@ -286,6 +265,23 @@ def _from_matches(
                 ),
             )
         )
+    return candidates
+
+
+def _from_spans(page, kind, spans, seen):
+    candidates = []
+    for start_offset, end_offset in spans:
+        key = (kind, page.page_id, start_offset, end_offset)
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence = Evidence.from_page(page, start_offset, end_offset)
+        candidates.append(Candidate(
+            id=_candidate_id(kind, page, start_offset, end_offset),
+            kind=kind,
+            value=page.text[start_offset:end_offset],
+            provenance=Provenance(authority=Authority.CODE, evidence=(evidence,), extractor=PHONE_CANDIDATE_EXTRACTOR),
+        ))
     return candidates
 
 

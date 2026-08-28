@@ -24,13 +24,14 @@ _INSTITUTIONS = ("university", "college", "academy", "school", "institute", "fac
 _DEGREES = ("bachelor", "master", "phd", "doctorate", "licencjat", "magister", "inzynier", "mba", "bsc", "msc")
 _ROLES = ("engineer", "developer", "manager", "consultant", "analyst", "designer", "specialist", "architect", "director", "lead", "intern", "programista", "inzynier", "konsultant", "analityk", "specjalista", "kierownik")
 _ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag|sa|s\.a\.|sp\.\s*z\s*o\.o\.|labs?|studio|group)\b")
+_LABEL_PREFIX = r"(?:^\s*|[|;]\s*)"
 _LABELS = {
-    "organization": re.compile(r"(?i)(?:^|[|;]\s*)(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>[^|;]+)"),
-    "client": re.compile(r"(?i)(?:^|[|;]\s*)(?:client|klient)\s*:\s*(?P<value>[^|;]+)"),
-    "role": re.compile(r"(?i)(?:^|[|;]\s*)(?:role|position|title|stanowisko)\s*:\s*(?P<value>[^|;]+)"),
-    "program": re.compile(r"(?i)(?:^|[|;]\s*)(?:program|programme|course|field of study|kierunek)\s*:\s*(?P<value>[^|;]+)"),
-    "location": re.compile(r"(?i)(?:^|[|;]\s*)(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>[^|;]+)"),
-    "result": re.compile(r"(?i)(?:^|[|;]\s*)(?:result|grade|wynik|ocena)\s*:\s*(?P<value>[^|;]+)"),
+    "organization": re.compile(rf"(?i){_LABEL_PREFIX}(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>[^|;]+)"),
+    "client": re.compile(rf"(?i){_LABEL_PREFIX}(?:client|klient)\s*:\s*(?P<value>[^|;]+)"),
+    "role": re.compile(rf"(?i){_LABEL_PREFIX}(?:role|position|title|stanowisko)\s*:\s*(?P<value>[^|;]+)"),
+    "program": re.compile(rf"(?i){_LABEL_PREFIX}(?:program|programme|course|field of study|kierunek)\s*:\s*(?P<value>[^|;]+)"),
+    "location": re.compile(rf"(?i){_LABEL_PREFIX}(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>[^|;]+)"),
+    "result": re.compile(rf"(?i){_LABEL_PREFIX}(?:result|grade|wynik|ocena)\s*:\s*(?P<value>[^|;]+)"),
 }
 
 
@@ -178,7 +179,7 @@ def _lines(document,blocks):
 def _unique(lines,predicate):
     values=[line for line in lines if predicate(line.text.strip())]; return values[0] if len(values)==1 else None
 def _label(lines,name):
-    values=[line for line in lines if _LABELS[name].search(line.text.strip())]; return values[0] if len(values)==1 else None
+    values=[line for line in lines if _LABELS[name].search(line.text)]; return values[0] if len(values)==1 else None
 def _has_date(line,dates): return any(d.evidence and d.evidence[0].line_id==line.line_id for d in dates)
 def _looks_org(value):
     text=value.strip(); words=text.split()
@@ -232,9 +233,13 @@ def _value_evidence(document,line):
 
 def _issue(document,lines,reason,order,exclusion=None):
     if not lines:return ()
-    evidence=tuple(_value_evidence(document,line)[1] for line in lines[:4])
+    selected=tuple(line for line in lines[:4] if line is not None)
     if exclusion is not None:
-        evidence=tuple(item for item in evidence if not exclusion.intersects(item.page_id,item.start_offset or 0,item.end_offset or 0))
+        # A labelled ownership field is atomic for quarantine purposes.  If
+        # either its label or value is excluded, no excerpt from that line may
+        # be repackaged as ambiguous evidence.
+        selected=tuple(line for line in selected if not exclusion.intersects(line.page_id,line.start_offset,line.end_offset))
+    evidence=tuple(_value_evidence(document,line)[1] for line in selected)
     return _ambiguous_from_evidence(evidence,reason,order)
 def _ambiguous_from_evidence(evidence,reason,order):
     if not evidence:return ()

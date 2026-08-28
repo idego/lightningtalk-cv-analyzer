@@ -238,6 +238,38 @@ def test_hidden_company_label_cannot_own_visible_value_or_research_subject() -> 
     assert payload["code_research_subjects"] == []
 
 
+@pytest.mark.parametrize("hidden_part", ["Company", "Example Labs Ltd"])
+def test_indented_hidden_company_field_is_quarantined_at_original_offsets(hidden_part: str) -> None:
+    text = "Experience\n  Company: Example Labs Ltd\nRole: Software Engineer\n01/2020 - 02/2022"
+    start = text.index(hidden_part)
+    span = PresentationSpan("page-0001", 1, hidden_part, start, start + len(hidden_part), association="exact", explicit_hidden=True)
+    payload = understanding_to_payload(_result(text, spans=(span,)))
+    serialized = json.dumps(payload)
+    assert payload["records"] == []
+    assert payload["code_research_subjects"] == []
+    assert hidden_part not in serialized
+    assert all(hidden_part not in evidence["excerpt"] for item in payload["ambiguous_spans"] for evidence in item["evidence"])
+
+
+def test_title_case_unknown_heading_stops_employment_without_breaking_inline_uppercase_rows() -> None:
+    result = _result("Experience\nExample Labs Ltd\nRole: Engineer\n01/2020 - 02/2022\nTraining\n03/2022 - 04/2022\nA 05/2022 - 06/2022")
+    payload = understanding_to_payload(result)
+    assert [item["kind"] for item in payload["sections"]] == ["employment", "other"]
+    assert [entry.category for entry in result.structural_audits.timeline.entries] == ["employment", "unknown", "unknown"]
+    assert len(payload["records"]) == 1
+
+
+def test_candidate_dates_use_shared_named_month_range_annotations() -> None:
+    result = _result("Experience\nJan 2020 - Feb 2022\nCompany: Example Labs Ltd\nRole: Engineer")
+    assert result.date_ranges[0].source_literal == "Jan 2020 - Feb 2022"
+    dates = [candidate for candidate in result.deterministic.candidates if candidate.kind.value == "date"]
+    assert [candidate.value for candidate in dates] == ["Jan 2020", "Feb 2022"]
+    assert [(item.provenance.evidence[0].start_offset, item.provenance.evidence[0].end_offset) for item in dates] == [
+        (result.date_ranges[0].evidence[0].start_offset, result.date_ranges[0].evidence[0].start_offset + len("Jan 2020")),
+        (result.date_ranges[0].evidence[0].end_offset - len("Feb 2022"), result.date_ranges[0].evidence[0].end_offset),
+    ]
+
+
 def test_label_and_value_keep_separate_evidence_through_research_projection() -> None:
     payload = understanding_to_payload(_result(
         "Experience\nCompany: Example Labs Ltd | Role: Software Engineer | 01/2020 - 02/2022"

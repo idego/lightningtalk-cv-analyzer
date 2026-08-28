@@ -35,6 +35,13 @@ _MONTHS = {
 }
 _TOKEN = r"(?:\d{1,2}[./-]\d{4}|\d{4}|[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]{3,12}\.?\s+\d{4}|present|current|now|obecnie|teraz)"
 _RANGE = re.compile(rf"(?P<start>{_TOKEN})\s*(?:-|–|—|\bto\b|\bdo\b)\s*(?P<end>{_TOKEN})", re.I)
+_DISCLOSURE_DATES = (
+    re.compile(r"\b\d{1,2}[/.]\d{4}\b"),
+    re.compile(r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b"),
+    re.compile(r"\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b"),
+    re.compile(r"(?i)\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b"),
+    re.compile(r"(?i)\b\d{1,2}\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{4}\b"),
+)
 SECTION_ALIASES = {
     SectionKind.CONTACT: {"contact", "contact details", "personal details", "kontakt", "dane kontaktowe", "dane osobowe"},
     SectionKind.SUMMARY: {"summary", "profile", "professional summary", "podsumowanie", "profil zawodowy"},
@@ -55,6 +62,14 @@ _EXCLUDED = re.compile(r"\b(?:birth|born|dob|date of birth|urodz|certificate|cer
 def date_range_spans(text: str) -> tuple[tuple[int, int], ...]:
     """Expose the shared range grammar without creating a second parser."""
     return tuple(match.span() for match in _RANGE.finditer(text))
+
+
+def disclosure_date_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Return candidate date spans from the shared understanding grammar."""
+    spans = {match.span(group) for match in _RANGE.finditer(text) for group in ("start", "end")}
+    for pattern in _DISCLOSURE_DATES:
+        spans.update(match.span() for match in pattern.finditer(text))
+    return tuple(sorted(spans))
 
 
 def build_shared_annotations(document: RedactedDocument, *, snapshot_month: str | None = None, config: StructuralAuditConfig | None = None):
@@ -265,7 +280,16 @@ def detect_sections(document: RedactedDocument, exclusion: VisibilityExclusionIn
 def _looks_unknown_heading(value: str) -> bool:
     text = value.strip().rstrip(":")
     words = text.split()
-    return bool(text) and not _RANGE.search(text) and len(words) <= 5 and (value.strip().endswith(":") or (text.upper() == text and any(ch.isalpha() for ch in text)))
+    boundary_labels = {
+        "training", "courses", "interests", "hobbies", "activities", "achievements", "portfolio",
+        "szkolenia", "kursy", "zainteresowania", "hobby", "osiagniecia",
+    }
+    normalized = normalize_text(text)
+    return bool(text) and not _RANGE.search(text) and len(words) <= 5 and (
+        value.strip().endswith(":")
+        or (text.upper() == text and any(ch.isalpha() for ch in text))
+        or (len(words) == 1 and normalized in boundary_labels and text[:1].isupper())
+    )
 
 
 def _month_index(value: str | None) -> int:

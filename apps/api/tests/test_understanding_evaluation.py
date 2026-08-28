@@ -8,8 +8,8 @@ from cv_validator.ingestion import RawDocument, SourcePage
 from cv_validator.ingestion.redaction import redact_national_ids
 
 
-def _analyze(text: str) -> dict:
-    raw = RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")
+def _analyze(text: str, *, source_format: str = "text", omitted_parts=()) -> dict:
+    raw = RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format=source_format, presentation_omitted_parts=tuple(omitted_parts))
     return understanding_to_payload(understand_document(redact_national_ids(raw), "evaluation-v1", snapshot_month="2026-08"))
 
 
@@ -26,7 +26,8 @@ def test_supported_pattern_evaluation_thresholds_and_reproducibility() -> None:
     section_expected = []; section_actual = []; record_expected = []; record_actual = []; skill_expected = []; skill_actual = []; subject_expected = []; subject_actual = []
     unsupported_positive_fields = 0
     for fixture in fixtures:
-        first = _analyze(fixture["text"]); second = _analyze(fixture["text"])
+        options = {"source_format": fixture.get("source_format", "text"), "omitted_parts": fixture.get("omitted_parts", ())}
+        first = _analyze(fixture["text"], **options); second = _analyze(fixture["text"], **options)
         assert first == second
         section_expected.extend((fixture["id"], value) for value in fixture["sections"])
         section_actual.extend((fixture["id"], item["kind"]) for item in first["sections"])
@@ -47,6 +48,13 @@ def test_supported_pattern_evaluation_thresholds_and_reproducibility() -> None:
         subject_expected.extend((fixture["id"], *value) for value in fixture["subjects"])
         subject_actual.extend((fixture["id"], item["category"], item["subject"]) for item in first["code_research_subjects"])
         assert first["coverage"]["status"] == fixture["coverage"]
+        assert set(first["coverage"]["omitted_parts"]) >= set(fixture.get("expected_omitted_parts", ()))
+        serialized_records = json.dumps(first["records"])
+        assert all(value not in serialized_records for value in fixture.get("abstain_values", ()))
+        for expected in fixture.get("full_records", ()):
+            record = next(item for item in first["records"] if item["kind"] == expected["kind"])
+            actual_fields = {field["name"]: {"status": field["status"], "value": field["value"]} for field in record["fields"]}
+            assert actual_fields == expected["fields"]
     section_precision, section_recall, _ = _prf(section_expected, section_actual)
     record_precision, _, record_exact_match_f1 = _prf(record_expected, record_actual)
     skill_precision, _, _ = _prf(skill_expected, skill_actual)
