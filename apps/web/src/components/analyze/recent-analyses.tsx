@@ -26,11 +26,11 @@ export function RecentAnalyses({ onOpen }: Props) {
       const body = await response.json() as { analyses?: AnalysisHistoryItem[] };
       setItems(body.analyses ?? []);
     } catch {
-      setError("Analysis history is unavailable.");
+      setError(t("historyUnavailable"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void refresh(); }, 0);
@@ -45,7 +45,7 @@ export function RecentAnalyses({ onOpen }: Props) {
       if (!response.ok) throw new Error("analysis_unavailable");
       onOpen(item.filename, await response.json() as AnalysisReport);
     } catch {
-      setError("This analysis is no longer available.");
+      setError(t("analysisUnavailable"));
       void refresh();
     } finally {
       setOpeningId(null);
@@ -53,10 +53,10 @@ export function RecentAnalyses({ onOpen }: Props) {
   }
 
   async function remove(item: AnalysisHistoryItem) {
-    if (!window.confirm(`Delete ${item.candidate_name ?? item.filename}?`)) return;
+    if (!window.confirm(t("confirmDeleteAnalysis", { name: item.candidate_name ?? item.filename }))) return;
     const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
     if (response.ok) setItems((current) => current.filter(({ analysis_id }) => analysis_id !== item.analysis_id));
-    else setError("The analysis could not be deleted.");
+    else setError(t("analysisCouldNotDelete"));
   }
 
   return <section className="rounded-xl border bg-card">

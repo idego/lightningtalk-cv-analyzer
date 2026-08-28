@@ -1,4 +1,10 @@
+"use client";
+
+import { useCopy } from "@/lib/app-settings";
+
 export function SiteFooter() {
+  const { t } = useCopy();
+
   return (
     <footer className="mt-auto shrink-0 px-4 py-3 text-center text-xs text-muted-foreground md:px-6">
       <p>
@@ -11,7 +17,7 @@ export function SiteFooter() {
         >
           Idego
         </a>
-        . All rights reserved.
+        . {t("allRightsReserved")}
       </p>
     </footer>
   );

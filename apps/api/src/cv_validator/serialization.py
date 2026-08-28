@@ -257,6 +257,7 @@ def _link_flag_reason(reason_code: str) -> str:
 def deserialize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Read old and new stored payloads without requiring new nullable fields."""
     result = deepcopy(payload)
+    result.setdefault("structural_audits", None)
     _validate_json(result)
     return result
 

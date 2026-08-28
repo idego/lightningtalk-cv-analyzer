@@ -15,9 +15,10 @@ export async function POST(
   if (typeof body.accessToken !== "string") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  if (body.aiEnabled !== true) return NextResponse.json({ error: "AI disabled" }, { status: 409 });
   const upstream = await fetch(
     `${INTERNAL_API_URL}/analyses/${encodeURIComponent(analysisId)}/research/company`,
-    { method: "POST", headers: { "X-Analysis-Access-Token": body.accessToken } },
+    { method: "POST", headers: { "X-Analysis-Access-Token": body.accessToken, "X-AI-Enabled": "true" } },
   );
   const data = await upstream.json().catch(() => ({}));
   return NextResponse.json(data, { status: upstream.status });

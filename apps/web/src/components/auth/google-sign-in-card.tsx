@@ -8,6 +8,7 @@ import {
   AuthPageShell,
   Login07GoogleIcon,
 } from "@/components/auth/login-07-shared";
+import { useCopy } from "@/lib/app-settings";
 
 export function GoogleSignInCard({
   showGoogle,
@@ -16,6 +17,7 @@ export function GoogleSignInCard({
   showGoogle: boolean;
   callbackURL: string;
 }) {
+  const { t } = useCopy();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,16 +32,16 @@ export function GoogleSignInCard({
         provider: "google",
         callbackURL: `${origin}${callbackURL.startsWith("/") ? callbackURL : `/${callbackURL}`}`,
       });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in.");
+    } catch {
+      setError(t("unableToSignIn"));
       setPending(false);
     }
   }
 
   return (
     <AuthPageShell
-      title="Welcome back"
-      description="Sign in to CV Analyzer with your Idego Google account."
+      title={t("welcomeBack")}
+      description={t("signInDescription")}
     >
       <div className="space-y-5">
         <Button
@@ -50,16 +52,16 @@ export function GoogleSignInCard({
           disabled={pending || !showGoogle}
         >
           <Login07GoogleIcon className="h-4 w-4" />
-          {pending ? "Signing in..." : "Sign in with Google"}
+          {pending ? t("signingIn") : t("signInWithGoogle")}
         </Button>
         <div className="flex items-center gap-2">
           <Separator className="flex-1" />
-          <span className="text-muted-foreground text-sm">Google SSO only</span>
+          <span className="text-muted-foreground text-sm">{t("googleSsoOnly")}</span>
           <Separator className="flex-1" />
         </div>
         {!showGoogle ? (
           <p className="text-sm text-destructive">
-            Google OAuth is not configured.
+            {t("googleOAuthNotConfigured")}
           </p>
         ) : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}

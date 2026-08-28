@@ -31,9 +31,10 @@ export function HoverDisclosure({
   allowHover = false,
   collapsible = true,
 }: HoverDisclosureProps) {
-  const { previewFindingsOnHover } = useAppSettings();
-  const [open, setOpen] = useState(defaultOpen);
-  const [pinned, setPinned] = useState(defaultOpen);
+  const { previewFindingsOnHover, expandSectionsByDefault } = useAppSettings();
+  const initialOpen = defaultOpen || expandSectionsByDefault;
+  const [open, setOpen] = useState(initialOpen);
+  const [pinned, setPinned] = useState(initialOpen);
 
   function setHoverOpen(nextOpen: boolean) {
     if (!allowHover || !previewFindingsOnHover || pinned || typeof window === "undefined") return;

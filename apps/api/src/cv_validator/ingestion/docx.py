@@ -14,7 +14,8 @@ from cv_validator.file_links.extraction import (
     extract_docx_hyperlinks,
     merge_document_links,
 )
-from cv_validator.ingestion import IngestionError, RawDocument, SourcePage
+from cv_validator.ingestion import IngestionError, PresentationSpan, RawDocument, SourcePage
+from cv_validator.structural.config import StructuralAuditConfig
 from cv_validator.ingestion.text import validate_text_sufficiency
 
 
@@ -35,6 +36,13 @@ def extract_docx(
         )
         for page_number, text in enumerate(page_texts, start=1)
     )
+    try:
+        presentation_spans, presentation_truncated = _presentation_spans(document, pages)
+        presentation_omitted = ()
+    except Exception:  # Presentation inspection must not break text ingestion.
+        presentation_spans, presentation_truncated = (), False
+        presentation_omitted = ("docx_body_runs_unavailable",)
+    omitted_parts = _omitted_parts(document) + presentation_omitted
     parsed = RawDocument(
         pages=pages,
         source_format="docx",
@@ -44,6 +52,10 @@ def extract_docx(
             extract_docx_hyperlinks(document, pages),
             source_format="docx",
         ),
+        presentation_spans=presentation_spans,
+        presentation_audited_parts=("docx_body_paragraph_runs", "docx_table_cell_runs", "docx_logical_page_breaks"),
+        presentation_omitted_parts=omitted_parts,
+        presentation_truncated=presentation_truncated,
     )
     validate_text_sufficiency(parsed, config or load_ingestion_config())
     return parsed
@@ -119,3 +131,70 @@ def _has_page_break_before(paragraph: Paragraph) -> bool:
 
 def _remove_paragraph_terminator(text: str) -> str:
     return text[:-1] if text.endswith("\n") else text
+
+
+def _presentation_spans(document, pages):
+    cfg = StructuralAuditConfig()
+    spans = []
+    page_index = 0
+    offset = 0
+    run_count = 0
+    for block_index, block in enumerate(document.iter_inner_content()):
+        paragraphs = [block] if isinstance(block, Paragraph) else [paragraph for row in block.rows for cell in row.cells for paragraph in cell.paragraphs]
+        for paragraph_index, paragraph in enumerate(paragraphs):
+            if _has_page_break_before(paragraph) and offset and page_index + 1 < len(pages):
+                page_index += 1; offset = 0
+            for run_index, run in enumerate(paragraph.runs):
+                run_count += 1
+                if run_count > cfg.max_docx_runs:
+                    return tuple(spans), True
+                text = run.text
+                if not text:
+                    continue
+                page = pages[page_index]
+                found = page.text.find(text, offset)
+                exact = found >= 0
+                if exact:
+                    offset = found + len(text)
+                color = run.font.color.rgb or (run.style.font.color.rgb if run.style is not None else None) or (paragraph.style.font.color.rgb if paragraph.style is not None else None)
+                foreground = _rgb_luminance(str(color)) if color is not None else None
+                shading = paragraph._p.pPr.find(qn("w:shd")) if paragraph._p.pPr is not None else None
+                fill = shading.get(qn("w:fill")) if shading is not None else None
+                background = _rgb_luminance(fill) if fill and fill.lower() != "auto" else None
+                partial_offset = page.text.find(text[:1], offset) if not exact and text else -1
+                association = "exact" if exact else "partial" if partial_offset >= 0 else "unmapped"
+                spans.append(PresentationSpan(
+                    page_id=page.page_id, page_number=page.page_number, text=text,
+                    start_offset=found if exact else partial_offset if partial_offset >= 0 else None, end_offset=found + len(text) if exact else partial_offset + 1 if partial_offset >= 0 else None,
+                    paragraph_path=f"body/{block_index}/paragraph/{paragraph_index}/run/{run_index}",
+                    association=association,
+                    font_size_points=_resolved_size(run, paragraph, document),
+                    foreground_luminance=foreground, background_luminance=background,
+                    explicit_hidden=bool(run.font.hidden or (run.style.font.hidden if run.style is not None else False) or (paragraph.style.font.hidden if paragraph.style is not None else False)),
+                ))
+    return tuple(spans), False
+
+
+def _omitted_parts(document):
+    omitted = set()
+    if any(section.header.paragraphs and any(p.text for p in section.header.paragraphs) for section in document.sections): omitted.add("docx_headers")
+    if any(section.footer.paragraphs and any(p.text for p in section.footer.paragraphs) for section in document.sections): omitted.add("docx_footers")
+    xml = document.part.element.xml
+    for marker, name in (("w:txbxContent", "docx_textboxes"), ("w:commentReference", "docx_comments"), ("w:drawing", "docx_drawings"), ("w:footnoteReference", "docx_footnotes"), ("w:endnoteReference", "docx_endnotes"), ("w:object", "docx_embedded_files")):
+        if marker in xml: omitted.add(name)
+    return tuple(sorted(omitted))
+
+
+def _rgb_luminance(value):
+    if not value or len(value) != 6:
+        return None
+    try: rgb = [int(value[index:index+2], 16) / 255 for index in (0, 2, 4)]
+    except ValueError: return None
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+
+
+def _resolved_size(run, paragraph, document):
+    for size in (run.font.size, run.style.font.size if run.style is not None else None, paragraph.style.font.size if paragraph.style is not None else None, document.styles["Normal"].font.size):
+        if size is not None:
+            return float(size.pt)
+    return None

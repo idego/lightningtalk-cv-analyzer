@@ -9,8 +9,8 @@ export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
 
-export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "autoResearchEnabled" | "autoCompanyResearch" | "autoEducationResearch" | "autoLinkedinDiscovery">): AutoResearchKind[] {
-  if (!settings.autoResearchEnabled) return [];
+export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnabled" | "autoResearchEnabled" | "autoCompanyResearch" | "autoEducationResearch" | "autoLinkedinDiscovery">): AutoResearchKind[] {
+  if (settings.aiEnabled === false || !settings.autoResearchEnabled) return [];
   return [settings.autoCompanyResearch && "company", settings.autoEducationResearch && "education", settings.autoLinkedinDiscovery && "linkedin"].filter(Boolean) as AutoResearchKind[];
 }
 
@@ -59,6 +59,7 @@ export function createAutoResearchOrchestrator({
   function enqueue(job: () => Promise<void>) { queue.push(job); pump(); }
 
   async function schedule(report: AnalysisReport, settings: AppSettings) {
+    if (settings.aiEnabled === false || report.ai_features_enabled === false) return;
     const eligible = eligibleKinds(report);
     const completions = effectiveAutoResearchKinds(settings).filter((kind) => eligible.has(kind)).map((kind) => {
       const existing = states.get(key(report.analysis_id, kind));
@@ -77,7 +78,7 @@ export function createAutoResearchOrchestrator({
           const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
           const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accessToken: report.analysis_access_token }),
+            body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }),
           });
           const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
           if (!response.ok) throw new Error(`Automatic ${kind} research failed (${response.status}).`);

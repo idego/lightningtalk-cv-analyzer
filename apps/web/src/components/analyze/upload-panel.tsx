@@ -20,19 +20,21 @@ function formatElapsed(seconds: number) {
   return `${minutes}:${remainder}`;
 }
 
-const researchLabels: Record<AutoResearchKind, string> = { company: "company", education: "education", linkedin: "LinkedIn discovery" };
+const researchLabelKeys = { company: "companyResearch", education: "educationResearch", linkedin: "linkedinDiscovery" } as const;
 function ResearchNotice({ kinds }: { kinds: AutoResearchKind[] }) {
+  const { t } = useCopy();
   if (!kinds.length) return null;
-  return <p className="text-xs text-muted-foreground">Auto research: {kinds.map((kind) => researchLabels[kind]).join(", ")}.</p>;
+  return <p className="text-xs text-muted-foreground">{t("autoResearch", { kinds: kinds.map((kind) => t(researchLabelKeys[kind])).join(", ") })}</p>;
 }
 
 function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, researchKinds }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; researchKinds: AutoResearchKind[] }) {
+  const { t } = useCopy();
   const completedByName = new Map(completed.map((entry) => [entry.file?.name ?? entry.result.filename, entry.result]));
   const estimatedRemaining = files.length * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="mx-auto max-w-3xl"><CardContent className="py-8">
-    <div className="flex flex-col items-center gap-4 text-center"><ThinkingOrb state="working" size={64} theme="auto" aria-label={`Analyzing CV ${currentIndex + 1} of ${files.length}`} /><div><h2 className="text-lg font-semibold">Analyzing {currentIndex + 1} of {files.length}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{files[currentIndex]?.name}</p></div><div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {estimatedRemaining > 0 ? `Estimated remaining about ${formatElapsed(estimatedRemaining)}` : "Taking longer than usual"}</div></div>
+    <div className="flex flex-col items-center gap-4 text-center"><ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total: files.length })} /><div><h2 className="text-lg font-semibold">{t("analyzing", { current: currentIndex + 1, total: files.length })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{files[currentIndex]?.name}</p></div><div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div></div>
     {researchKinds.length ? <div className="mt-5 rounded-md bg-muted/30 p-3"><ResearchNotice kinds={researchKinds} /></div> : null}
-    <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? "Completed" : "Failed") : active ? "Analyzing" : "Waiting"}</span></li>; })}</ol>
+    <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? t("completed") : t("failed")) : active ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
   </CardContent></Card>;
 }
 
@@ -52,10 +54,12 @@ export function UploadPanel() {
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("files", file, file.name);
-    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage } });
+    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-AI-Enabled": String(settings.aiEnabled) } });
     const payload = await response.json().catch(() => ({})) as AnalyzeBatchResponse & { error?: string };
-    if (!response.ok) throw new Error(payload.error ?? `Analysis failed (${response.status})`);
-    return payload.results?.[0] ?? { filename: file.name, status: "error", error: "No result was returned" };
+    if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
+    const result = payload.results?.[0];
+    if (!result) return { filename: file.name, status: "error", error: t("noResult") };
+    return result.status === "error" ? { ...result, error: t("analysisFailed") } : result;
   }
 
   async function enrichWithAi(
@@ -64,21 +68,25 @@ export function UploadPanel() {
     if (result.report.ai_analysis.status !== "pending") return result;
     const response = await fetch(
       `/api/analyses/${encodeURIComponent(result.report.analysis_id)}/ai/retry`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiEnabled: settings.aiEnabled }),
+      },
     );
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(payload.error ?? payload.detail ?? "AI analysis failed");
+      throw new Error(t("analysisFailed"));
     }
     return { ...result, report: payload };
   }
 
   async function submit() {
-    setError(null); if (!acceptedFiles.length) { setError("Add at least one PDF or DOCX file."); return; }
+    setError(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     setLoading(true); setEntries([]); setCurrentIndex(0); setElapsedSeconds(0);
     for (let index = 0; index < acceptedFiles.length; index += 1) {
       const file = acceptedFiles[index]; setCurrentIndex(index); let result: AnalyzeItemResult;
-      try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : "Unexpected analysis error" }; }
+      try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       setEntries((previous) => [...previous, { file, result }]);
       if (result.status === "ok") {
         try {
@@ -94,7 +102,7 @@ export function UploadPanel() {
             void getAutoResearchOrchestrator()?.schedule(enriched.report, settings);
           }
         } catch (cause) {
-          const message = cause instanceof Error ? cause.message : "AI analysis failed";
+          const message = cause instanceof Error ? cause.message : t("analysisFailed");
           const failed: typeof result = {
             ...result,
             report: {
@@ -126,7 +134,7 @@ export function UploadPanel() {
     setEntries([{ file: null, result: { filename, status: "ok", report } }]);
   }
   if (loading) return <div className="space-y-6"><AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} />{entries.length ? <AnalysisWorkspace entries={entries} compact /> : null}</div>;
-  if (entries.length) return <div className="space-y-4"><div className="mx-auto flex max-w-7xl items-center gap-4"><Button variant="outline" onClick={reset}><ArrowLeft data-icon="inline-start" />{t("back")}</Button>{entries.length > 1 ? <p className="ml-auto text-sm text-muted-foreground">{entries.filter(({ result }) => result.status === "ok").length} of {entries.length} analyzed</p> : null}</div><AnalysisWorkspace entries={entries} /></div>;
+  if (entries.length) return <div className="space-y-4"><div className="mx-auto flex max-w-7xl items-center gap-4"><Button variant="outline" onClick={reset}><ArrowLeft data-icon="inline-start" />{t("back")}</Button>{entries.length > 1 ? <p className="ml-auto text-sm text-muted-foreground">{t("analyzedCount", { completed: entries.filter(({ result }) => result.status === "ok").length, total: entries.length })}</p> : null}</div><AnalysisWorkspace entries={entries} /></div>;
 
   return <div className="mx-auto max-w-5xl space-y-6">
     <Card>

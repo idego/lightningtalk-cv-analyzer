@@ -27,6 +27,13 @@ test("does not double count overlapping fixed month ranges", () => {
   );
 });
 
+test("localizes Polish timeline summaries", () => {
+  assert.equal(
+    summarizeDateRanges(["Jan 2020 – Present"], new Date("2022-03-01T00:00:00Z"), "pl"),
+    "2020–obecnie · 2 lata 3 miesiące",
+  );
+});
+
 test("omits a summary when no complete range can be parsed", () => {
   assert.equal(summarizeDateRanges(["Graduated recently", "2020"]), null);
 });

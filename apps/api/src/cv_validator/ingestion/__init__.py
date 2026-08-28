@@ -74,6 +74,24 @@ class NationalIdRedaction:
 
 
 @dataclass(frozen=True)
+class PresentationSpan:
+    page_id: str
+    page_number: int
+    text: str = field(repr=False)
+    start_offset: int | None = None
+    end_offset: int | None = None
+    paragraph_path: str | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    association: str = "unmapped"
+    font_size_points: float | None = None
+    foreground_luminance: float | None = None
+    background_luminance: float | None = None
+    opacity: float | None = None
+    explicit_hidden: bool = False
+    redaction_type_hints: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RedactedDocumentIdentity:
     algorithm: str
     format_version: str
@@ -88,6 +106,10 @@ class _PageDocument:
     source_format: str
     file_details: FileDetails | None
     document_links: tuple[DocumentLink, ...]
+    presentation_spans: tuple[PresentationSpan, ...]
+    presentation_audited_parts: tuple[str, ...]
+    presentation_omitted_parts: tuple[str, ...]
+    presentation_truncated: bool
 
     def __init__(
         self,
@@ -96,6 +118,10 @@ class _PageDocument:
         source_format: str,
         file_details: FileDetails | None = None,
         document_links: tuple[DocumentLink, ...] = (),
+        presentation_spans: tuple[PresentationSpan, ...] = (),
+        presentation_audited_parts: tuple[str, ...] = (),
+        presentation_omitted_parts: tuple[str, ...] = (),
+        presentation_truncated: bool = False,
     ) -> None:
         canonical_pages = tuple(pages)
         page_ids = [page.page_id for page in canonical_pages]
@@ -105,6 +131,10 @@ class _PageDocument:
         object.__setattr__(self, "source_format", source_format)
         object.__setattr__(self, "file_details", file_details)
         object.__setattr__(self, "document_links", tuple(document_links))
+        object.__setattr__(self, "presentation_spans", tuple(presentation_spans))
+        object.__setattr__(self, "presentation_audited_parts", tuple(presentation_audited_parts))
+        object.__setattr__(self, "presentation_omitted_parts", tuple(presentation_omitted_parts))
+        object.__setattr__(self, "presentation_truncated", presentation_truncated)
 
     @property
     def source_lines(self) -> tuple[SourceLine, ...]:
@@ -129,12 +159,20 @@ class RedactedDocument(_PageDocument):
         redactions: tuple[NationalIdRedaction, ...] = (),
         file_details: FileDetails | None = None,
         document_links: tuple[DocumentLink, ...] = (),
+        presentation_spans: tuple[PresentationSpan, ...] = (),
+        presentation_audited_parts: tuple[str, ...] = (),
+        presentation_omitted_parts: tuple[str, ...] = (),
+        presentation_truncated: bool = False,
     ) -> None:
         super().__init__(
             pages=pages,
             source_format=source_format,
             file_details=file_details,
             document_links=document_links,
+            presentation_spans=presentation_spans,
+            presentation_audited_parts=presentation_audited_parts,
+            presentation_omitted_parts=presentation_omitted_parts,
+            presentation_truncated=presentation_truncated,
         )
         object.__setattr__(self, "redactions", tuple(redactions))
 

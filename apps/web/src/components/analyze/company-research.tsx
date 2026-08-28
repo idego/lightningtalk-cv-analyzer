@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { ResearchAction } from "@/components/analyze/research-action";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
+import { useCopy } from "@/lib/app-settings";
 
 export function CompanyResearchPanel({
   report,
@@ -16,6 +16,7 @@ export function CompanyResearchPanel({
   report: AnalysisReport;
   onResearchChange?: (research: CompanyResearch) => void;
 }) {
+  const { settings, t } = useCopy();
   const [research, setResearch] = useState<CompanyResearch | undefined>(report.company_research);
   const [state, setState] = useState<"idle" | "pending" | "error" | "timeout" | "completed">(
     report.company_research ? "completed" : "idle",
@@ -31,7 +32,12 @@ export function CompanyResearchPanel({
   const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
   const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
   const completed = state === "completed" || automatic?.status === "succeeded";
-  const hasContent = Boolean(visibleResearch || error || automatic?.message || !enabled);
+  const hasContent = Boolean(visibleResearch || error || automatic?.message);
+  const automaticMessage = automatic?.status === "manual-action"
+    ? t("automaticResearchAlreadyAttempted")
+    : automatic?.status === "failed"
+      ? t("automaticResearchFailed")
+      : null;
 
   useEffect(() => {
     onResearchChangeRef.current = onResearchChange;
@@ -52,14 +58,14 @@ export function CompanyResearchPanel({
     try {
       const response = await fetch(
         `/api/analyses/${encodeURIComponent(report.analysis_id)}/research/company`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token }) },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }) },
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         const detail = payload.detail ?? payload.error ?? "company_research_failed";
         if (response.status === 504 || detail === "company_research_timeout") {
           setState("timeout");
-          setError("Research timed out. You can safely try again.");
+          setError(t("researchTimedOut"));
           return;
         }
         throw new Error(detail);
@@ -67,9 +73,9 @@ export function CompanyResearchPanel({
       setResearch(payload.company_research);
       onResearchChange?.(payload.company_research);
       setState("completed");
-    } catch (cause) {
+    } catch {
       setState("error");
-      setError(cause instanceof Error ? cause.message : "company_research_failed");
+      setError(t("researchFailed"));
     }
   }
 
@@ -77,33 +83,23 @@ export function CompanyResearchPanel({
     <HoverDisclosure
       className="rounded-md border border-violet-500/30 p-3"
       triggerClassName="font-medium"
-      title="Company research"
+      title={t("companyResearch")}
       collapsible={hasContent}
       contentClassName="space-y-3 pt-3"
       action={completed ? undefined : (
-        <Button
-            type="button"
-            variant="outline"
-            onClick={startResearch}
-            disabled={!enabled || busy}
-          >
-            {busy ? (
-            <span className="flex items-center gap-2">
-              <ThinkingOrb state="working" size={20} theme="auto" aria-label="Company research in progress" />
-              Researching…
-            </span>
-            ) : "Start"}
-          </Button>
+        <ResearchAction
+          busy={busy}
+          disabled={!enabled || busy}
+          onClick={startResearch}
+          label={t("start")}
+          busyLabel={t("researching")}
+          busyAriaLabel={t("companyResearchInProgress")}
+          disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
+        />
       )}
     >
-
-      {!enabled ? (
-        <p className="text-sm text-muted-foreground">
-          No companies available to research.
-        </p>
-      ) : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {automatic?.message ? <p className="text-sm text-destructive">{automatic.message}</p> : null}
+      {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
 
       {visibleResearch ? (
         <div className="divide-y">
@@ -114,12 +110,12 @@ export function CompanyResearchPanel({
             <HoverDisclosure
               className="py-3 text-xs text-muted-foreground"
               triggerClassName="w-fit flex-none font-medium text-foreground"
-              title="Search details"
+              title={t("searchDetails")}
               contentClassName="pt-2"
             >
               <ul className="space-y-1">
-                {visibleResearch.searches_performed.map((search) => <li key={search}>Search: {search}</li>)}
-                {visibleResearch.search_limitations.map((limit) => <li key={limit}>Limit: {limit}</li>)}
+                {visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}
+                {visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}
               </ul>
             </HoverDisclosure>
           ) : null}
@@ -132,6 +128,7 @@ export function CompanyResearchPanel({
 type Organization = CompanyResearch["organizations"][number];
 
 function CompanyResult({ organization }: { organization: Organization }) {
+  const { t } = useCopy();
   const sources = Array.from(new Set([
     ...(organization.official_website ? [organization.official_website] : []),
     ...organization.company_pages,
@@ -139,9 +136,9 @@ function CompanyResult({ organization }: { organization: Organization }) {
     ...organization.findings.flatMap((finding) => finding.source_urls),
   ]));
   const existence = {
-    supported: "Company found",
-    conflicting: "Conflicting company information",
-    insufficient_evidence: "Company not confirmed",
+    supported: t("companyFound"),
+    conflicting: t("conflictingCompanyInformation"),
+    insufficient_evidence: t("companyNotConfirmed"),
   }[organization.existence];
 
   return (
@@ -155,7 +152,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
       }
       action={
         <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="outline">{organization.confidence} confidence</Badge>
+          <Badge variant="outline">{t("confidenceWithValue", { value: t(`confidence${organization.confidence[0].toUpperCase()}${organization.confidence.slice(1)}` as "confidenceHigh" | "confidenceMedium" | "confidenceLow") })}</Badge>
         </div>
       }
       contentClassName="pt-3"
@@ -163,15 +160,15 @@ function CompanyResult({ organization }: { organization: Organization }) {
       <div className="space-y-3 pl-0 sm:pl-2">
         <dl className="divide-y rounded-md border">
           <FactRow
-            label="Reported office or location"
-            value={organization.location ?? "Not confirmed"}
+            label={t("reportedOfficeOrLocation")}
+            value={organization.location ?? t("notConfirmed")}
           />
           <FactRow
-            label="Official website"
-            value={organization.official_website ? "Found" : "Not confirmed"}
+            label={t("officialWebsite")}
+            value={organization.official_website ? t("found") : t("notConfirmed")}
           />
-          {organization.activity ? <FactRow label="Activity" value={organization.activity} /> : null}
-          {organization.operating_dates ? <FactRow label="Operating dates" value={organization.operating_dates} /> : null}
+          {organization.activity ? <FactRow label={t("activity")} value={organization.activity} /> : null}
+          {organization.operating_dates ? <FactRow label={t("operatingDates")} value={organization.operating_dates} /> : null}
         </dl>
 
         {organization.findings.length ? (

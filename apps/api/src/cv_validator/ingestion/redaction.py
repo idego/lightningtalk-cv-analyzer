@@ -70,7 +70,34 @@ def redact_national_ids(document: RawDocument) -> RedactedDocument:
         redactions=tuple(redactions),
         file_details=document.file_details,
         document_links=document.document_links,
+        presentation_spans=tuple(
+            _redact_presentation_span(span, redactions)
+            for span in document.presentation_spans
+        ),
+        presentation_audited_parts=document.presentation_audited_parts,
+        presentation_omitted_parts=document.presentation_omitted_parts,
+        presentation_truncated=document.presentation_truncated,
     )
+
+
+def _redact_presentation_span(span, redactions):
+    from dataclasses import replace
+
+    hints: set[str] = set(span.redaction_type_hints)
+    text = span.text
+    if span.start_offset is not None and span.end_offset is not None:
+        chars = list(text)
+        for redaction in redactions:
+            if redaction.page_id != span.page_id:
+                continue
+            left = max(span.start_offset, redaction.start_offset)
+            right = min(span.end_offset, redaction.end_offset)
+            if left >= right:
+                continue
+            chars[left - span.start_offset:right - span.start_offset] = MASK_CHARACTER * (right - left)
+            hints.update(redaction.type_hints)
+        text = "".join(chars)
+    return replace(span, text=text, redaction_type_hints=tuple(sorted(hints)))
 
 
 def _find_sensitive_spans(text: str) -> list[_SensitiveSpan]:

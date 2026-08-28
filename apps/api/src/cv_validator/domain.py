@@ -842,6 +842,7 @@ class Report:
     deterministic: DeterministicAnalysisResult | None = None
     file_details: FileDetails | None = None
     link_inspection: LinkInspection | None = None
+    structural_audits: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -895,6 +896,11 @@ class Report:
             payload["file_details"] = self.file_details.to_dict()
         if self.link_inspection is not None:
             payload["link_inspection"] = self.link_inspection.to_dict()
+        payload["structural_audits"] = (
+            self.structural_audits.to_dict()
+            if self.structural_audits is not None
+            else None
+        )
         return payload
 
 

@@ -62,6 +62,9 @@ def test_single_analyze_success(client):
         "analysis_id",
         "ai_analysis",
         "checklist",
+        "structural_audits",
+        "ai_features_enabled",
+        "ai_capabilities",
     }
     assert set(body["deterministic"]) == {
         "ruleset_version",

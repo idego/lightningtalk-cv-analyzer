@@ -213,6 +213,24 @@ def create_app(
 
     store.set_purge_listener(remove_retry_state)
 
+    def attach_ai_capabilities(payload: dict, *, requested: bool) -> dict:
+        payload["ai_features_enabled"] = bool(
+            requested
+            and selected_ai_settings.enabled
+            and selected_document_analyzer is not None
+        )
+        payload["ai_capabilities"] = {
+            "document_analysis": selected_document_analyzer is not None,
+            "company_research": selected_company_researcher is not None,
+            "education_research": selected_education_researcher is not None,
+            "linkedin_research": selected_linkedin_researcher is not None,
+        }
+        return payload
+
+    def require_analysis_ai_enabled(payload: dict, requested: bool) -> None:
+        if not requested or payload.get("ai_features_enabled") is False:
+            raise HTTPException(status_code=409, detail="ai_disabled_for_analysis")
+
     @app.middleware("http")
     async def observe_request(request, call_next):
         supplied_correlation_id = request.headers.get("X-Correlation-ID")
@@ -308,19 +326,21 @@ def create_app(
         file: UploadFile = File(...),
         x_analysis_access_token: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
+        x_ai_enabled: bool = Header(default=True),
     ) -> JSONResponse:
         filename = file.filename or "upload.pdf"
         try:
             content = await _read_upload(file)
+            request_ai_settings = selected_ai_settings if x_ai_enabled else replace(selected_ai_settings, enabled=False)
             result = analyze_cv_bytes_result(
                 content,
                 filename=filename,
                 ingestion_config=ingestion_config,
                 location_resolver=resolver,
-                ai_settings=selected_ai_settings,
+                ai_settings=request_ai_settings,
                 document_analyzer=selected_document_analyzer,
                 report_language=_report_language(x_report_language),
-                defer_ai=selected_ai_settings.enabled,
+                defer_ai=request_ai_settings.enabled,
                 link_check_config=selected_link_check_config,
                 link_inspector=link_inspector,
                 link_dns_resolver=link_dns_resolver,
@@ -331,9 +351,10 @@ def create_app(
             access_token = x_analysis_access_token or secrets.token_urlsafe(32)
             payload = serialize_analysis_payload(
                 result,
-                selected_ai_settings,
+                request_ai_settings,
                 analysis_id=analysis_id,
             )
+            attach_ai_capabilities(payload, requested=x_ai_enabled)
             store.persist_report(
                 result.document_identity,
                 result.report,
@@ -364,6 +385,7 @@ def create_app(
         files: list[UploadFile] = File(...),
         x_analysis_access_token: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
+        x_ai_enabled: bool = Header(default=True),
     ) -> JSONResponse:
         prepared = await _prepare_batch(
             files,
@@ -385,15 +407,16 @@ def create_app(
                 continue
             try:
                 assert item.content is not None
+                request_ai_settings = selected_ai_settings if x_ai_enabled else replace(selected_ai_settings, enabled=False)
                 result = analyze_cv_bytes_result(
                     item.content,
                     filename=filename,
                     ingestion_config=ingestion_config,
                     location_resolver=resolver,
-                    ai_settings=selected_ai_settings,
+                    ai_settings=request_ai_settings,
                     document_analyzer=selected_document_analyzer,
                     report_language=_report_language(x_report_language),
-                    defer_ai=selected_ai_settings.enabled,
+                    defer_ai=request_ai_settings.enabled,
                     link_check_config=selected_link_check_config,
                     link_inspector=link_inspector,
                     link_dns_resolver=link_dns_resolver,
@@ -404,9 +427,10 @@ def create_app(
                 access_token = x_analysis_access_token or secrets.token_urlsafe(32)
                 payload = serialize_analysis_payload(
                     result,
-                    selected_ai_settings,
+                    request_ai_settings,
                     analysis_id=analysis_id,
                 )
+                attach_ai_capabilities(payload, requested=x_ai_enabled)
                 store.persist_report(
                     result.document_identity,
                     result.report,
@@ -478,8 +502,10 @@ def create_app(
     def retry_ai_analysis(
         analysis_id: str,
         x_analysis_access_token: str | None = Header(default=None),
+        x_ai_enabled: bool = Header(default=True),
     ) -> JSONResponse:
         stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        require_analysis_ai_enabled(stored_payload, x_ai_enabled)
         if not selected_ai_settings.enabled or selected_document_analyzer is None:
             raise HTTPException(status_code=409, detail="ai_unavailable")
         with retry_contexts_guard:
@@ -519,6 +545,7 @@ def create_app(
                     selected_ai_settings,
                     analysis_id=analysis_id,
                 )
+                attach_ai_capabilities(payload, requested=True)
                 for key in (
                     "company_research",
                     "education_research",
@@ -593,7 +620,7 @@ def create_app(
     research_locks_guard = threading.Lock()
 
     @app.post("/analyses/{analysis_id}/research/company")
-    def research_company(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    def research_company(analysis_id: str, x_analysis_access_token: str | None = Header(default=None), x_ai_enabled: bool = Header(default=True)) -> JSONResponse:
         if selected_company_researcher is None:
             raise HTTPException(status_code=503, detail="company_research_disabled")
         if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
@@ -601,6 +628,7 @@ def create_app(
         stored_payload = store.get_analysis_payload(analysis_id)
         if stored_payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
+        require_analysis_ai_enabled(stored_payload, x_ai_enabled)
         try:
             request = build_company_research_request(stored_payload)
         except ValueError as exc:
@@ -646,7 +674,7 @@ def create_app(
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/education")
-    def research_education(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    def research_education(analysis_id: str, x_analysis_access_token: str | None = Header(default=None), x_ai_enabled: bool = Header(default=True)) -> JSONResponse:
         if selected_education_researcher is None:
             raise HTTPException(status_code=503, detail="education_research_disabled")
         if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
@@ -654,6 +682,7 @@ def create_app(
         stored_payload = store.get_analysis_payload(analysis_id)
         if stored_payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
+        require_analysis_ai_enabled(stored_payload, x_ai_enabled)
         try:
             request = build_education_research_request(stored_payload)
         except ValueError as exc:
@@ -704,8 +733,9 @@ def create_app(
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
-    def discover_linkedin(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    def discover_linkedin(analysis_id: str, x_analysis_access_token: str | None = Header(default=None), x_ai_enabled: bool = Header(default=True)) -> JSONResponse:
         stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        require_analysis_ai_enabled(stored_payload, x_ai_enabled)
         if selected_linkedin_researcher is None: raise HTTPException(status_code=503, detail="linkedin_research_disabled")
         with research_locks_guard: lock = research_locks.setdefault(f"linkedin:{analysis_id}", threading.Lock())
         with lock:
