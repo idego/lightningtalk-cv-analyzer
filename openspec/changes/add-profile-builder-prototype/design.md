@@ -12,7 +12,7 @@ The prototype brief defines the key product invariant as one canonical candidate
 - Regression tests for stale state and anonymization.
 
 **Non-goals:**
-- Saving/reopening profiles, team permissions, template persistence, PDF conversion, template designer, OCR, translation, rewriting assistant, batch generation, ATS integrations.
+- Team-shared permissions, PDF conversion, arbitrary absolute-position canvas features, OCR, translation, rewriting assistant, batch generation, ATS integrations.
 
 ## Decisions
 
@@ -35,3 +35,18 @@ One cohesive React workspace stores one `profile` object and one `anonymization`
 ### D5: Keep persistence and PDF outside the first slice
 
 The profile exists only in browser memory. PDF can later be generated from the same DOCX through LibreOffice, and a constrained visual template system can be added after DOCX correctness is proven.
+
+
+### D6: Persist exact Profile Builder snapshots for Recent
+
+Recent profiles use the existing SQLite persistence layer. A stored record contains the owner-scoped canonical `CandidateProfile`, anonymization policy, exact selected template snapshot, source filename, and created/updated timestamps. The original uploaded PDF/DOCX bytes are never stored. The editor autosaves the current snapshot after a debounce and opening Recent restores that exact state.
+
+### D7: Use a constrained normalized template model
+
+The Template Creator edits a `profile-template-v1` JSON contract rather than raw DOCX/Jinja/pdfme data. V1 supports brand text/accent, font family/sizes, header visibility, ordered domain sections, section titles, visibility, and simple inline/bulleted list presentation. It deliberately excludes arbitrary coordinates, overlap, rotation, and free-form drawing.
+
+The same exact template snapshot is sent with DOCX export, avoiding a save/export race. The browser preview and DOCX renderer both consume the same normalized template contract.
+
+### D8: Keep template management inside the Profile Builder flow
+
+The upload state shows the current template beside Recent profiles. A template manager dialog can select a template, create a new one, or navigate to editing an existing one. `/profile-builder/templates/new` and `/profile-builder/templates/<id>` render the same Template Creator screen. The built-in `idego-default` can be owner-customized without changing other users; deleting that override falls back to the built-in default.

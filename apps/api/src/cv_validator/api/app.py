@@ -63,7 +63,13 @@ from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearche
 from cv_validator.operations import OperationsTelemetry, safe_log
 from cv_validator.ai.application import ProfileExtractionError, ProfileExtractor, extract_candidate_profile
 from cv_validator.ai.openai_client import OpenAIResponsesProfileExtractor
-from cv_validator.profile_builder import ProfileExportRequest, render_candidate_profile_docx
+from cv_validator.profile_builder import (
+    ProfileBuilderSnapshot,
+    ProfileExportRequest,
+    ProfileTemplate,
+    default_profile_template,
+    render_candidate_profile_docx,
+)
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -528,6 +534,7 @@ def create_app(
         content = render_candidate_profile_docx(
             request.profile,
             request.anonymization,
+            request.template,
         )
         return Response(
             content=content,
@@ -539,6 +546,186 @@ def create_app(
                 "Content-Disposition": 'attachment; filename="candidate-profile.docx"'
             },
         )
+
+    @app.get("/profile-builder/profiles")
+    def profile_builder_list_profiles(
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        return JSONResponse(
+            {
+                "profiles": store.list_candidate_profiles(
+                    x_profile_builder_access_token
+                )
+            }
+        )
+
+    @app.post("/profile-builder/profiles")
+    def profile_builder_create_profile(
+        snapshot: ProfileBuilderSnapshot,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        try:
+            profile_id = store.create_candidate_profile(token, snapshot)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        return JSONResponse({"profile_id": profile_id}, status_code=201)
+
+    @app.get("/profile-builder/profiles/{profile_id}")
+    def profile_builder_get_profile(
+        profile_id: str,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        payload = store.get_candidate_profile(
+            profile_id, x_profile_builder_access_token
+        )
+        if payload is None:
+            raise HTTPException(status_code=404, detail="profile_not_found")
+        return JSONResponse(payload)
+
+    @app.put("/profile-builder/profiles/{profile_id}")
+    def profile_builder_update_profile(
+        profile_id: str,
+        snapshot: ProfileBuilderSnapshot,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        try:
+            updated = store.update_candidate_profile(
+                profile_id,
+                x_profile_builder_access_token,
+                snapshot,
+            )
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        if not updated:
+            raise HTTPException(status_code=404, detail="profile_not_found")
+        return JSONResponse({"updated": True})
+
+    @app.delete("/profile-builder/profiles/{profile_id}")
+    def profile_builder_delete_profile(
+        profile_id: str,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        try:
+            deleted = store.delete_candidate_profile(
+                profile_id, x_profile_builder_access_token
+            )
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="profile_not_found")
+        return JSONResponse({"deleted": True})
+
+    @app.get("/profile-builder/templates")
+    def profile_builder_list_templates(
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        stored = store.list_profile_templates(token)
+        stored_by_id = {
+            item["template"]["id"]: item
+            for item in stored
+            if isinstance(item.get("template"), dict)
+        }
+        default_item = stored_by_id.pop("idego-default", None)
+        if default_item is None:
+            default_template = default_profile_template().model_dump(mode="json")
+            default_item = {
+                "template": default_template,
+                "created_at": None,
+                "updated_at": None,
+                "built_in": True,
+                "customized": False,
+            }
+        else:
+            default_item = {
+                **default_item,
+                "built_in": True,
+                "customized": True,
+            }
+        custom_items = [
+            {**item, "built_in": False, "customized": True}
+            for item in stored_by_id.values()
+        ]
+        return JSONResponse({"templates": [default_item, *custom_items]})
+
+    @app.get("/profile-builder/templates/{template_id}")
+    def profile_builder_get_template(
+        template_id: str,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        stored = store.get_profile_template(template_id, token)
+        if stored is not None:
+            return JSONResponse(
+                {
+                    **stored,
+                    "built_in": template_id == "idego-default",
+                    "customized": True,
+                }
+            )
+        if template_id == "idego-default":
+            return JSONResponse(
+                {
+                    "template": default_profile_template().model_dump(mode="json"),
+                    "created_at": None,
+                    "updated_at": None,
+                    "built_in": True,
+                    "customized": False,
+                }
+            )
+        raise HTTPException(status_code=404, detail="template_not_found")
+
+    @app.put("/profile-builder/templates/{template_id}")
+    def profile_builder_put_template(
+        template_id: str,
+        template: ProfileTemplate,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if template.id != template_id:
+            raise HTTPException(status_code=400, detail="template_id_mismatch")
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        try:
+            store.upsert_profile_template(token, template)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        return JSONResponse({"saved": True, "template": template.model_dump(mode="json")})
+
+    @app.delete("/profile-builder/templates/{template_id}")
+    def profile_builder_delete_template(
+        template_id: str,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        try:
+            deleted = store.delete_profile_template(template_id, token)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        if template_id == "idego-default":
+            return JSONResponse({"deleted": deleted, "reset_to_builtin": True})
+        if not deleted:
+            raise HTTPException(status_code=404, detail="template_not_found")
+        return JSONResponse({"deleted": True})
 
     @app.get("/analyses")
     def list_analyses(
@@ -916,6 +1103,12 @@ def _default_app() -> FastAPI:
 
 
 app = _default_app()
+
+
+def _require_profile_builder_access_token(value: str | None) -> str:
+    if not value:
+        raise HTTPException(status_code=401, detail="profile_builder_auth_required")
+    return value
 
 
 def _owned_payload(store: PersistenceStore, analysis_id: str, access_token: str | None) -> dict:

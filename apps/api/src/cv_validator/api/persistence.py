@@ -23,6 +23,7 @@ from cv_validator.errors import PersistenceError
 from cv_validator.file_links.normalization import URLNormalizationError, normalize_url
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
+from cv_validator.profile_builder import ProfileBuilderSnapshot, ProfileTemplate
 from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
 
 
@@ -158,6 +159,29 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS candidate_profiles (
+                    profile_id TEXT PRIMARY KEY,
+                    access_token_hash TEXT NOT NULL,
+                    source_filename TEXT NOT NULL,
+                    profile_json TEXT NOT NULL,
+                    anonymization_json TEXT NOT NULL,
+                    template_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS candidate_profiles_owner_updated
+                    ON candidate_profiles(access_token_hash, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS profile_templates (
+                    access_token_hash TEXT NOT NULL,
+                    template_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    template_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (access_token_hash, template_id)
+                );
+                CREATE INDEX IF NOT EXISTS profile_templates_owner_updated
+                    ON profile_templates(access_token_hash, updated_at DESC);
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -408,6 +432,280 @@ class PersistenceStore:
                 f"DELETE FROM reports WHERE analysis_id IN ({placeholders})",
                 analysis_ids,
             )
+
+    def create_candidate_profile(
+        self,
+        access_token: str | None,
+        snapshot: ProfileBuilderSnapshot,
+    ) -> str:
+        if not access_token:
+            raise PersistenceError("profile builder access token required")
+        profile_id = str(uuid4())
+        now = _utc_now()
+        payload = snapshot.model_dump(mode="json")
+        try:
+            self.purge_expired()
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO candidate_profiles (
+                        profile_id, access_token_hash, source_filename, profile_json,
+                        anonymization_json, template_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        _token_hash(access_token),
+                        payload["source_filename"],
+                        json.dumps(payload["profile"]),
+                        json.dumps(payload["anonymization"]),
+                        json.dumps(payload["template"]),
+                        now,
+                        now,
+                    ),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("candidate profile persistence failed") from exc
+        return profile_id
+
+    def list_candidate_profiles(self, access_token: str | None) -> list[dict[str, Any]]:
+        if not access_token:
+            return []
+        self.purge_expired()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT profile_id, source_filename, profile_json, template_json,
+                       created_at, updated_at
+                FROM candidate_profiles
+                WHERE access_token_hash = ?
+                ORDER BY updated_at DESC
+                LIMIT 50
+                """,
+                (_token_hash(access_token),),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                profile = json.loads(row["profile_json"])
+                template = ProfileTemplate.model_validate(
+                    json.loads(row["template_json"])
+                )
+            except (json.JSONDecodeError, ValueError):
+                continue
+            result.append(
+                {
+                    "profile_id": row["profile_id"],
+                    "source_filename": row["source_filename"],
+                    "candidate_name": _profile_candidate_name(profile),
+                    "template_id": template.id,
+                    "template_name": template.name,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return result
+
+    def get_candidate_profile(
+        self,
+        profile_id: str,
+        access_token: str | None,
+    ) -> dict[str, Any] | None:
+        if not access_token:
+            return None
+        self.purge_expired()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM candidate_profiles
+                WHERE profile_id = ? AND access_token_hash = ?
+                """,
+                (profile_id, _token_hash(access_token)),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            snapshot = ProfileBuilderSnapshot.model_validate(
+                {
+                    "source_filename": row["source_filename"],
+                    "profile": json.loads(row["profile_json"]),
+                    "anonymization": json.loads(row["anonymization_json"]),
+                    "template": json.loads(row["template_json"]),
+                }
+            )
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return {
+            "profile_id": row["profile_id"],
+            **snapshot.model_dump(mode="json"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def update_candidate_profile(
+        self,
+        profile_id: str,
+        access_token: str | None,
+        snapshot: ProfileBuilderSnapshot,
+    ) -> bool:
+        if not access_token:
+            return False
+        self.purge_expired()
+        payload = snapshot.model_dump(mode="json")
+        try:
+            with self._connect() as conn:
+                updated = conn.execute(
+                    """
+                    UPDATE candidate_profiles
+                    SET source_filename = ?, profile_json = ?, anonymization_json = ?,
+                        template_json = ?, updated_at = ?
+                    WHERE profile_id = ? AND access_token_hash = ?
+                    """,
+                    (
+                        payload["source_filename"],
+                        json.dumps(payload["profile"]),
+                        json.dumps(payload["anonymization"]),
+                        json.dumps(payload["template"]),
+                        _utc_now(),
+                        profile_id,
+                        _token_hash(access_token),
+                    ),
+                ).rowcount
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("candidate profile update failed") from exc
+        return updated == 1
+
+    def delete_candidate_profile(
+        self,
+        profile_id: str,
+        access_token: str | None,
+    ) -> bool:
+        if not access_token:
+            return False
+        try:
+            with self._connect() as conn:
+                deleted = conn.execute(
+                    """
+                    DELETE FROM candidate_profiles
+                    WHERE profile_id = ? AND access_token_hash = ?
+                    """,
+                    (profile_id, _token_hash(access_token)),
+                ).rowcount
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("candidate profile delete failed") from exc
+        return deleted == 1
+
+    def list_profile_templates(self, access_token: str | None) -> list[dict[str, Any]]:
+        if not access_token:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT template_id, template_json, created_at, updated_at
+                FROM profile_templates
+                WHERE access_token_hash = ?
+                ORDER BY updated_at DESC
+                """,
+                (_token_hash(access_token),),
+            ).fetchall()
+        templates: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                template = ProfileTemplate.model_validate(
+                    json.loads(row["template_json"])
+                )
+            except (json.JSONDecodeError, ValueError):
+                continue
+            templates.append(
+                {
+                    "template": template.model_dump(mode="json"),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            )
+        return templates
+
+    def get_profile_template(
+        self,
+        template_id: str,
+        access_token: str | None,
+    ) -> dict[str, Any] | None:
+        if not access_token:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT template_json, created_at, updated_at
+                FROM profile_templates
+                WHERE access_token_hash = ? AND template_id = ?
+                """,
+                (_token_hash(access_token), template_id),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            template = ProfileTemplate.model_validate(json.loads(row["template_json"]))
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return {
+            "template": template.model_dump(mode="json"),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def upsert_profile_template(
+        self,
+        access_token: str | None,
+        template: ProfileTemplate,
+    ) -> None:
+        if not access_token:
+            raise PersistenceError("profile builder access token required")
+        now = _utc_now()
+        payload = template.model_dump(mode="json")
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO profile_templates (
+                        access_token_hash, template_id, name, template_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(access_token_hash, template_id) DO UPDATE SET
+                        name = excluded.name,
+                        template_json = excluded.template_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        _token_hash(access_token),
+                        template.id,
+                        template.name,
+                        json.dumps(payload),
+                        now,
+                        now,
+                    ),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("profile template persistence failed") from exc
+
+    def delete_profile_template(
+        self,
+        template_id: str,
+        access_token: str | None,
+    ) -> bool:
+        if not access_token:
+            return False
+        try:
+            with self._connect() as conn:
+                deleted = conn.execute(
+                    """
+                    DELETE FROM profile_templates
+                    WHERE access_token_hash = ? AND template_id = ?
+                    """,
+                    (_token_hash(access_token), template_id),
+                ).rowcount
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("profile template delete failed") from exc
+        return deleted == 1
 
     def get_retention_days(self) -> int:
         with self._connect() as conn:
@@ -666,6 +964,10 @@ class PersistenceStore:
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation", "audit_log"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
+            deleted["candidate_profiles"] = conn.execute(
+                "DELETE FROM candidate_profiles WHERE updated_at < ?",
+                (cutoff_iso,),
+            ).rowcount
             deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
             if expired_ids and self._purge_listener is not None:
@@ -689,6 +991,18 @@ def _candidate_name(payload: dict[str, Any]) -> str | None:
             if value:
                 return value
     return None
+
+
+def _profile_candidate_name(profile: dict[str, Any]) -> str | None:
+    personal = profile.get("personal")
+    if not isinstance(personal, dict):
+        return None
+    parts = [
+        value.strip()
+        for value in (personal.get("first_name"), personal.get("last_name"))
+        if isinstance(value, str) and value.strip()
+    ]
+    return " ".join(parts) or None
 
 
 def _ensure_column(

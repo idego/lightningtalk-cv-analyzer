@@ -9,7 +9,9 @@ IDEGO currently relies on an external CV-to-profile workflow whose editor, previ
 - Keep one canonical browser-side profile state; editor, preview, anonymization, and export derive from the same current snapshot.
 - Add deterministic, reversible anonymization controls for candidate PII and employer/institution visibility.
 - Export one IDEGO-style, meaningfully editable DOCX directly from the submitted current profile snapshot.
-- Keep the prototype session-only: no candidate-profile persistence, PDF conversion, or visual template studio in this slice.
+- Persist extracted/edited profile snapshots for a Recent profiles workflow without storing the original CV bytes.
+- Add persistent constrained templates, a template picker/manager, and a visual Template Creator screen.
+- Keep PDF conversion and unconstrained canvas editing outside this slice.
 
 ## Capabilities
 
@@ -19,8 +21,10 @@ IDEGO currently relies on an external CV-to-profile workflow whose editor, previ
 
 ## Impact
 
-- One consolidated backend `cv_validator.profile_builder` profile/rendering module, extensions to the existing `ai/*` modules for extraction, and two API endpoints.
-- New authenticated Next.js route and proxy handlers.
+- Extend the consolidated backend `cv_validator.profile_builder` profile/rendering module with the normalized template contract and template-aware DOCX rendering.
+- Extend the existing SQLite `PersistenceStore` with owner-scoped candidate-profile snapshots and templates; original CV bytes are not persisted.
+- Extend the existing Profile Builder API/proxy surface with recent-profile and template CRUD.
+- Extend the authenticated Profile Builder route with Recent profiles, template selection/management, autosave, and a dedicated Template Creator screen.
 - Sidebar gains Profile Builder.
 - No location score, band, Analyze behavior, persistence schema, or research behavior changes.
 - No new runtime dependency is required for DOCX generation because `python-docx` is already installed.

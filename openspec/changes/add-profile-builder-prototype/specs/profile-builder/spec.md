@@ -42,3 +42,41 @@ Profile Builder SHALL be available as `/profile-builder` inside the existing aut
 #### Scenario: Authenticated recruiter opens the app
 - **WHEN** navigation is rendered
 - **THEN** Analyze, Profile Builder, and Settings are available as separate destinations
+
+
+### Requirement: Recent candidate profiles
+The system SHALL persist authenticated owner-scoped Profile Builder snapshots containing the current canonical profile, anonymization policy, selected template snapshot, source filename, and timestamps. It MUST NOT persist the original uploaded CV bytes for this workflow.
+
+#### Scenario: Profile extraction succeeds
+- **WHEN** an authenticated recruiter extracts a supported CV
+- **THEN** the web workflow creates a saved Profile Builder record and shows it in Recent profiles
+
+#### Scenario: Recruiter edits a saved profile
+- **WHEN** canonical profile data, anonymization, or the selected template changes
+- **THEN** the browser updates immediately and persists the exact current snapshot after a debounce without blocking editing
+
+#### Scenario: Recruiter opens a recent profile
+- **WHEN** a saved Profile Builder record is opened
+- **THEN** the editor restores its canonical profile, anonymization, selected template snapshot, and filename
+
+### Requirement: Template management
+The upload workflow SHALL expose the current template and a template manager that can select an existing template, create a new template, or navigate to editing one. Templates SHALL be owner-scoped except for the built-in IDEGO Default fallback.
+
+#### Scenario: Recruiter changes the current template
+- **WHEN** another template is selected in the manager
+- **THEN** the next profile uses that template and an open profile immediately derives preview/export from the new template snapshot
+
+#### Scenario: Recruiter creates or edits a template
+- **WHEN** Create template or Edit is activated
+- **THEN** the app opens the Template Creator screen for a new or existing normalized template
+
+### Requirement: Constrained visual Template Creator
+The Template Creator SHALL let HR visually assemble a template from supported domain blocks, reorder/remove/add blocks, rename section headings, and edit supported brand, typography, header, and simple list-layout settings. It MUST NOT require JSON/Jinja knowledge.
+
+#### Scenario: Template structure changes
+- **WHEN** a recruiter reorders or hides a domain block
+- **THEN** the sample preview updates immediately and a saved template preserves that order/visibility
+
+#### Scenario: Custom template is exported
+- **WHEN** a profile using a custom template is exported
+- **THEN** DOCX section order, visible sections, headings, branding, and supported typography derive from the exact submitted template snapshot

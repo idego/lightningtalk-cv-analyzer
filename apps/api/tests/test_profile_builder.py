@@ -11,6 +11,10 @@ from cv_validator.profile_builder import (
     CandidateProfile,
     ExperienceEntry,
     PersonalInformation,
+    ProfileTemplate,
+    ProfileTemplateBranding,
+    ProfileTemplateSection,
+    default_profile_template,
     apply_profile_anonymization,
 )
 
@@ -301,3 +305,276 @@ def test_docx_export_uses_exact_current_snapshot_and_anonymization(
     assert "jane@example.com" not in text
     assert "Website: https://example.test" in text
     assert "https://cert.example.test" in text
+
+
+PROFILE_TOKEN = "profile-owner-a"
+OTHER_PROFILE_TOKEN = "profile-owner-b"
+
+
+def _profile_snapshot(profile: dict | None = None, template: dict | None = None) -> dict:
+    return {
+        "source_filename": "candidate.docx",
+        "profile": profile or {
+            "schema_version": "candidate-profile-v1",
+            **_extracted_payload(),
+            "experience": [
+                {"id": "experience-001", **_extracted_payload()["experience"][0]}
+            ],
+            "education": [
+                {"id": "education-001", **_extracted_payload()["education"][0]}
+            ],
+            "languages": [
+                {"id": "language-001", **_extracted_payload()["languages"][0]}
+            ],
+        },
+        "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+        "template": template or default_profile_template().model_dump(mode="json"),
+    }
+
+
+def test_profile_builder_recent_profiles_are_owner_scoped_and_reopen_exact_snapshot(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    headers = {"X-Profile-Builder-Access-Token": PROFILE_TOKEN}
+    snapshot = _profile_snapshot()
+
+    created = client.post("/profile-builder/profiles", headers=headers, json=snapshot)
+    assert created.status_code == 201
+    profile_id = created.json()["profile_id"]
+
+    listed = client.get("/profile-builder/profiles", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["profiles"] == [
+        {
+            "profile_id": profile_id,
+            "source_filename": "candidate.docx",
+            "candidate_name": "Jane Example",
+            "template_id": "idego-default",
+            "template_name": "IDEGO Default",
+            "created_at": listed.json()["profiles"][0]["created_at"],
+            "updated_at": listed.json()["profiles"][0]["updated_at"],
+        }
+    ]
+    assert client.get(
+        f"/profile-builder/profiles/{profile_id}",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+    ).status_code == 404
+
+    snapshot["profile"]["summary"] = "Autosaved exact summary"
+    snapshot["anonymization"]["hide_email"] = True
+    updated_template = default_profile_template().model_copy(deep=True)
+    updated_template.name = "Selected Snapshot"
+    snapshot["template"] = updated_template.model_dump(mode="json")
+    updated = client.put(
+        f"/profile-builder/profiles/{profile_id}",
+        headers=headers,
+        json=snapshot,
+    )
+    assert updated.status_code == 200
+
+    reopened = client.get(
+        f"/profile-builder/profiles/{profile_id}", headers=headers
+    )
+    assert reopened.status_code == 200
+    body = reopened.json()
+    assert body["profile"]["summary"] == "Autosaved exact summary"
+    assert body["anonymization"]["hide_email"] is True
+    assert body["template"]["name"] == "Selected Snapshot"
+    assert "source_file" not in body
+    assert "file_bytes" not in body
+
+    deleted = client.delete(
+        f"/profile-builder/profiles/{profile_id}", headers=headers
+    )
+    assert deleted.status_code == 200
+    assert client.get("/profile-builder/profiles", headers=headers).json()["profiles"] == []
+
+
+def test_profile_builder_templates_have_builtin_fallback_and_owner_scoped_overrides(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    headers = {"X-Profile-Builder-Access-Token": PROFILE_TOKEN}
+
+    initial = client.get("/profile-builder/templates", headers=headers)
+    assert initial.status_code == 200
+    templates = initial.json()["templates"]
+    assert len(templates) == 1
+    assert templates[0]["template"]["id"] == "idego-default"
+    assert templates[0]["built_in"] is True
+    assert templates[0]["customized"] is False
+
+    custom = default_profile_template().model_copy(deep=True)
+    custom.id = "client-compact"
+    custom.name = "Client Compact"
+    custom.description = "Compact client-facing profile"
+    custom.branding = ProfileTemplateBranding(
+        brand_name="CLIENT",
+        accent_hex="#123456",
+        show_brand=True,
+    )
+    saved = client.put(
+        "/profile-builder/templates/client-compact",
+        headers=headers,
+        json=custom.model_dump(mode="json"),
+    )
+    assert saved.status_code == 200
+
+    owned = client.get("/profile-builder/templates", headers=headers).json()["templates"]
+    assert {item["template"]["id"] for item in owned} == {
+        "idego-default",
+        "client-compact",
+    }
+    other = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+    ).json()["templates"]
+    assert [item["template"]["id"] for item in other] == ["idego-default"]
+
+    default_override = default_profile_template().model_copy(deep=True)
+    default_override.name = "My IDEGO Default"
+    assert client.put(
+        "/profile-builder/templates/idego-default",
+        headers=headers,
+        json=default_override.model_dump(mode="json"),
+    ).status_code == 200
+    overridden = client.get(
+        "/profile-builder/templates/idego-default", headers=headers
+    ).json()
+    assert overridden["template"]["name"] == "My IDEGO Default"
+    assert overridden["customized"] is True
+
+    reset = client.delete(
+        "/profile-builder/templates/idego-default", headers=headers
+    )
+    assert reset.status_code == 200
+    fallback = client.get(
+        "/profile-builder/templates/idego-default", headers=headers
+    ).json()
+    assert fallback["template"]["name"] == "IDEGO Default"
+    assert fallback["customized"] is False
+
+
+def test_custom_template_snapshot_controls_docx_sections_order_titles_and_branding(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    profile = _profile_snapshot()["profile"]
+    template = ProfileTemplate(
+        id="custom-export",
+        name="Custom Export",
+        branding=ProfileTemplateBranding(
+            brand_name="CLIENT BRAND",
+            accent_hex="#9B2C2C",
+            show_brand=True,
+        ),
+        sections=[
+            ProfileTemplateSection(
+                id="experience",
+                kind="experience",
+                title="Selected Work",
+            ),
+            ProfileTemplateSection(
+                id="summary",
+                kind="summary",
+                title="About",
+            ),
+        ],
+    )
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": profile,
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": template.id,
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 200
+    text = _docx_text(response.content)
+    assert "CLIENT BRAND" in text
+    assert "Selected Work" in text
+    assert "About" in text
+    assert text.index("Selected Work") < text.index("About")
+    assert "Skills" not in text
+    assert "\nTechnologies\n" not in f"\n{text}\n"
+
+
+def test_docx_export_rejects_mismatched_template_snapshot_id(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    template = default_profile_template().model_copy(deep=True)
+    template.id = "actual-template"
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": _profile_snapshot()["profile"],
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": "different-template",
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_additional_section_block_heading_affects_docx_output(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    profile = _profile_snapshot()["profile"]
+    profile["additional_sections"] = [
+        {
+            "id": "additional-001",
+            "title": "Community",
+            "items": ["Mentors engineers"],
+        }
+    ]
+    template = ProfileTemplate(
+        id="additional-export",
+        name="Additional Export",
+        sections=[
+            ProfileTemplateSection(
+                id="additional",
+                kind="additional_sections",
+                title="Beyond Work",
+                layout="bullets",
+            )
+        ],
+    )
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": profile,
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": template.id,
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 200
+    text = _docx_text(response.content)
+    assert "Beyond Work" in text
+    assert "Community" in text
+    assert "Mentors engineers" in text
+
+
+def test_docx_export_rejects_custom_template_id_without_snapshot(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": _profile_snapshot()["profile"],
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": "missing-custom-snapshot",
+        },
+    )
+    assert response.status_code == 422
