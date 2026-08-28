@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from collections.abc import Iterable
 
 from cv_validator.domain import (
@@ -215,10 +216,24 @@ def extract_candidates(document: RedactedDocument, *, exclusion_index=None) -> t
     )
     if exclusion_index is None:
         return result
-    return tuple(
-        candidate for candidate in result
-        if all(not exclusion_index.intersects(e.page_id, e.start_offset, e.end_offset) for e in candidate.provenance.evidence)
-    )
+    admitted = []
+    for candidate in result:
+        evidence = tuple(e for e in candidate.provenance.evidence if not exclusion_index.intersects(e.page_id, e.start_offset, e.end_offset))
+        if not evidence:
+            continue
+        relation_evidence = tuple(e for e in candidate.relation_evidence if not exclusion_index.intersects(e.page_id, e.start_offset, e.end_offset))
+        value_evidence = tuple(e for e in candidate.value_evidence if not exclusion_index.intersects(e.page_id, e.start_offset, e.end_offset))
+        if candidate.relation_evidence and len(relation_evidence) != len(candidate.relation_evidence):
+            # Ownership labels are atomic. A visible value cannot inherit a
+            # person/employer/client relation from quarantined label evidence.
+            continue
+        admitted.append(replace(
+            candidate,
+            provenance=replace(candidate.provenance, evidence=evidence),
+            relation_evidence=relation_evidence,
+            value_evidence=value_evidence,
+        ))
+    return tuple(admitted)
 
 
 def _from_matches(

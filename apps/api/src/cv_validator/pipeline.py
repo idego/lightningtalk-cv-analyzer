@@ -38,7 +38,6 @@ from cv_validator.ingestion.router import ingest_cv
 from cv_validator.ingestion.text import validate_text_sufficiency
 from cv_validator.scoring.engine import score_deterministic
 from cv_validator.location import LocationResolver
-from cv_validator.structural import audit_document
 
 
 @dataclass(frozen=True)

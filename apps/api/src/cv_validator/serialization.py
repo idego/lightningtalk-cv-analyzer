@@ -264,13 +264,23 @@ def deserialize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
             UnderstandingContractError, sanitize_understanding,
         )
         try:
+            timeline_ids = _timeline_entry_ids(result.get("structural_audits"))
             result["document_understanding"] = sanitize_understanding(
-                result["document_understanding"]
+                result["document_understanding"], timeline_entry_ids=timeline_ids
             )
         except UnderstandingContractError:
             result["document_understanding"] = None
     _validate_json(result)
     return result
+
+
+def _timeline_entry_ids(structural: Any) -> set[str]:
+    if not isinstance(structural, dict):
+        return set()
+    timeline = structural.get("timeline")
+    if not isinstance(timeline, dict) or not isinstance(timeline.get("entries"), list):
+        return set()
+    return {item["id"] for item in timeline["entries"] if isinstance(item, dict) and isinstance(item.get("id"), str)}
 
 
 def _deterministic_importance(finding: dict[str, Any]) -> str:

@@ -24,7 +24,8 @@ def extract_docx(
 ) -> RawDocument:
     try:
         document = Document(io.BytesIO(content))
-        page_texts = _extract_logical_pages(document.iter_inner_content())
+        body_blocks = tuple(document.iter_inner_content())
+        page_texts = _extract_logical_pages(body_blocks)
     except Exception as exc:  # noqa: BLE001
         raise IngestionError(f"Failed to read DOCX: {exc}") from exc
 
@@ -37,8 +38,8 @@ def extract_docx(
         for page_number, text in enumerate(page_texts, start=1)
     )
     try:
-        presentation_spans, presentation_truncated = _presentation_spans(document, pages)
-        source_blocks, source_blocks_partial = _source_blocks(document, pages)
+        presentation_spans, presentation_truncated = _presentation_spans(document, pages, body_blocks)
+        source_blocks, source_blocks_partial = _source_blocks(document, pages, body_blocks)
         presentation_omitted = ()
     except Exception:  # Presentation inspection must not break text ingestion.
         presentation_spans, presentation_truncated = (), False
@@ -51,7 +52,7 @@ def extract_docx(
         file_details=extract_docx_file_details(document),
         document_links=merge_document_links(
             pages,
-            extract_docx_hyperlinks(document, pages),
+            extract_docx_hyperlinks(document, pages, body_blocks=body_blocks),
             source_format="docx",
         ),
         presentation_spans=presentation_spans,
@@ -85,10 +86,10 @@ def _append_block(
         _append_paragraph(block, page_fragments)
         return
 
-    seen_cells: set[int] = set()
+    seen_cells: set[object] = set()
     for row in block.rows:
         for cell in row.cells:
-            cell_key = id(cell._tc)
+            cell_key = cell._tc
             if cell_key in seen_cells:
                 continue
             seen_cells.add(cell_key)
@@ -137,13 +138,13 @@ def _remove_paragraph_terminator(text: str) -> str:
     return text[:-1] if text.endswith("\n") else text
 
 
-def _presentation_spans(document, pages):
+def _presentation_spans(document, pages, body_blocks):
     cfg = StructuralAuditConfig()
     spans = []
     page_index = 0
     offset = 0
     run_count = 0
-    for block_index, block in enumerate(document.iter_inner_content()):
+    for block_index, block in enumerate(body_blocks):
         paragraphs = [block] if isinstance(block, Paragraph) else [paragraph for row in block.rows for cell in row.cells for paragraph in cell.paragraphs]
         for paragraph_index, paragraph in enumerate(paragraphs):
             if _has_page_break_before(paragraph) and offset and page_index + 1 < len(pages):
@@ -179,7 +180,7 @@ def _presentation_spans(document, pages):
     return tuple(spans), False
 
 
-def _source_blocks(document, pages):
+def _source_blocks(document, pages, body_blocks):
     blocks: list[SourceBlock] = []
     page_index = 0
     offset = 0
@@ -211,15 +212,15 @@ def _source_blocks(document, pages):
             list_level=level, association="exact" if exact else "unmapped",
         ))
 
-    for block_index, block in enumerate(document.iter_inner_content()):
+    for block_index, block in enumerate(body_blocks):
         if isinstance(block, Paragraph):
             append_paragraph(block, paragraph_path=f"body/{block_index}/paragraph")
             continue
-        seen_cells: set[int] = set()
+        seen_cells: set[object] = set()
         for row_index, row in enumerate(block.rows):
             for cell_index, cell in enumerate(row.cells):
-                if id(cell._tc) in seen_cells: continue
-                seen_cells.add(id(cell._tc))
+                if cell._tc in seen_cells: continue
+                seen_cells.add(cell._tc)
                 for paragraph_index, paragraph in enumerate(cell.paragraphs):
                     append_paragraph(paragraph, kind="table_cell", table_id=f"table-{block_index:04d}", row_index=row_index, paragraph_path=f"body/{block_index}/row/{row_index}/cell/{cell_index}/paragraph/{paragraph_index}")
     return tuple(blocks), any(block.association != "exact" for block in blocks)

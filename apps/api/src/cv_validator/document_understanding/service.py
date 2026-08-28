@@ -1,189 +1,221 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import re
 from datetime import date
+from pathlib import Path
 
+from cv_validator.document_understanding.annotations import build_shared_annotations, project_structural_v1
 from cv_validator.document_understanding.contract import sanitize_understanding
 from cv_validator.document_understanding.domain import (
-    Confidence, DateRangeAnnotation, DocumentAnnotationIndex,
-    DocumentUnderstandingResult, ResearchSubject, SectionKind, SectionSpan,
-    Status, StructuredField, StructuredRecord, UnderstandingCoverage,
+    AmbiguousSpan, Confidence, DateRangeAnnotation, DocumentAnnotationIndex,
+    DocumentUnderstandingResult, EntrySpan, ResearchSubject, SectionKind, Status,
+    StructuredField, StructuredRecord, UnderstandingCoverage,
     UnderstandingEvidence, stable_source_id,
 )
 from cv_validator.document_understanding.normalization import normalize_text, subject_key
-from cv_validator.document_understanding.visibility import build_visibility_exclusion_index
+from cv_validator.document_understanding.skills import DEFAULT_INDEX, SkillIndexError, match_explicit_skills
 from cv_validator.extraction.deterministic import analyze_deterministically
-from cv_validator.ingestion import RedactedDocument, SourceLine
 from cv_validator.location import LocationResolver
-from cv_validator.document_understanding.structural_projection import annotate_structural_surfaces, project_structural_v1
 
 PARSER_VERSION = "document-understanding-parser-v1"
 RULESET_VERSION = "document-understanding-rules-v1"
-
-SECTION_ALIASES = {
-    SectionKind.CONTACT: {"contact", "contact details", "kontakt", "dane kontaktowe"},
-    SectionKind.SUMMARY: {"summary", "profile", "professional summary", "podsumowanie", "profil zawodowy"},
-    SectionKind.EMPLOYMENT: {"experience", "work experience", "employment", "professional experience", "doswiadczenie", "doswiadczenie zawodowe", "zatrudnienie"},
-    SectionKind.EDUCATION: {"education", "academic background", "wyksztalcenie", "edukacja"},
-    SectionKind.SKILLS: {"skills", "technical skills", "umiejetnosci", "kompetencje"},
-    SectionKind.CERTIFICATIONS: {"certifications", "certificates", "certyfikaty"},
-    SectionKind.PROJECTS: {"projects", "projekty"},
-    SectionKind.LANGUAGES: {"languages", "jezyki"},
-    SectionKind.PUBLICATIONS: {"publications", "publikacje"},
-    SectionKind.AWARDS: {"awards", "honors", "nagrody", "wyroznienia"},
-    SectionKind.VOLUNTEERING: {"volunteering", "volunteer experience", "wolontariat"},
-    SectionKind.REFERENCES: {"references", "referencje"},
+_RELATIONSHIPS = {"freelance", "freelancer", "self employed", "self employment", "self-employed", "self-employment", "samozatrudnienie", "samozatrudniony", "wolny strzelec"}
+_INSTITUTIONS = ("university", "college", "academy", "school", "institute", "faculty", "uniwersytet", "politechnika", "akademia", "szkola", "wydzial")
+_DEGREES = ("bachelor", "master", "phd", "doctorate", "licencjat", "magister", "inzynier", "mba", "bsc", "msc")
+_ROLES = ("engineer", "developer", "manager", "consultant", "analyst", "designer", "specialist", "architect", "director", "lead", "intern", "programista", "inzynier", "konsultant", "analityk", "specjalista", "kierownik")
+_ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag|sa|s\.a\.|sp\.\s*z\s*o\.o\.|labs?|studio|group)\b")
+_LABELS = {
+    "organization": re.compile(r"(?i)^(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>.+)$"),
+    "client": re.compile(r"(?i)^(?:client|klient)\s*:\s*(?P<value>.+)$"),
+    "role": re.compile(r"(?i)^(?:role|position|title|stanowisko)\s*:\s*(?P<value>.+)$"),
+    "program": re.compile(r"(?i)^(?:program|programme|course|field of study|kierunek)\s*:\s*(?P<value>.+)$"),
+    "location": re.compile(r"(?i)^(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>.+)$"),
+    "result": re.compile(r"(?i)^(?:result|grade|wynik|ocena)\s*:\s*(?P<value>.+)$"),
 }
-_RELATIONSHIPS = {"freelance", "freelancer", "self employed", "self-employed", "samozatrudnienie", "wolny strzelec"}
-_INSTITUTION_MARKERS = ("university", "college", "academy", "school", "institute", "universytet", "uniwersytet", "politechnika", "akademia", "szkola")
-_DEGREE_MARKERS = ("bachelor", "master", "phd", "engineer", "licencjat", "magister", "inzynier", "mba", "bsc", "msc")
-_ROLE_MARKERS = ("engineer", "developer", "manager", "consultant", "analyst", "designer", "specialist", "architect", "director", "lead", "intern", "programista", "inzynier", "konsultant", "analityk", "specjalista", "kierownik")
 
 
-def understand_document(
-    document: RedactedDocument,
-    deterministic_ruleset_version: str,
-    *,
-    snapshot_month: str | None = None,
-    location_resolver: LocationResolver | None = None,
-    small_locality_population_max: int = 10_000,
-) -> DocumentUnderstandingResult:
+def understand_document(document, deterministic_ruleset_version: str, *, snapshot_month: str | None = None, location_resolver: LocationResolver | None = None, small_locality_population_max: int = 10_000, skill_index_path: Path = DEFAULT_INDEX) -> DocumentUnderstandingResult:
     snapshot = snapshot_month or date.today().strftime("%Y-%m")
-    exclusion = build_visibility_exclusion_index(document)
-    sections = _sections(document, exclusion)
-    timeline, visibility = annotate_structural_surfaces(document, snapshot)
+    snapshot, exclusion, sections, timeline, visibility = build_shared_annotations(document, snapshot_month=snapshot)
     structural = project_structural_v1(document, snapshot, timeline, visibility)
-    date_ranges = _dates(structural)
-    records = _records(document, sections, date_ranges, exclusion)
-    subjects = _subjects(records)
-    deterministic = analyze_deterministically(
-        document, deterministic_ruleset_version,
-        location_resolver=location_resolver,
-        small_locality_population_max=small_locality_population_max,
-        exclusion_index=exclusion,
-    )
+    dates = _dates(structural)
+    entries, entry_issues = _entries(document, sections, dates)
+    records, field_issues = _records(document, sections, dates, entries, exclusion)
+    records = _deduplicate(records)
+    try:
+        skills = match_explicit_skills(document, sections, exclusion, index_path=skill_index_path)
+        skills_available = True
+    except SkillIndexError:
+        skills = ()
+        skills_available = False
+    deterministic = analyze_deterministically(document, deterministic_ruleset_version, location_resolver=location_resolver, small_locality_population_max=small_locality_population_max, exclusion_index=exclusion)
     omitted = []
     if document.source_blocks_partial: omitted.append("source_blocks_unavailable")
     if exclusion.partial_coverage: omitted.append("presentation_spans_unavailable")
+    if not skills_available: omitted.append("skills_unavailable")
     status = Status.PARTIAL if omitted else Status.COMPLETED
-    coverage = UnderstandingCoverage(
-        status=status, source_format=document.source_format,
-        audited_parts=("canonical_pages", "source_blocks", "presentation_spans", "section_annotations", "date_annotations", "entry_annotations"),
-        omitted_parts=tuple(omitted),
-    )
-    return DocumentUnderstandingResult(
-        document=document,
-        annotation_index=DocumentAnnotationIndex(exclusion.intervals, sections, date_ranges),
-        deterministic=deterministic, structural_audits=structural,
-        sections=sections, date_ranges=date_ranges, records=records,
-        skills=(), ambiguous_spans=(), timeline_record_links=_timeline_links(records, date_ranges, structural),
-        code_research_subjects=subjects, coverage=coverage, snapshot_month=snapshot,
-    )
+    audited = ["canonical_pages", "source_blocks", "presentation_spans", "section_annotations", "date_annotations", "entry_annotations"]
+    if skills_available: audited.append("skill_taxonomy")
+    coverage = UnderstandingCoverage(status, document.source_format, tuple(audited), tuple(omitted))
+    issues = tuple(sorted((*entry_issues, *field_issues), key=lambda item: (item.source_order, item.id)))
+    return DocumentUnderstandingResult(document, DocumentAnnotationIndex(exclusion.intervals, sections, dates), deterministic, structural, sections, dates, records, skills, issues, _timeline_links(records, dates), _subjects(records), coverage, snapshot)
 
 
 def understanding_to_payload(result: DocumentUnderstandingResult) -> dict:
-    def evidence(value): return {"page_id": value.page_id, "page_number": value.page_number, "line_id": value.line_id, "start_offset": value.start_offset, "end_offset": value.end_offset, "association": value.association, "excerpt": value.excerpt}
-    sections = [{"id": x.id, "kind": x.kind.value, "confidence": x.confidence.value, "heading": x.heading[:128], "start_line_id": x.start_line_id, "end_line_id": x.end_line_id, "evidence": [evidence(e) for e in x.evidence]} for x in result.sections]
-    dates = [{"id": x.id, "source_literal": x.source_literal[:128], "start_month": x.start_month, "end_month": x.end_month, "start_precision": x.start_precision, "end_precision": x.end_precision, "status": x.status, "snapshot_month": x.snapshot_month, "evidence": [evidence(e) for e in x.evidence]} for x in result.date_ranges]
-    records = [{"id": x.id, "kind": x.kind, "section_id": x.section_id, "confidence": x.confidence.value, "fields": [{"name": f.name, "status": f.status, "value": f.value, "authority": "code", "confidence": f.confidence.value, "evidence": [evidence(e) for e in f.evidence]} for f in x.fields], "date_range_ids": list(x.date_range_ids)} for x in result.records]
-    subjects = [{"id": x.id, "category": x.category, "subject": x.subject, "record_id": x.record_id, "field_name": x.field_name} for x in result.code_research_subjects]
-    names = ("sections", "date_ranges", "records", "skills", "ambiguous_spans", "timeline_record_links", "code_research_subjects")
-    payload = {
-        "contract_version": "document-understanding-v1", "status": result.coverage.status.value,
-        "parser_version": result.parser_version, "ruleset_version": result.ruleset_version,
-        "snapshot_month": result.snapshot_month,
-        "coverage": {"status": result.coverage.status.value, "source_format": result.coverage.source_format, "audited_parts": list(result.coverage.audited_parts), "omitted_parts": list(result.coverage.omitted_parts)},
-        "sections": sections, "date_ranges": dates, "records": records, "skills": [], "ambiguous_spans": [],
-        "timeline_record_links": [dict(x) for x in result.timeline_record_links], "code_research_subjects": subjects,
-        "truncation": {name: {"reported_count": len(locals_map), "additional_count": 0, "truncated": False} for name, locals_map in (("sections", sections), ("date_ranges", dates), ("records", records), ("skills", []), ("ambiguous_spans", []), ("timeline_record_links", result.timeline_record_links), ("code_research_subjects", subjects))},
-    }
-    timeline_ids = {entry.id for entry in result.structural_audits.timeline.entries}
-    return sanitize_understanding(payload, timeline_entry_ids=timeline_ids) or payload
-
-
-def _sections(document, exclusion):
-    headings=[]; lines=[line for page in document.pages for line in page.lines]
-    for index, line in enumerate(lines):
-        normalized=normalize_text(line.text.strip().rstrip(":"))
-        kind=next((kind for kind, aliases in SECTION_ALIASES.items() if normalized in aliases), None)
-        if kind is None or exclusion.intersects(line.page_id,line.start_offset,line.end_offset): continue
-        headings.append((index,line,kind))
-    result=[]
-    for position,(index,line,kind) in enumerate(headings):
-        end_index=(headings[position+1][0]-1) if position+1<len(headings) else len(lines)-1
-        end_line=lines[max(index,end_index)]
-        ev=_line_evidence(document,line)
-        result.append(SectionSpan(stable_source_id(f"section-{kind.value}",line.page_id,line.start_offset,line.end_offset),kind,Confidence.HIGH,line.text.strip(),line.line_id,end_line.line_id,(ev,),index))
-    return tuple(result)
+    def ev(e): return {"page_id": e.page_id, "page_number": e.page_number, "line_id": e.line_id, "start_offset": e.start_offset, "end_offset": e.end_offset, "association": e.association, "excerpt": e.excerpt}
+    sections=[{"id":x.id,"kind":x.kind.value,"confidence":x.confidence.value,"heading":x.heading[:128],"start_line_id":x.start_line_id,"end_line_id":x.end_line_id,"evidence":[ev(e) for e in x.evidence]} for x in result.sections]
+    dates=[{"id":x.id,"source_literal":x.source_literal[:128],"start_month":x.start_month,"end_month":x.end_month,"start_precision":x.start_precision,"end_precision":x.end_precision,"status":x.status,"snapshot_month":x.snapshot_month,"evidence":[ev(e) for e in x.evidence]} for x in result.date_ranges]
+    records=[{"id":x.id,"kind":x.kind,"section_id":x.section_id,"confidence":x.confidence.value,"fields":[{"name":f.name,"status":f.status,"value":f.value,"authority":"code","confidence":f.confidence.value,"evidence":[ev(e) for e in f.evidence]} for f in x.fields],"date_range_ids":list(x.date_range_ids)} for x in result.records]
+    ambiguous=[{"id":x.id,"category":x.category,"reason_code":x.reason_code,"evidence":[ev(e) for e in x.evidence]} for x in result.ambiguous_spans]
+    subjects=[{"id":x.id,"category":x.category,"subject":x.subject,"record_id":x.record_id,"field_name":x.field_name} for x in result.code_research_subjects]
+    skills=[{"id":x.id,"canonical_id":x.canonical_id,"display_label":x.display_label,"taxonomy":"esco","taxonomy_version":x.taxonomy_version,"confidence":x.confidence.value,"evidence":[ev(e) for e in x.evidence]} for x in result.skills]
+    collections={"sections":sections,"date_ranges":dates,"records":records,"skills":skills,"ambiguous_spans":ambiguous,"timeline_record_links":[dict(x) for x in result.timeline_record_links],"code_research_subjects":subjects}
+    payload={"contract_version":"document-understanding-v1","status":result.coverage.status.value,"parser_version":result.parser_version,"ruleset_version":result.ruleset_version,"snapshot_month":result.snapshot_month,"coverage":{"status":result.coverage.status.value,"source_format":result.coverage.source_format,"audited_parts":list(result.coverage.audited_parts),"omitted_parts":list(result.coverage.omitted_parts)},**collections,"truncation":{name:{"reported_count":len(values),"additional_count":0,"truncated":False} for name,values in collections.items()}}
+    sanitized=sanitize_understanding(payload,timeline_entry_ids={entry.id for entry in result.structural_audits.timeline.entries})
+    if sanitized is None: raise ValueError("document understanding unexpectedly null")
+    return sanitized
 
 
 def _dates(structural):
     result=[]
     for order,entry in enumerate(structural.timeline.entries):
-        loc=entry.source_location
-        ev=UnderstandingEvidence(loc.page_id,loc.page_number,loc.line_id,loc.start_offset,loc.end_offset,loc.association.value,entry.evidence[0].excerpt if entry.evidence else None)
-        result.append(DateRangeAnnotation(stable_source_id("date-range",loc.page_id,loc.start_offset or 0,loc.end_offset or 0),entry.evidence[0].excerpt if entry.evidence else "",entry.start_month,entry.end_month,entry.start_precision,entry.end_precision,entry.status,structural.snapshot_month or "",(ev,),order))
+        loc=entry.source_location; literal=entry.evidence[0].excerpt if entry.evidence else ""
+        evidence=UnderstandingEvidence(loc.page_id,loc.page_number,loc.line_id,loc.start_offset,loc.end_offset,loc.association.value,literal)
+        result.append(DateRangeAnnotation(stable_source_id("date-range",loc.page_id,loc.start_offset or 0,loc.end_offset or 0),literal,entry.start_month,entry.end_month,entry.start_precision,entry.end_precision,entry.status,structural.snapshot_month or "",(evidence,),order,entry.id))
     return tuple(result)
 
 
-def _records(document, sections, dates, exclusion):
-    lines={line.line_id: line for page in document.pages for line in page.lines}; ordered=list(lines.values()); positions={line.line_id:i for i,line in enumerate(ordered)}; records=[]
+def _entries(document, sections, dates):
+    line_order={line.line_id:i for i,line in enumerate(document.source_lines)}; dates_by_line={}
+    for item in dates:
+        if item.evidence and item.evidence[0].line_id: dates_by_line.setdefault(item.evidence[0].line_id,[]).append(item)
+    result=[]; issues=[]
     for section in sections:
         if section.kind not in {SectionKind.EDUCATION,SectionKind.EMPLOYMENT}: continue
-        start=positions[section.start_line_id]+1; end=positions[section.end_line_id]+1; content=[line for line in ordered[start:end] if line.text.strip()]
-        groups=[]; current=[]
-        for line in content:
-            line_dates=[d for d in dates if d.evidence and d.evidence[0].line_id==line.line_id]
-            if line_dates and current: groups.append(current); current=[]
-            current.append(line)
-        if current: groups.append(current)
-        for group in groups:
-            if any(exclusion.intersects(line.page_id,line.start_offset,line.end_offset) for line in group): continue
-            record=_record_from_group(document,section,group,dates,len(records))
-            if record is not None: records.append(record)
-    return tuple(records)
+        start,end=line_order[section.start_line_id],line_order[section.end_line_id]
+        blocks=[b for b in document.source_blocks if b.line_ids and any(start < line_order.get(line_id,-1) <= end for line_id in b.line_ids)]
+        current=[]; anchors=[]; table=None; row=None
+        for block in blocks:
+            row_boundary=current and block.table_id is not None and table==block.table_id and row is not None and block.row_index!=row
+            if current and (anchors or row_boundary):
+                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]
+            current.append(block); table,row=block.table_id,block.row_index
+            found=[d for line_id in block.line_ids for d in dates_by_line.get(line_id,())]
+            anchors.extend(d for d in found if d.id not in {x.id for x in anchors})
+            if len(anchors)>1: issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
+        if current: result.append(_entry(section.id,current,anchors,len(result)))
+    return tuple(result),tuple(issues)
 
 
-def _record_from_group(document, section, group, dates, order):
-    values=[line.text.strip() for line in group]; normalized=[normalize_text(v) for v in values]; date_ids=tuple(d.id for d in dates if d.evidence and d.evidence[0].line_id in {line.line_id for line in group})[:4]
-    if section.kind is SectionKind.EDUCATION:
-        identity=next((i for i,v in enumerate(normalized) if any(m in v for m in _INSTITUTION_MARKERS)),None); secondary=next((i for i,v in enumerate(normalized) if any(m in v for m in _DEGREE_MARKERS)),None)
-        if identity is None or (secondary is None and not date_ids): return None
-        pairs=[("institution",identity),("degree",secondary),("study_dates",next((i for i,line in enumerate(group) if any(d.evidence[0].line_id==line.line_id for d in dates if d.evidence)),None))]; kind="education"
-    else:
-        relation=next((i for i,v in enumerate(normalized) if v in _RELATIONSHIPS),None); role=next((i for i,v in enumerate(normalized) if any(m in v for m in _ROLE_MARKERS)),None); identity=next((i for i in range(len(values)) if i!=role and i!=relation and not any(d.evidence[0].line_id==group[i].line_id for d in dates if d.evidence)),None)
-        if identity is None and relation is None: return None
-        if role is None and not date_ids: return None
-        pairs=[("organization",identity),("role",role),("relationship_type",relation),("employment_dates",next((i for i,line in enumerate(group) if any(d.evidence[0].line_id==line.line_id for d in dates if d.evidence)),None))]; kind="employment"
-    fields=[]
-    for name,index in pairs:
-        if index is None: fields.append(StructuredField(name,"unknown",None,Confidence.LOW,()))
-        else: fields.append(StructuredField(name,"supported",values[index][:256],Confidence.HIGH,(_line_evidence(document,group[index]),)))
-    first=group[0]; last=group[-1]
-    return StructuredRecord(stable_source_id(f"record-{kind}",first.page_id,first.start_offset,last.end_offset),kind,section.id,Confidence.HIGH,tuple(fields),date_ids,order)
+def _entry(section_id,blocks,dates,order):
+    first,last=blocks[0],blocks[-1]
+    return EntrySpan(stable_source_id("entry",first.page_id,first.start_offset or 0,last.end_offset or first.end_offset or 0),section_id,tuple(b.id for b in blocks),tuple(d.id for d in dates[:4]),order)
+
+
+def _records(document,sections,dates,entries,exclusion):
+    section_by_id={x.id:x for x in sections}; block_by_id={x.id:x for x in document.source_blocks}; date_by_id={x.id:x for x in dates}; records=[]; issues=[]
+    for entry in entries:
+        lines=_lines(document,[block_by_id[x] for x in entry.block_ids]); entry_dates=[date_by_id[x] for x in entry.date_range_ids]
+        if not lines: continue
+        if section_by_id[entry.section_id].kind is SectionKind.EDUCATION: record,new_issues=_education(document,section_by_id[entry.section_id],entry,lines,entry_dates,exclusion)
+        else: record,new_issues=_employment(document,section_by_id[entry.section_id],entry,lines,entry_dates,exclusion)
+        issues.extend(new_issues)
+        if record: records.append(record)
+    return tuple(records),tuple(issues)
+
+
+def _education(document,section,entry,lines,dates,exclusion):
+    identity=_unique(lines,lambda s:any(m in normalize_text(s) for m in _INSTITUTIONS)); degree=_unique(lines,lambda s:any(m in normalize_text(s) for m in _DEGREES)); program=_label(lines,"program")
+    if identity is None: return None,_issue(document,lines,"unsupported_education_identity",entry.source_order)
+    institution=_field(document,"institution",identity,exclusion)
+    if institution.status!="supported" or not (degree or program or dates): return None,_issue(document,lines,"insufficient_education_support",entry.source_order)
+    fields=(institution,_field(document,"program",program,exclusion),_field(document,"degree",degree,exclusion),_date_field("study_dates",dates),_field(document,"result",_label(lines,"result"),exclusion),_field(document,"education_location",_label(lines,"location"),exclusion))
+    return _record("education",section,entry,lines,fields,dates),()
+
+
+def _employment(document,section,entry,lines,dates,exclusion):
+    relationship=_unique(lines,lambda s:normalize_text(s) in _RELATIONSHIPS); role=_label(lines,"role") or _unique(lines,lambda s:any(m in normalize_text(s) for m in _ROLES)); client=_label(lines,"client"); organization=_label(lines,"organization")
+    remaining=[line for line in lines if line not in {relationship,role,client} and not _has_date(line,dates) and not _LABELS["location"].match(line.text.strip())]
+    if organization is None:
+        names=[line for line in remaining if _looks_org(line.text)]; organization=names[0] if len(names)==1 else None
+    issues=_issue(document,(client,),"employer_client_ambiguity",entry.source_order) if client and organization is None else ()
+    org_field=_field(document,"organization",organization,exclusion); rel_field=_field(document,"relationship_type",relationship,exclusion); role_field=_field(document,"role",role,exclusion)
+    if org_field.status!="supported" and rel_field.status!="supported": return None,(*issues,*_issue(document,lines,"unsupported_employment_identity",entry.source_order))
+    if role_field.status!="supported" and not dates: return None,(*issues,*_issue(document,lines,"insufficient_employment_support",entry.source_order))
+    fields=(org_field,role_field,rel_field,_date_field("employment_dates",dates),_field(document,"employment_location",_label(lines,"location"),exclusion))
+    return _record("employment",section,entry,lines,fields,dates),issues
+
+
+def _record(kind,section,entry,lines,fields,dates):
+    return StructuredRecord(stable_source_id(f"record-{kind}",lines[0].page_id,lines[0].start_offset,lines[-1].end_offset),kind,section.id,Confidence.HIGH,tuple(fields),tuple(d.id for d in dates),entry.source_order)
+
+
+def _lines(document,blocks):
+    lookup={x.line_id:x for x in document.source_lines}; seen=set(); result=[]
+    for block in blocks:
+        for line_id in block.line_ids:
+            if line_id not in seen and line_id in lookup and lookup[line_id].text.strip(): seen.add(line_id); result.append(lookup[line_id])
+    return result
+
+
+def _unique(lines,predicate):
+    values=[line for line in lines if predicate(line.text.strip())]; return values[0] if len(values)==1 else None
+def _label(lines,name):
+    values=[line for line in lines if _LABELS[name].match(line.text.strip())]; return values[0] if len(values)==1 else None
+def _has_date(line,dates): return any(d.evidence and d.evidence[0].line_id==line.line_id for d in dates)
+def _looks_org(value):
+    text=value.strip(); words=text.split()
+    return normalize_text(text) not in _RELATIONSHIPS and not _LABELS["client"].match(text) and (bool(_ORG_SUFFIX.search(text)) or (len(words)>=2 and all(not w[:1].isalpha() or w[:1].isupper() for w in words)))
+
+
+def _field(document,name,line,exclusion):
+    if line is None: return StructuredField(name,"unknown",None,Confidence.LOW,())
+    value,evidence=_value_evidence(document,line)
+    if exclusion.intersects(evidence.page_id,evidence.start_offset or 0,evidence.end_offset or 0): return StructuredField(name,"unknown",None,Confidence.LOW,())
+    return StructuredField(name,"supported",value[:256],Confidence.HIGH,(evidence,))
+
+
+def _date_field(name,dates):
+    if not dates:return StructuredField(name,"unknown",None,Confidence.LOW,())
+    return StructuredField(name,"supported",dates[0].source_literal[:256],Confidence.HIGH,dates[0].evidence[:4])
+
+
+def _value_evidence(document,line):
+    raw=line.text; value=raw.strip(); match=re.match(r"^[^:]{1,40}:\s*(?P<value>.+)$",value)
+    if match:value=match.group("value").strip()
+    relative=raw.find(value); page=next(p for p in document.pages if p.page_id==line.page_id)
+    return value,UnderstandingEvidence(line.page_id,page.page_number,line.line_id,line.start_offset+relative,line.start_offset+relative+len(value),"exact",value[:256])
+
+
+def _issue(document,lines,reason,order):
+    if not lines:return ()
+    evidence=tuple(_value_evidence(document,line)[1] for line in lines[:4]); return _ambiguous_from_evidence(evidence,reason,order)
+def _ambiguous_from_evidence(evidence,reason,order):
+    if not evidence:return ()
+    first,last=evidence[0],evidence[-1]
+    return (AmbiguousSpan(stable_source_id("ambiguous-entry",first.page_id,first.start_offset or 0,last.end_offset or 0),"entry",reason,tuple(evidence[:4]),order),)
+
+
+def _deduplicate(records):
+    seen=set(); result=[]
+    for record in sorted(records,key=lambda x:(x.source_order,x.id)):
+        if record.id not in seen:seen.add(record.id);result.append(record)
+    return tuple(result)
 
 
 def _subjects(records):
-    result=[]; seen=set()
+    seen=set();result=[]
     for record in records:
-        name="institution" if record.kind=="education" else "organization"; category="education" if record.kind=="education" else "company"
-        field=next((f for f in record.fields if f.name==name and f.status=="supported" and f.value),None)
-        if field is None or normalize_text(field.value) in _RELATIONSHIPS: continue
+        name="institution" if record.kind=="education" else "organization";category="education" if record.kind=="education" else "company";field=next((f for f in record.fields if f.name==name and f.status=="supported" and f.value),None)
+        if field is None or normalize_text(field.value) in _RELATIONSHIPS:continue
         key=subject_key(category,field.value)
-        if key in seen: continue
-        seen.add(key); result.append(ResearchSubject(stable_source_id(f"research-{category}",field.evidence[0].page_id,field.evidence[0].start_offset or 0,field.evidence[0].end_offset or 0),category,field.value,record.id,name,record.source_order))
+        if key in seen:continue
+        seen.add(key);e=field.evidence[0];result.append(ResearchSubject(stable_source_id(f"research-{category}",e.page_id,e.start_offset or 0,e.end_offset or 0),category,field.value,record.id,name,record.source_order))
     return tuple(result[:50])
 
 
-def _timeline_links(records, dates, structural):
-    by_literal={d.source_literal: d.id for d in dates}; result=[]
-    for entry in structural.timeline.entries:
-        literal=entry.evidence[0].excerpt if entry.evidence else ""; date_id=by_literal.get(literal)
-        candidates=[r for r in records if date_id in r.date_range_ids]
-        if len(candidates)==1: result.append({"timeline_entry_id":entry.id,"record_id":candidates[0].id})
-    return tuple(result)
-
-
-def _line_evidence(document, line: SourceLine):
-    page=next(page for page in document.pages if page.page_id==line.page_id)
-    return UnderstandingEvidence(line.page_id,page.page_number,line.line_id,line.start_offset,line.end_offset,"exact",line.text[:256])
+def _timeline_links(records,dates):
+    by_date={}
+    for record in records:
+        for date_id in record.date_range_ids:by_date.setdefault(date_id,[]).append(record)
+    return tuple({"timeline_entry_id":d.timeline_entry_id,"record_id":by_date[d.id][0].id} for d in dates if len(by_date.get(d.id,()))==1)

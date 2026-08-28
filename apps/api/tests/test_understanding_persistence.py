@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from copy import deepcopy
+import json
+from datetime import datetime, timedelta, timezone
+
+from cv_validator.ai.config import AISettings
+from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.pipeline import analyze_cv_text_result
+from cv_validator.serialization import deserialize_analysis_payload, serialize_analysis_payload
+
+
+TEXT = "Experience\nExample Labs\nSoftware Engineer\n01/2020 - 02/2022\nEducation\nExample University\nBachelor of Science\n09/2015 - 06/2019"
+
+
+def _saved(tmp_path):
+    settings = AISettings(enabled=False); result = analyze_cv_text_result(TEXT, ai_settings=settings)
+    payload = serialize_analysis_payload(result, settings, analysis_id="understanding-1")
+    store = PersistenceStore(PersistenceConfig(tmp_path / "understanding.db"))
+    store.persist_report(result.document_identity, result.report, report_payload=payload, analysis_id="understanding-1", ai_analysis=payload["ai_analysis"], access_token="token")
+    return store, payload
+
+
+def test_understanding_initial_save_reload_and_retry_are_byte_stable(tmp_path):
+    store, payload = _saved(tmp_path)
+    expected = json.dumps(payload["document_understanding"], sort_keys=True, separators=(",", ":")).encode()
+    reloaded = store.get_analysis_payload("understanding-1")
+    assert json.dumps(reloaded["document_understanding"], sort_keys=True, separators=(",", ":")).encode() == expected
+    retry = deepcopy(payload); retry["document_understanding"] = None
+    store.replace_ai_analysis("understanding-1", retry)
+    assert json.dumps(store.get_analysis_payload("understanding-1")["document_understanding"], sort_keys=True, separators=(",", ":")).encode() == expected
+    reopened = PersistenceStore(store.config)
+    assert reopened.get_analysis_payload("understanding-1")["document_understanding"] == payload["document_understanding"]
+
+
+def test_understanding_is_removed_with_analysis_deletion(tmp_path):
+    store, _ = _saved(tmp_path)
+    assert store.delete_analysis("understanding-1", "token") is True
+    assert store.get_analysis_payload("understanding-1") is None
+
+
+def test_understanding_obeys_report_retention_without_a_parallel_store(tmp_path):
+    store, _ = _saved(tmp_path)
+    old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+    with store._connect() as connection:
+        connection.execute("UPDATE reports SET created_at = ? WHERE analysis_id = ?", (old, "understanding-1"))
+        connection.execute("UPDATE audit_log SET created_at = ? WHERE analysis_id = ?", (old, "understanding-1"))
+    store.set_retention_days(1)
+    assert store.get_analysis_payload("understanding-1") is None
+
+
+def test_legacy_and_malformed_nested_understanding_load_fail_safely():
+    assert deserialize_analysis_payload({})["document_understanding"] is None
+    malformed = {"document_understanding": {"contract_version": "document-understanding-v1", "records": [None]}}
+    assert deserialize_analysis_payload(malformed)["document_understanding"] is None

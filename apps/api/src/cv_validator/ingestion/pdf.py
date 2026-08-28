@@ -41,7 +41,7 @@ def extract_pdf(
                 for page in pdf.pages
                 if page.images
             ) + tuple(presentation_omitted)
-            source_blocks = _source_blocks(pdf.pages, pages)
+            source_blocks = _source_blocks(pages, presentation_spans)
     except Exception as exc:  # noqa: BLE001
         raise IngestionError(f"Failed to read PDF: {exc}") from exc
 
@@ -106,15 +106,15 @@ def _presentation_spans(pdf_pages, canonical_pages):
     return tuple(spans), truncated
 
 
-def _source_blocks(pdf_pages, canonical_pages):
+def _source_blocks(canonical_pages, presentation_spans):
     blocks=[]
-    for pdf_page, canonical in zip(pdf_pages, canonical_pages):
-        words=pdf_page.extract_words() or []
+    for canonical in canonical_pages:
+        page_spans = [span for span in presentation_spans if span.page_id == canonical.page_id and span.bbox is not None]
         for line in canonical.lines:
-            line_words=[word for word in words if str(word.get("text") or "") in line.text]
+            line_words=[span for span in page_spans if span.start_offset is not None and span.end_offset is not None and span.start_offset < line.end_offset and span.end_offset > line.start_offset]
             bbox=None
             if line_words:
-                bbox=(min(float(w["x0"]) for w in line_words), min(float(w["top"]) for w in line_words), max(float(w["x1"]) for w in line_words), max(float(w["bottom"]) for w in line_words))
+                bbox=(min(w.bbox[0] for w in line_words), min(w.bbox[1] for w in line_words), max(w.bbox[2] for w in line_words), max(w.bbox[3] for w in line_words))
             blocks.append(SourceBlock(
                 id=f"source-block-{len(blocks)+1:04d}", page_id=canonical.page_id,
                 page_number=canonical.page_number, source_order=len(blocks), kind="line",

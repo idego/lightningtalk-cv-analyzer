@@ -756,10 +756,15 @@ def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
         UnderstandingContractError, sanitize_understanding,
     )
     try:
+        structural = sanitized.get("structural_audits")
+        timeline_ids = {
+            item["id"] for item in (structural or {}).get("timeline", {}).get("entries", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        } if isinstance(structural, dict) else set()
         sanitized["document_understanding"] = sanitize_understanding(
-            sanitized.get("document_understanding")
+            sanitized.get("document_understanding"), timeline_entry_ids=timeline_ids
         )
-    except UnderstandingContractError:
+    except (AttributeError, KeyError, TypeError, UnderstandingContractError):
         sanitized["document_understanding"] = None
     for finding in sanitized.get("findings", []):
         if not isinstance(finding, dict):

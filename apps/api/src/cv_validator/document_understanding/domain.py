@@ -74,6 +74,25 @@ class DateRangeAnnotation:
     snapshot_month: str
     evidence: tuple[UnderstandingEvidence, ...]
     source_order: int
+    timeline_entry_id: str
+
+
+@dataclass(frozen=True)
+class EntrySpan:
+    id: str
+    section_id: str
+    block_ids: tuple[str, ...]
+    date_range_ids: tuple[str, ...]
+    source_order: int
+
+
+@dataclass(frozen=True)
+class AmbiguousSpan:
+    id: str
+    category: str
+    reason_code: str
+    evidence: tuple[UnderstandingEvidence, ...]
+    source_order: int
 
 
 @dataclass(frozen=True)

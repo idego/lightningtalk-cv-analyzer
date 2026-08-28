@@ -389,7 +389,7 @@ def test_pdf_link_inventory_keeps_friendly_labels_mismatches_duplicates_and_inva
             ]
 
         def extract_words(self):
-            return tuple({"text": value} for value in ("Profile", "https://example.com/visible"))
+            raise AssertionError("hyperlink association must reuse canonical text")
 
     pages = (SourcePage(
         "page-0001",

@@ -90,6 +90,23 @@ def test_unlabelled_invalid_eleven_digits_are_not_masked_as_generic_id():
     assert phone_like_value in redacted.pages[0].text
 
 
+@pytest.mark.parametrize("ordinary", [
+    "+48 600 700 800", "01/2020 - 02/2022", "2026-08-28",
+    "Order 123456 and reference 987654", "Apartment 12, floor 3",
+])
+def test_ordinary_phone_date_numeric_and_text_content_is_not_over_redacted(ordinary):
+    redacted = redact_national_ids(_raw(f"Profile information\n{ordinary}\nExperience details"))
+    assert ordinary in redacted.pages[0].text
+
+
+def test_labelled_id_rule_does_not_consume_neighboring_content():
+    raw_id = "123-45-6789"
+    following = "Experience Example Labs 2020-2022"
+    redacted = redact_national_ids(_raw(f"National ID: {raw_id}\n{following}"))
+    assert raw_id not in redacted.pages[0].text
+    assert redacted.pages[0].text.endswith(following)
+
+
 def test_valid_unlabelled_pesel_is_masked_before_phone_extraction():
     pesel = "440" + "514" + "01458"
     redacted = redact_national_ids(

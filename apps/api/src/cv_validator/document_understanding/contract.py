@@ -39,7 +39,7 @@ def sanitize_understanding(value: Any, *, timeline_entry_ids: set[str] | None = 
     _coverage(payload["coverage"])
     for name in LIMITS:
         if not isinstance(payload[name], list): raise UnderstandingContractError(f"{name} must be an array")
-    _truncate(payload)
+    _truncation(payload["truncation"], payload)
     sections = {_section(x)["id"] for x in payload["sections"]}
     dates = {_date(x, payload["snapshot_month"])["id"] for x in payload["date_ranges"]}
     records: dict[str, dict[str, Any]] = {}
@@ -49,11 +49,12 @@ def sanitize_understanding(value: Any, *, timeline_entry_ids: set[str] | None = 
     for item in payload["ambiguous_spans"]: _ambiguous(item)
     for item in payload["timeline_record_links"]:
         _object(item, {"timeline_entry_id", "record_id"}, "timeline link"); _short(item["timeline_entry_id"], 128, "timeline_entry_id"); _short(item["record_id"], 128, "record_id")
-        if item["record_id"] not in records or (timeline_entry_ids is not None and item["timeline_entry_id"] not in timeline_entry_ids): raise UnderstandingContractError("unresolved timeline link")
+        if timeline_entry_ids is None or item["record_id"] not in records or item["timeline_entry_id"] not in timeline_entry_ids: raise UnderstandingContractError("unresolved timeline link")
     for item in payload["code_research_subjects"]: _subject(item, records)
-    _truncation(payload["truncation"])
     _unique_ids(payload)
     if _contains_forbidden_identifier(payload): raise UnderstandingContractError("forbidden sensitive identifier")
+    _truncate(payload)
+    _validate_retained_references(payload, timeline_entry_ids)
     return payload
 
 
@@ -138,9 +139,25 @@ def _subject(x:Any, records:dict[str,dict[str,Any]])->None:
     if record is None or record["kind"]!=expected or not any(f["name"]==x["field_name"] and f["status"]=="supported" and f["value"]==x["subject"] for f in record["fields"]): raise UnderstandingContractError("research subject lacks supported identity field")
 
 
-def _truncation(x:Any)->None:
+def _truncation(x:Any, payload:dict[str,Any])->None:
     _object(x,set(LIMITS),"truncation")
-    for item in x.values(): _object(item,{"reported_count","additional_count","truncated"},"truncation record"); _integer(item["reported_count"],0,"reported_count"); _integer(item["additional_count"],0,"additional_count");
+    for name,item in x.items():
+        _object(item,{"reported_count","additional_count","truncated"},"truncation record")
+        _integer(item["reported_count"],0,"reported_count")
+        _integer(item["additional_count"],0,"additional_count")
+        if not isinstance(item["truncated"],bool): raise UnderstandingContractError("truncated must be boolean")
+        if item["reported_count"] != len(payload[name]): raise UnderstandingContractError("reported_count must match collection length")
+        if item["truncated"] != (item["additional_count"] > 0): raise UnderstandingContractError("inconsistent truncation flag")
+
+
+def _validate_retained_references(payload:dict[str,Any], timeline_entry_ids:set[str]|None)->None:
+    sections={item["id"] for item in payload["sections"]}; dates={item["id"] for item in payload["date_ranges"]}; records={item["id"] for item in payload["records"]}
+    for record in payload["records"]:
+        if record["section_id"] not in sections or not set(record["date_range_ids"])<=dates: raise UnderstandingContractError("unresolved retained record reference")
+    for link in payload["timeline_record_links"]:
+        if timeline_entry_ids is None or link["record_id"] not in records or link["timeline_entry_id"] not in timeline_entry_ids: raise UnderstandingContractError("unresolved retained timeline link")
+    for subject in payload["code_research_subjects"]:
+        if subject["record_id"] not in records: raise UnderstandingContractError("unresolved retained research subject")
 
 
 def _unique_ids(p:dict[str,Any])->None:

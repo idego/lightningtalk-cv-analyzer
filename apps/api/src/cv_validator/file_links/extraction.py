@@ -142,12 +142,14 @@ def extract_pdf_hyperlinks(
 def extract_docx_hyperlinks(
     document: Any,
     pages: tuple[SourcePage, ...],
+    *,
+    body_blocks: tuple[Any, ...] | None = None,
 ) -> tuple[DocumentLink, ...]:
     links: list[DocumentLink] = []
     link_index = 0
     current_page = 1
 
-    for block in document.iter_inner_content():
+    for block in body_blocks if body_blocks is not None else document.iter_inner_content():
         for paragraph in _iter_paragraphs(block):
             paragraph_links, paragraph_end_page = _paragraph_hyperlinks_with_pages(
                 paragraph,
@@ -424,19 +426,6 @@ def _pdf_display_association(
     target: str | None,
 ) -> tuple[str | None, tuple[Evidence, ...]]:
     """Use only text that can be found in the canonical page text as evidence."""
-    try:
-        words = tuple(pdf_page.extract_words() or ())
-    except Exception:  # noqa: BLE001
-        words = ()
-    if words:
-        visible = " ".join(
-            str(word.get("text", "")).strip()
-            for word in words
-            if isinstance(word, dict) and str(word.get("text", "")).strip()
-        )
-        if visible and target and _comparison_key(visible) == _comparison_key(target):
-            evidence = _find_text_evidence(source_page, visible)
-            return visible if evidence else None, evidence
     visible_urls = _visible_links((source_page,), "pdf")
     if len(visible_urls) == 1:
         visible = visible_urls[0]

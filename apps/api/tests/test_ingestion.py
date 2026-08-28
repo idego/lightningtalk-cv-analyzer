@@ -172,6 +172,23 @@ def test_docx_flattens_table_text_in_document_block_order():
     assert all(block.association == "exact" for block in table_blocks)
 
 
+def test_docx_adapter_traverses_body_once_for_pages_blocks_links_and_presentation(monkeypatch):
+    from docx.document import Document as DocumentType
+    calls = 0
+    original = DocumentType.iter_inner_content
+
+    def counted(document):
+        nonlocal calls
+        calls += 1
+        return original(document)
+
+    monkeypatch.setattr(DocumentType, "iter_inner_content", counted)
+    doc = Document(); doc.add_paragraph("Skills"); doc.add_paragraph("Python SQL")
+    table = doc.add_table(rows=1, cols=1); table.cell(0, 0).text = "Example content"
+    extract_docx(_save_docx(doc))
+    assert calls == 1
+
+
 def test_docx_hard_page_break_inside_table_is_preserved():
     doc = Document()
     cell_paragraph = doc.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0]
