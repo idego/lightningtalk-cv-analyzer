@@ -21,6 +21,10 @@ FIELD_NAMES = {"institution", "program", "degree", "study_dates", "result", "edu
 EDUCATION_FIELDS = {"institution", "program", "degree", "study_dates", "result", "education_location"}
 EMPLOYMENT_FIELDS = {"organization", "role", "relationship_type", "employment_dates", "employment_location"}
 _MONTH = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
+_MASKED_LABELED_ID = re.compile(
+    r"(?i)\b(?:PESEL|SSN|NINO|national\s+ID|national\s+insurance(?:\s+number)?)"
+    r"\b\s*(?:[:#-]\s*)?█+"
+)
 
 
 class UnderstandingContractError(ValueError):
@@ -167,9 +171,12 @@ def _unique_ids(p:dict[str,Any])->None:
 
 
 def _contains_forbidden_identifier(value: Any) -> bool:
-    from cv_validator.ingestion.redaction import _find_sensitive_spans
+    from cv_validator.ingestion.redaction import MASK_CHARACTER, _find_sensitive_spans
     if isinstance(value, str):
-        return bool(_find_sensitive_spans(value))
+        # Redacted DTO evidence may retain labels and same-length mask glyphs;
+        # those are safe provenance, not a reappearance of the raw identifier.
+        safe_projection = _MASKED_LABELED_ID.sub("", value).replace(MASK_CHARACTER, "")
+        return bool(_find_sensitive_spans(safe_projection))
     if isinstance(value, dict):
         return any(_contains_forbidden_identifier(item) for item in value.values())
     if isinstance(value, list):

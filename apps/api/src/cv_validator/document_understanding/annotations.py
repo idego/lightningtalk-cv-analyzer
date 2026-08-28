@@ -265,7 +265,7 @@ def detect_sections(document: RedactedDocument, exclusion: VisibilityExclusionIn
 def _looks_unknown_heading(value: str) -> bool:
     text = value.strip().rstrip(":")
     words = text.split()
-    return bool(text) and len(words) <= 5 and (value.strip().endswith(":") or (text.upper() == text and any(ch.isalpha() for ch in text)))
+    return bool(text) and not _RANGE.search(text) and len(words) <= 5 and (value.strip().endswith(":") or (text.upper() == text and any(ch.isalpha() for ch in text)))
 
 
 def _month_index(value: str | None) -> int:
