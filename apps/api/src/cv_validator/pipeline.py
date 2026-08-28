@@ -38,6 +38,7 @@ from cv_validator.ingestion.router import ingest_cv
 from cv_validator.ingestion.text import validate_text_sufficiency
 from cv_validator.scoring.engine import score_deterministic
 from cv_validator.location import LocationResolver
+from cv_validator.structural import audit_document
 
 
 @dataclass(frozen=True)
@@ -249,6 +250,7 @@ def _analyze_raw(
                 metrics=link_metrics,
             )
     redacted = redact_national_ids(parsed)
+    structural_audits = audit_document(redacted)
     deterministic = analyze_deterministically(
         redacted,
         weights.version,
@@ -260,6 +262,7 @@ def _analyze_raw(
         report,
         file_details=file_details,
         link_inspection=link_inspection,
+        structural_audits=structural_audits,
     )
     selected_ai_settings = ai_settings or AISettings()
     if selected_ai_settings.enabled and defer_ai:

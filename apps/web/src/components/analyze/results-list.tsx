@@ -26,8 +26,10 @@ import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { FileDetailsDisclosure, LinkInspectionPanel } from "@/components/analyze/file-inspection";
 import { useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
+import { StructuralAuditPanel } from "@/components/analyze/structural-audit-panel";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
+  const { t } = useCopy();
   return (
     <div className="space-y-2">
       {flags.map((flag) => {
@@ -43,12 +45,12 @@ function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLangua
           contentClassName="pt-3"
         >
           <dl className="space-y-3 border-t pt-3">
-            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Why it matters</dt><dd className="mt-1 leading-relaxed">{copy.whyItMatters}</dd></div>
-            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">What to check</dt><dd className="mt-1 leading-relaxed">{copy.whatToCheck}</dd></div>
+            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whyItMatters")}</dt><dd className="mt-1 leading-relaxed">{copy.whyItMatters}</dd></div>
+            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whatToCheck")}</dt><dd className="mt-1 leading-relaxed">{copy.whatToCheck}</dd></div>
           </dl>
           {flag.evidence.length ? (
             <p className="mt-3 border-l-2 pl-2 text-xs text-muted-foreground">
-              Evidence: „{flag.evidence[0].excerpt}”
+              {t("evidence")}: „{flag.evidence[0].excerpt}”
             </p>
           ) : null}
         </HoverDisclosure>
@@ -111,9 +113,9 @@ function OverviewRow({
   );
 }
 
-function displayCountry(countryCode: string) {
+function displayCountry(countryCode: string, language: "en" | "pl") {
   const code = countryCode.toUpperCase();
-  const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
+  const name = new Intl.DisplayNames([language], { type: "region" }).of(code);
   return name && name !== code ? `${name} (${code})` : code;
 }
 
@@ -125,7 +127,7 @@ function employmentDetail(organization: string, location?: string | null, dates?
 }
 
 function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"] }) {
-  const { t } = useCopy();
+  const { settings, t } = useCopy();
   const aiContact = report.ai_analysis.facts.contact;
   const candidateName = aiContact.find((fact) => fact.kind === "candidate_name")?.value;
   const phone = report.deterministic.candidates.find((candidate) => candidate.subject === "person" && candidate.kind === "phone")?.value
@@ -135,15 +137,15 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
   const phoneCountry = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "phone_country")?.value;
   const claimedLocation = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "claimed_location");
   const resolvedLocation = claimedLocation
-    ? `${claimedLocation.resolved_name ?? displayCountry(claimedLocation.value)}${claimedLocation.resolved_name && claimedLocation.value ? ` (${claimedLocation.value})` : ""}`
+    ? `${claimedLocation.resolved_name ?? displayCountry(claimedLocation.value, settings.uiLanguage)}${claimedLocation.resolved_name && claimedLocation.value ? ` (${claimedLocation.value})` : ""}`
     : null;
   const postalCountryFact = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "postal_country");
   const postalCandidateIds = new Set(postalCountryFact?.source_candidate_ids ?? []);
   const postalCode = report.deterministic.candidates.find((candidate) => candidate.kind === "postal" && postalCandidateIds.has(candidate.id))?.value;
   const euStatus = report.deterministic.observations.some((observation) => observation.kind === "combined_location_outside_eu")
-    ? "Outside the EU"
+      ? t("outsideEu")
     : report.deterministic.observations.some((observation) => observation.kind === "combined_location_inside_eu")
-      ? "Inside the EU"
+      ? t("insideEu")
       : null;
   const education = Array.from(new Map(report.ai_analysis.facts.education.map((fact) => [
     `${fact.institution}:${fact.program ?? ""}:${fact.study_dates ?? ""}`,
@@ -154,8 +156,8 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
     fact,
   ])).values());
   const timelineNow = new Date();
-  const educationTimeline = summarizeDateRanges(education.map((fact) => fact.study_dates), timelineNow);
-  const employmentTimeline = summarizeDateRanges(employment.map((fact) => fact.employment_dates), timelineNow);
+  const educationTimeline = summarizeDateRanges(education.map((fact) => fact.study_dates), timelineNow, settings.uiLanguage);
+  const employmentTimeline = summarizeDateRanges(employment.map((fact) => fact.employment_dates), timelineNow, settings.uiLanguage);
   const hasContact = Boolean(candidateName || phone);
   const hasLocation = Boolean(statedLocation || resolvedLocation || postalCode || postalCountryFact || euStatus);
   const hasFacts = hasContact || hasLocation || education.length > 0 || employment.length > 0;
@@ -175,41 +177,41 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
         <div className="space-y-5">
           {hasContact || hasLocation ? <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
             {hasContact ? <section aria-labelledby="overview-contact">
-              <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">Contact</h4>
+              <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">{t("contact")}</h4>
               <div className="space-y-1">
-                {candidateName ? <OverviewRow icon={<UserRound className="size-4" />} label="Candidate name" value={candidateName} tone={contactTone} /> : null}
+                {candidateName ? <OverviewRow icon={<UserRound className="size-4" />} label={t("candidateName")} value={candidateName} tone={contactTone} /> : null}
                 {phone ? <OverviewRow
                   icon={<Phone className="size-4" />}
-                  label="Phone number"
+                  label={t("phoneNumber")}
                   value={phone}
-                  detail={phoneCountry ? displayCountry(phoneCountry) : null}
+                  detail={phoneCountry ? displayCountry(phoneCountry, settings.uiLanguage) : null}
                   tone={contactTone}
                 /> : null}
               </div>
             </section> : null}
 
             {hasLocation ? <section aria-labelledby="overview-location">
-              <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">Location</h4>
+              <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
               <div className="space-y-1">
-                {statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label="Stated location" value={statedLocation} tone={locationTone} /> : null}
-                {resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label="Resolved location" value={resolvedLocation} tone={locationTone} /> : null}
-                {postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label="Postal code" value={postalCode} tone={locationTone} /> : null}
-                {postalCountryFact ? <OverviewRow icon={<Globe2 className="size-4" />} label="Postal country" value={displayCountry(postalCountryFact.value)} tone={locationTone} /> : null}
-                {euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label="EU status" value={euStatus} tone={locationTone} /> : null}
+                {statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={statedLocation} tone={locationTone} /> : null}
+                {resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={resolvedLocation} tone={locationTone} /> : null}
+                {postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={postalCode} tone={locationTone} /> : null}
+                {postalCountryFact ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(postalCountryFact.value, settings.uiLanguage)} tone={locationTone} /> : null}
+                {euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={euStatus} tone={locationTone} /> : null}
               </div>
             </section> : null}
           </div> : null}
 
           {education.length ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <h4 id="overview-education" className="text-xs font-semibold text-foreground">Education</h4>
+              <h4 id="overview-education" className="text-xs font-semibold text-foreground">{t("education")}</h4>
               {educationTimeline ? <span className="text-xs font-normal text-muted-foreground">{educationTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {education.map((fact, index) => <OverviewRow
                 key={`${fact.institution}:${fact.program ?? ""}:${index}`}
                 icon={<GraduationCap className="size-4" />}
-                label="Education entry"
+                label={t("educationEntry")}
                 value={fact.institution}
                 detail={[fact.program, fact.study_dates].filter(Boolean).join(" · ")}
                 tone={educationTone}
@@ -219,14 +221,14 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
 
           {employment.length ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <h4 id="overview-employment" className="text-xs font-semibold text-foreground">Experience</h4>
+              <h4 id="overview-employment" className="text-xs font-semibold text-foreground">{t("experience")}</h4>
               {employmentTimeline ? <span className="text-xs font-normal text-muted-foreground">{employmentTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {employment.map((fact, index) => <OverviewRow
                 key={`${fact.organization}:${fact.role}:${index}`}
                 icon={<BriefcaseBusiness className="size-4" />}
-                label="Employment entry"
+                label={t("employmentEntry")}
                 value={fact.role}
                 detail={employmentDetail(fact.organization, fact.location, fact.employment_dates)}
                 tone={employmentTone}
@@ -236,7 +238,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          No CV details extracted.
+          {t("noCvDetails")}
         </p>
       )}
     </HoverDisclosure>
@@ -270,12 +272,12 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
     setRetryingId(report.analysis_id);
     setRetryError(previous => ({ ...previous, [report.analysis_id]: "" }));
     try {
-      const response = await fetch(`/api/analyses/${encodeURIComponent(report.analysis_id)}/ai/retry`, { method: "POST" });
+      const response = await fetch(`/api/analyses/${encodeURIComponent(report.analysis_id)}/ai/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiEnabled: settings.aiEnabled }) });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? payload.detail ?? "AI retry failed");
+      if (!response.ok) throw new Error(t("analysisFailed"));
       setReportOverrides(previous => ({ ...previous, [report.analysis_id]: payload }));
-    } catch (error) {
-      setRetryError(previous => ({ ...previous, [report.analysis_id]: error instanceof Error ? error.message : "AI retry failed" }));
+    } catch {
+      setRetryError(previous => ({ ...previous, [report.analysis_id]: t("analysisFailed") }));
     } finally {
       setRetryingId(null);
     }
@@ -312,7 +314,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         }
 
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
-        const grouped = partitionReviewFlags(recruiterReviewFlags(report));
+        const grouped = partitionReviewFlags(recruiterReviewFlags(report, report.ai_analysis.report_language));
         const statusMessage = aiStatusMessage(
           report.ai_analysis.status,
           report.ai_analysis.failure_reason,
@@ -321,10 +323,6 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         const checkedCount = Object.values(report.checklist.checks).filter(
           (check) => check.checked,
         ).length;
-        const reportDescription = report.ai_analysis.status === "succeeded"
-          ? null
-          : (settings.uiLanguage === "pl" ? "Analiza AI nie zwróciła pełnego wyniku." : "AI analysis did not return a complete result.");
-
         return (
           <Card
             key={`${item.filename}-${itemIndex}`}
@@ -335,7 +333,6 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <CardTitle className="text-base">{item.filename}</CardTitle>
-                  {reportDescription ? <CardDescription>{reportDescription}</CardDescription> : null}
                 </div>
               </div>
             </CardHeader>
@@ -346,39 +343,51 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
               >
                 {statusMessage ? (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2">{report.ai_analysis.status === "pending" ? <ThinkingOrb state="working" size={20} theme="auto" aria-label="AI analysis in progress" /> : null}{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? (settings.uiLanguage === "pl" ? "Ponawianie…" : "Retrying…") : (settings.uiLanguage === "pl" ? "Ponów analizę AI" : "Retry AI analysis")}</Button> : null}</div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2">{report.ai_analysis.status === "pending" ? <ThinkingOrb state="working" size={20} theme="auto" aria-label={t("aiAnalysisInProgress")} /> : null}{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? t("retryingAi") : t("retryAi")}</Button> : null}</div>
                     {retryError[report.analysis_id] ? <p className="mt-2 text-xs text-destructive">{retryError[report.analysis_id]}</p> : null}
                   </div>
                 ) : null}
+
+                <StructuralAuditPanel
+                  audits={report.structural_audits}
+                  language={settings.uiLanguage}
+                  employment={report.ai_analysis.facts.employment}
+                  education={report.ai_analysis.facts.education}
+                />
 
                 {grouped.attention.length ? <section className="space-y-2 rounded-md border border-rose-500/30 p-3">
                   <h3 className="font-medium">{t("needsAttention")} ({grouped.attention.length})</h3>
                   <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} />
                 </section> : null}
 
-                {grouped.worthKnowing.length ? <section className="space-y-2 rounded-md border border-sky-500/30 p-3">
-                  <h3 className="font-medium">{t("worthKnowing")} ({grouped.worthKnowing.length})</h3>
+                {grouped.worthKnowing.length ? <HoverDisclosure
+                  className="rounded-md border border-sky-500/30 p-3"
+                  triggerClassName="text-sm font-medium"
+                  title={`${t("worthKnowing")} (${grouped.worthKnowing.length})`}
+                  contentClassName="pt-3"
+                  allowHover
+                >
                   <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} />
-                </section> : null}
+                </HoverDisclosure> : null}
 
                 <StructuredFacts report={report} />
                 <FileDetailsDisclosure details={report.file_details} />
                 <LinkInspectionPanel inspection={report.link_inspection} />
               </div>
 
-              <CompanyResearchPanel
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel
                 report={report}
                 onResearchChange={(research) => updateCompletedResearch(report, { company_research: research })}
-              />
+              /> : null}
 
-              <EducationResearchPanel
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel
                 report={report}
                 onResearchChange={(research) => updateCompletedResearch(report, { education_research: research })}
-              />
-              <LinkedInResearchPanel
+              /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel
                 report={report}
                 onDiscoveryChange={(discovery) => updateCompletedResearch(report, { linkedin_discovery: discovery })}
-              />
+              /> : null}
 
               {grouped.remaining.length ? <HoverDisclosure
                 className="rounded-md border p-3"
@@ -392,7 +401,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
               <HoverDisclosure
                 className="rounded-md border p-3"
                 triggerClassName="text-sm font-medium"
-                title={`${settings.uiLanguage === "pl" ? "Sprawdzone" : "Checks run"}: ${checkedCount}/${Object.keys(report.checklist.checks).length}`}
+                title={`${t("checksRun")}: ${checkedCount}/${Object.keys(report.checklist.checks).length}`}
                 contentClassName="pt-3"
               >
                 <ul className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">

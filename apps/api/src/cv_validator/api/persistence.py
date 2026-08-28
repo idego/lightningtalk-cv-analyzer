@@ -296,6 +296,16 @@ class PersistenceStore:
                 ).fetchone()
                 if report is None:
                     raise PersistenceError("analysis not found")
+                existing_row = conn.execute(
+                    "SELECT output_json FROM audit_log WHERE analysis_id = ?",
+                    (analysis_id,),
+                ).fetchone()
+                if existing_row is not None:
+                    existing_payload = json.loads(existing_row["output_json"])
+                    payload = deepcopy(payload)
+                    payload["structural_audits"] = existing_payload.get(
+                        "structural_audits"
+                    )
                 conn.execute(
                     "UPDATE audit_log SET output_json = ? WHERE analysis_id = ?",
                     (json.dumps(_sanitize_findings(payload)), analysis_id),
@@ -733,7 +743,12 @@ def _insert_ai_analysis(
 
 
 def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
+    from cv_validator.structural.sanitize import sanitize_structural_audits
+
     sanitized = deepcopy(report_dict)
+    sanitized["structural_audits"] = sanitize_structural_audits(
+        sanitized.get("structural_audits")
+    )
     for finding in sanitized.get("findings", []):
         if not isinstance(finding, dict):
             continue

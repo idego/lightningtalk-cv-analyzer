@@ -159,11 +159,20 @@ export type ResearchChecklistItem = {
   source: "company" | "education" | "linkedin";
 };
 
+type ReportLanguage = "en" | "pl";
+
+function researchReviewLimitation(language: ReportLanguage) {
+  return language === "pl"
+    ? "Sprawdź przytoczone źródła publiczne i potwierdź istotne informacje z kandydatem."
+    : "Review the cited public sources and confirm relevant details with the candidate.";
+}
+
 export function researchChecklistItems(
   report: Pick<
     AnalysisReport,
     "company_research" | "education_research" | "linkedin_discovery"
   >,
+  language: ReportLanguage = "en",
 ): ResearchChecklistItem[] {
   const items: ResearchChecklistItem[] = [];
 
@@ -173,10 +182,16 @@ export function researchChecklistItems(
       items.push({
         id: `company:${companyName}:exists`,
         importance: "worth_knowing",
-        title: `Public sources support that ${companyName} exists.`,
+        title: language === "pl"
+          ? `Źródła publiczne potwierdzają istnienie firmy ${companyName}.`
+          : `Public sources support that ${companyName} exists.`,
         reason: organization.official_website
-          ? "An official website or other sourced company record was found."
-          : "The completed company research retained public evidence for this organization.",
+          ? language === "pl"
+            ? "Znaleziono oficjalną stronę lub inny udokumentowany wpis firmy."
+            : "An official website or other sourced company record was found."
+          : language === "pl"
+            ? "Zakończone sprawdzanie firmy zachowało publiczne dowody dotyczące tej organizacji."
+            : "The completed company research retained public evidence for this organization.",
         source: "company",
       });
     } else {
@@ -184,8 +199,12 @@ export function researchChecklistItems(
         id: `company:${companyName}:existence-review`,
         importance: "attention",
         title: organization.existence === "conflicting"
-          ? `Public information about ${companyName} conflicts.`
-          : `${companyName} was not confirmed by the completed searches.`,
+          ? language === "pl"
+            ? `Publiczne informacje o firmie ${companyName} są sprzeczne.`
+            : `Public information about ${companyName} conflicts.`
+          : language === "pl"
+            ? `Nie potwierdzono firmy ${companyName} w wykonanych wyszukiwaniach.`
+            : `${companyName} was not confirmed by the completed searches.`,
         reason: organization.uncertainty,
         source: "company",
       });
@@ -194,37 +213,53 @@ export function researchChecklistItems(
       items.push({
         id: `company:${companyName}:limited-presence`,
         importance: "attention",
-        title: `${companyName} has limited confirmed online presence.`,
+        title: language === "pl"
+          ? `${companyName} ma ograniczoną potwierdzoną obecność w internecie.`
+          : `${companyName} has limited confirmed online presence.`,
         reason: organization.limited_online_presence_reason
-          ?? "The bounded public searches retained too little evidence to confirm a normal online presence.",
+          ?? (language === "pl"
+            ? "Ograniczone wyszukiwania publiczne zachowały zbyt mało dowodów, aby potwierdzić typową obecność w internecie."
+            : "The bounded public searches retained too little evidence to confirm a normal online presence."),
         source: "company",
       });
     }
   }
 
   for (const [credentialIndex, credential] of (report.education_research?.credentials ?? []).entries()) {
-    const institution = credential.institution ?? credential.program ?? "An education entry";
+    const institution = credential.institution ?? credential.program ?? (language === "pl" ? "Wpis edukacyjny" : "An education entry");
     const addEducationField = (
       field: "institution" | "program" | "degree" | "certificate",
       value: string | null,
       status: "supported" | "mismatch" | "evidence_unavailable",
     ) => {
       if (!value) return;
-      const label = field === "institution" ? "institution" : field;
+      const label = language === "pl"
+        ? ({ institution: "instytucję", program: "program", degree: "stopień", certificate: "certyfikat" }[field])
+        : field === "institution" ? "institution" : field;
       const supported = status === "supported";
       items.push({
         id: `education:${credentialIndex}:${field}`,
         importance: supported ? "worth_knowing" : "attention",
         title: supported
           ? field === "institution"
-            ? `Public sources support that ${value} exists.`
-            : `Public sources support the ${label} ${value}.`
+            ? language === "pl"
+              ? `Źródła publiczne potwierdzają istnienie ${value}.`
+              : `Public sources support that ${value} exists.`
+            : language === "pl"
+              ? `Źródła publiczne potwierdzają ${label}: ${value}.`
+              : `Public sources support the ${label} ${value}.`
           : status === "mismatch"
-            ? `The ${label} ${value} does not match the retained public evidence.`
-            : `The completed searches did not confirm the ${label} ${value}.`,
+            ? language === "pl"
+              ? `${label[0].toLocaleUpperCase()}${label.slice(1)} ${value} nie pasuje do zachowanych dowodów publicznych.`
+              : `The ${label} ${value} does not match the retained public evidence.`
+            : language === "pl"
+              ? `Wykonane wyszukiwania nie potwierdziły ${label}: ${value}.`
+              : `The completed searches did not confirm the ${label} ${value}.`,
         reason: field === "institution" && supported
           && [credential.city, credential.country].filter(Boolean).length
-          ? `The institution was located in ${[credential.city, credential.country].filter(Boolean).join(", ")}.`
+          ? language === "pl"
+            ? `Instytucję zlokalizowano w ${[credential.city, credential.country].filter(Boolean).join(", ")}.`
+            : `The institution was located in ${[credential.city, credential.country].filter(Boolean).join(", ")}.`
           : credential.uncertainty,
         source: "education",
       });
@@ -237,7 +272,9 @@ export function researchChecklistItems(
       items.push({
         id: `education:${credentialIndex}:dates`,
         importance: "worth_knowing",
-        title: `Public sources show education dates: ${credential.dates}.`,
+        title: language === "pl"
+          ? `Źródła publiczne wskazują okres edukacji: ${credential.dates}.`
+          : `Public sources show education dates: ${credential.dates}.`,
         reason: credential.uncertainty,
         source: "education",
       });
@@ -249,10 +286,16 @@ export function researchChecklistItems(
           ? "worth_knowing"
           : "attention",
         title: credential.accreditation_status === "established"
-          ? `Public sources establish accreditation for ${institution}.`
+          ? language === "pl"
+            ? `Źródła publiczne potwierdzają akredytację dla ${institution}.`
+            : `Public sources establish accreditation for ${institution}.`
           : credential.accreditation_status === "not_established"
-            ? `The completed searches did not establish accreditation for ${institution}.`
-            : `Accreditation for ${institution} could not be confirmed.`,
+            ? language === "pl"
+              ? `Wykonane wyszukiwania nie potwierdziły akredytacji dla ${institution}.`
+              : `The completed searches did not establish accreditation for ${institution}.`
+            : language === "pl"
+              ? `Nie udało się potwierdzić akredytacji dla ${institution}.`
+              : `Accreditation for ${institution} could not be confirmed.`,
         reason: credential.uncertainty,
         source: "education",
       });
@@ -261,7 +304,9 @@ export function researchChecklistItems(
       items.push({
         id: `education:${credentialIndex}:location`,
         importance: "attention",
-        title: `The location of ${institution} needs review.`,
+        title: language === "pl"
+          ? `Lokalizacja ${institution} wymaga sprawdzenia.`
+          : `The location of ${institution} needs review.`,
         reason: credential.location_difference_for_review,
         source: "education",
       });
@@ -273,7 +318,9 @@ export function researchChecklistItems(
     items.push({
       id: "linkedin:not-found",
       importance: "attention",
-      title: "The completed searches did not retain a matching LinkedIn profile.",
+      title: language === "pl"
+        ? "Wykonane wyszukiwania nie zachowały pasującego profilu LinkedIn."
+        : "The completed searches did not retain a matching LinkedIn profile.",
       reason: discovery.not_found_caveat,
       source: "linkedin",
     });
@@ -287,11 +334,17 @@ export function researchChecklistItems(
         : "linkedin:profiles-found",
       importance: "worth_knowing",
       title: possibleProfiles.length === 1
-        ? "Possible LinkedIn profile 1 was found."
-        : `${possibleProfiles.length} possible LinkedIn profiles were found.`,
+        ? language === "pl"
+          ? "Znaleziono możliwy profil LinkedIn 1."
+          : "Possible LinkedIn profile 1 was found."
+        : language === "pl"
+          ? `Znaleziono ${possibleProfiles.length} możliwe profile LinkedIn.`
+          : `${possibleProfiles.length} possible LinkedIn profiles were found.`,
       reason: possibleProfiles.length === 1
         ? firstProfile.uncertainty
-        : "These links are possible matches only.",
+        : language === "pl"
+          ? "To wyłącznie możliwe dopasowania."
+          : "These links are possible matches only.",
       source: "linkedin",
     });
   }
@@ -300,8 +353,12 @@ export function researchChecklistItems(
       items.push({
         id: `linkedin:profile:${profile.profile_url}:photo`,
         importance: "attention",
-        title: `Possible LinkedIn profile ${index + 1} has no publicly visible photo.`,
-        reason: "This is a profile-completeness detail only. It says nothing about identity, suitability, or authenticity.",
+        title: language === "pl"
+          ? `Możliwy profil LinkedIn ${index + 1} nie ma publicznie widocznego zdjęcia.`
+          : `Possible LinkedIn profile ${index + 1} has no publicly visible photo.`,
+        reason: language === "pl"
+          ? "To tylko szczegół dotyczący kompletności profilu. Nie mówi nic o tożsamości, dopasowaniu ani autentyczności."
+          : "This is a profile-completeness detail only. It says nothing about identity, suitability, or authenticity.",
         source: "linkedin",
       });
     }
@@ -309,8 +366,12 @@ export function researchChecklistItems(
       items.push({
         id: `linkedin:profile:${profile.profile_url}:connections`,
         importance: "attention",
-        title: `Possible LinkedIn profile ${index + 1} has a low public connection count.`,
-        reason: "This is a profile-completeness detail only. Connection counts do not establish identity, suitability, or authenticity.",
+        title: language === "pl"
+          ? `Możliwy profil LinkedIn ${index + 1} ma małą liczbę publicznych kontaktów.`
+          : `Possible LinkedIn profile ${index + 1} has a low public connection count.`,
+        reason: language === "pl"
+          ? "To tylko szczegół dotyczący kompletności profilu. Liczba kontaktów nie potwierdza tożsamości, dopasowania ani autentyczności."
+          : "This is a profile-completeness detail only. Connection counts do not establish identity, suitability, or authenticity.",
         source: "linkedin",
       });
     }
@@ -385,8 +446,9 @@ function groupOutsideEuFlags(flags: ReviewFlag[]): ReviewFlag[] {
 
 export function recruiterReviewFlags(
   report: Pick<AnalysisReport, "checklist" | "company_research" | "education_research" | "linkedin_discovery">,
+  language: ReportLanguage = "en",
 ): ReviewFlag[] {
-  const researchFlags: ReviewFlag[] = researchChecklistItems(report).map((item) => ({
+  const researchFlags: ReviewFlag[] = researchChecklistItems(report, language).map((item) => ({
     id: item.id,
     source: "research",
     authority: "ai",
@@ -396,7 +458,7 @@ export function recruiterReviewFlags(
     confidence: "research",
     observation: item.title,
     reason: item.reason,
-    limitation: "Review the cited public sources and confirm relevant details with the candidate.",
+    limitation: researchReviewLimitation(language),
     evidence: [],
   }));
   const seen = new Set<string>();

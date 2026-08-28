@@ -241,6 +241,42 @@ test("summarizes multiple possible LinkedIn profiles in one recruiter finding", 
   ]);
 });
 
+test("localizes frontend research checklist copy to Polish", () => {
+  const items = researchChecklistItems({
+    company_research: {
+      organizations: [{
+        query_subject: "Example",
+        existence: "supported",
+        official_website: "https://example.test",
+        location: null,
+        activity: null,
+        operating_dates: null,
+        relationship: null,
+        company_pages: [],
+        registries: [],
+        confidence: "high",
+        uncertainty: "Ograniczona pewność.",
+        findings: [],
+        limited_online_presence: false,
+        limited_online_presence_reason: null,
+      }],
+    },
+    education_research: null,
+    linkedin_discovery: null,
+  }, "pl");
+
+  assert.equal(items[0].title, "Źródła publiczne potwierdzają istnienie firmy Example.");
+  assert.equal(
+    recruiterReviewFlags({
+      checklist: { flags: [] },
+      company_research: null,
+      education_research: null,
+      linkedin_discovery: { linkedin_not_found: true, not_found_caveat: "Brak pewności.", possible_profiles: [] },
+    }, "pl")[0].observation,
+    "Wykonane wyszukiwania nie zachowały pasującego profilu LinkedIn.",
+  );
+});
+
 test("describes disabled, refusal and technical failure without a verdict", () => {
   assert.match(aiStatusMessage("disabled", null), /disabled/i);
   assert.match(aiStatusMessage("failed", "refusal"), /declined/i);

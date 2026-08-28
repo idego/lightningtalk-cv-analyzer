@@ -129,6 +129,19 @@ class _Analyzer:
         )
 
 
+class _NoCallResearcher:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def research(self, request):
+        self.calls.append(request)
+        raise AssertionError("research must not run while AI is disabled")
+
+    def discover(self, request):
+        self.calls.append(request)
+        raise AssertionError("LinkedIn discovery must not run while AI is disabled")
+
+
 class _PayloadAnalyzer:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
@@ -265,6 +278,78 @@ def test_deferred_ai_returns_pending_deterministic_report_without_calling_provid
     assert payload["ai_analysis"]["manual_retry_available"] is False
     assert payload["deterministic"]["facts"]
     assert payload["deterministic"]["scoring_signals"]
+
+
+def test_request_ai_opt_out_disables_analysis_and_retry_without_provider_call(
+    tmp_path,
+) -> None:
+    analyzer = _Analyzer()
+    app = create_app(
+        db_path=tmp_path / "ai-opt-out.db",
+        ai_settings=AISettings(enabled=True, api_key="test-key"),
+        document_analyzer=analyzer,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/analyze",
+        headers={"X-AI-Enabled": "false", "X-Analysis-Access-Token": "owner-token"},
+        files={
+            "file": (
+                "cv.docx",
+                _docx_bytes("Candidate Example\nSoftware engineer profile"),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ai_features_enabled"] is False
+    assert payload["ai_analysis"]["status"] == "disabled"
+    retry = client.post(
+        f"/analyses/{payload['analysis_id']}/ai/retry",
+        headers={"X-AI-Enabled": "false", "X-Analysis-Access-Token": "owner-token"},
+    )
+    assert retry.status_code == 409
+    assert retry.json()["detail"] == "ai_disabled_for_analysis"
+    assert analyzer.requests == []
+
+
+def test_request_ai_opt_out_blocks_all_research_backends(tmp_path) -> None:
+    researcher = _NoCallResearcher()
+    app = create_app(
+        db_path=tmp_path / "research-opt-out.db",
+        ai_settings=AISettings(enabled=True, api_key="test-key"),
+        document_analyzer=_Analyzer(),
+        company_researcher=researcher,
+        education_researcher=researcher,
+        linkedin_researcher=researcher,
+    )
+    client = TestClient(app)
+    analyzed = client.post(
+        "/analyze",
+        headers={"X-AI-Enabled": "false", "X-Analysis-Access-Token": "owner-token"},
+        files={
+            "file": (
+                "cv.docx",
+                _docx_bytes("Candidate Example\nSoftware engineer profile"),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    ).json()
+    headers = {"X-AI-Enabled": "false", "X-Analysis-Access-Token": "owner-token"}
+
+    for path in (
+        "research/company",
+        "research/education",
+        "research/linkedin/discovery",
+    ):
+        response = client.post(f"/analyses/{analyzed['analysis_id']}/{path}", headers=headers)
+        assert response.status_code == 409
+        assert response.json()["detail"] == "ai_disabled_for_analysis"
+
+    assert researcher.calls == []
 
 
 def test_pending_ai_enrichment_reuses_the_same_analysis_and_deterministic_report(

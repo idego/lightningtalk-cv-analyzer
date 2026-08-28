@@ -30,7 +30,7 @@ export function AnalysisWorkspace({ entries, compact = false }: { entries: Analy
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {previewVisible && active.file ? <>
-        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label="Resize CV preview" onPointerDown={startResize} className="sticky top-20 h-[calc(100svh-6.5rem)] cursor-col-resize touch-none rounded-full bg-border transition-colors hover:bg-primary/60" /> : null}
+        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} onPointerDown={startResize} className="sticky top-20 h-[calc(100svh-6.5rem)] cursor-col-resize touch-none rounded-full bg-border transition-colors hover:bg-primary/60" /> : null}
         <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
       </> : null}
     </div>

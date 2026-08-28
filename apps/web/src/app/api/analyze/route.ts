@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     headers: {
       "X-Analysis-Access-Token": analysisAccessToken,
       "X-Report-Language": req.headers.get("X-Report-Language") ?? "en",
+      "X-AI-Enabled": req.headers.get("X-AI-Enabled") === "false" ? "false" : "true",
     },
   });
 

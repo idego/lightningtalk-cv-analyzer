@@ -28,8 +28,8 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           className="size-8"
-          aria-label="Open feature list board"
-          title="Open feature list board"
+          aria-label={t("openFeatureListBoard")}
+          title={t("openFeatureListBoard")}
           onClick={() => {
             window.open("https://boards.s18i.io/boards/S3q9Xbo5w63D", "_blank", "noopener,noreferrer");
           }}

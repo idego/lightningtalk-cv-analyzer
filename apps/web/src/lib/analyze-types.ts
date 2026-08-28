@@ -362,8 +362,22 @@ export type DeterministicScoringSignal = ProvenanceFields & {
   label: string | null;
 };
 
+export type StructuralSourceLocation = { page_id: string; page_number: number; line_id: string | null; line_number: number | null; start_offset: number | null; end_offset: number | null; paragraph_path: string | null; bbox: { x0: number; y0: number; x1: number; y1: number } | null; association: "exact" | "partial" | "unmapped" };
+export type StructuralTimelineEvidence = { location: StructuralSourceLocation; excerpt: string };
+export type StructuralTimelineEntry = { id: string; category: "employment" | "education" | "unknown"; status: "valid" | "invalid" | "unresolved"; start_text: string | null; end_text: string | null; start_month: string | null; end_month: string | null; start_precision: string; end_precision: string; source_location: StructuralSourceLocation; evidence: StructuralTimelineEvidence[] };
+export type StructuralTimelineObservation = { id: string; kind: "invalid_period" | "definite_overlap" | "possible_overlap"; status: "needs_review" | "informational"; entry_ids: string[]; overlap_months: number | null; precision: "exact" | "coarse" | null; reason_code: string; evidence: StructuralTimelineEvidence[] };
+export type StructuralVisibilityObservation = { id: string; kind: "hidden_text" | "near_zero_text" | "zero_opacity_text" | "low_contrast_text"; status: "needs_review"; confidence: "high" | "medium"; source_location: StructuralSourceLocation; trigger_codes: string[]; character_count: number; word_count: number; redaction: { present: boolean; type_hints: string[] } | null; threshold_version: string };
+export type StructuralAudits = { contract_version: "structural-audits-v1"; status: "completed" | "partial" | "unavailable" | "not_applicable"; snapshot_month: string | null; coverage: { status: string; source_format: string; audited_parts: string[]; omitted_parts: string[] }; timeline: { status: string; parser_version: string; entries: StructuralTimelineEntry[]; summaries: Array<{ category: string; entry_count: number; earliest_month: string | null; latest_month: string | null; non_overlapping_months: number }>; observations: StructuralTimelineObservation[]; reported_entry_count: number; additional_entry_count: number; truncated: boolean }; visibility: { status: string; detector_version: string; threshold_version: string; observations: StructuralVisibilityObservation[]; reported_observation_count: number; additional_observation_count: number; truncated: boolean } };
+
 export type AnalysisReport = {
   analysis_id: string;
+  ai_features_enabled?: boolean;
+  ai_capabilities?: {
+    document_analysis: boolean;
+    company_research: boolean;
+    education_research: boolean;
+    linkedin_research: boolean;
+  };
   analysis_access_token?: string;
   score: number;
   band: Band;
@@ -386,6 +400,7 @@ export type AnalysisReport = {
   conflicting_count: number;
   file_details?: FileDetails | null;
   link_inspection?: LinkInspection | null;
+  structural_audits?: StructuralAudits | null;
   deterministic: {
     ruleset_version: string;
     candidates: DeterministicCandidate[];

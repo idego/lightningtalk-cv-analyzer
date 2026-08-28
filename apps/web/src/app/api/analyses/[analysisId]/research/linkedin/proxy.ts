@@ -8,7 +8,8 @@ export async function proxyLinkedInResearch(req: Request, context: { params: Pro
   const { analysisId } = await context.params;
   const body = await req.json().catch(() => ({}));
   if (typeof body.accessToken !== "string") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const upstream = await fetch(`${INTERNAL_API_URL}/analyses/${encodeURIComponent(analysisId)}/research/linkedin/discovery`, { method: "POST", headers: { "X-Analysis-Access-Token": body.accessToken } });
+  if (body.aiEnabled !== true) return NextResponse.json({ error: "AI disabled" }, { status: 409 });
+  const upstream = await fetch(`${INTERNAL_API_URL}/analyses/${encodeURIComponent(analysisId)}/research/linkedin/discovery`, { method: "POST", headers: { "X-Analysis-Access-Token": body.accessToken, "X-AI-Enabled": "true" } });
   const data = await upstream.json().catch(() => ({}));
   return NextResponse.json(data, { status: upstream.status });
 }

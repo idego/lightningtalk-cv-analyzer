@@ -3,8 +3,11 @@
 import { LogOut } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { useCopy } from "@/lib/app-settings";
 
 export function SignOutButton() {
+  const { t } = useCopy();
+
   return (
     <Button
       variant="ghost"
@@ -19,11 +22,11 @@ export function SignOutButton() {
           },
         })
       }
-      aria-label="Sign out"
-      title="Sign out"
+      aria-label={t("signOut")}
+      title={t("signOut")}
     >
       <LogOut className="size-3.5" />
-      Sign out
+      {t("signOut")}
     </Button>
   );
 }

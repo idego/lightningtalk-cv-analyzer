@@ -28,8 +28,25 @@ function memoryStorage() {
 }
 
 test("children are effective only when the master toggle is on", () => {
+  assert.deepEqual(effectiveAutoResearchKinds({ ...settings, aiEnabled: false }), []);
   assert.deepEqual(effectiveAutoResearchKinds({ ...settings, autoResearchEnabled: false }), []);
   assert.deepEqual(effectiveAutoResearchKinds({ ...settings, autoEducationResearch: false }), ["company", "linkedin"]);
+});
+
+test("does not schedule any research when AI is disabled", async () => {
+  let calls = 0;
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: memoryStorage(),
+    fetcher: async () => {
+      calls += 1;
+      return { ok: true, json: async () => ({}) };
+    },
+  });
+
+  await orchestrator.schedule(report("ai-off"), { ...settings, aiEnabled: false });
+  await orchestrator.schedule({ ...report("server-off"), ai_features_enabled: false }, settings);
+
+  assert.equal(calls, 0);
 });
 
 test("runs eligible research with one global concurrency limit", async () => {

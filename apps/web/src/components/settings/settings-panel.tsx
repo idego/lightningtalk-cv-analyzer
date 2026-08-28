@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { updateAppSettings, useCopy, type AppLanguage } from "@/lib/app-settings";
+import { updateAppSettings, useCopy, type AppLanguage, type CopyKey } from "@/lib/app-settings";
 
 type Capability = { ready: boolean; version?: string | null; recovery?: string | null };
 type Health = { status: string; ready: boolean; capabilities: Record<string, Capability> };
 type RefreshFeedback = "idle" | "refreshing" | "updated";
 
-const capabilityLabels: Record<string, string> = {
-  database: "Database", geonames: "GeoNames location resolver", document_ai: "AI document analysis",
-  company_research: "Company research", education_research: "Education research", linkedin_research: "LinkedIn research",
+const capabilityLabels: Record<string, CopyKey> = {
+  database: "database", geonames: "geoNamesResolver", document_ai: "aiDocumentAnalysis",
+  company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch", link_checks: "linkChecks",
 };
 
 export function SettingsPanel() {
@@ -59,14 +59,14 @@ export function SettingsPanel() {
         const body = await response.json() as { days: number };
         setRetentionDays(String(body.days));
       })
-      .catch(() => setRetentionMessage("Retention settings are unavailable."))
+      .catch(() => setRetentionMessage(t("retentionUnavailable")))
       .finally(() => setRetentionLoading(false));
-  }, []);
+  }, [t]);
 
   async function saveRetention() {
     const days = Number(retentionDays);
     if (!Number.isInteger(days) || days < 1 || days > 3650) {
-      setRetentionMessage("Enter a whole number from 1 to 3650.");
+      setRetentionMessage(t("enterWholeNumber"));
       return;
     }
     setRetentionLoading(true);
@@ -77,7 +77,7 @@ export function SettingsPanel() {
       body: JSON.stringify({ days }),
     });
     setRetentionLoading(false);
-    setRetentionMessage(response.ok ? "Saved." : "Retention could not be saved.");
+    setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
   }
 
   async function deleteAllAnalyses() {
@@ -88,9 +88,9 @@ export function SettingsPanel() {
     setDeletingAll(true);
     try {
       const response = await fetch("/api/analyses", { method: "DELETE" });
-      setRetentionMessage(response.ok ? "All saved analyses were deleted." : "Analyses could not be deleted.");
+      setRetentionMessage(response.ok ? t("allAnalysesDeleted") : t("analysesCouldNotDelete"));
     } catch {
-      setRetentionMessage("Analyses could not be deleted.");
+      setRetentionMessage(t("analysesCouldNotDelete"));
     } finally {
       setDeletingAll(false);
       setConfirmDeleteAll(false);
@@ -102,31 +102,39 @@ export function SettingsPanel() {
       <option value="en">English</option><option value="pl">Polski</option>
     </select>
   );
-  const toggle = (id: string, label: string, checked: boolean, onChange: (checked: boolean) => void, disabled = false) => (
+  const toggle = (id: string, label: string, checked: boolean, onChange: (checked: boolean) => void, disabled = false, description?: string) => (
     <label htmlFor={id} className={`flex items-center justify-between gap-4 py-3 ${disabled ? "text-muted-foreground" : ""}`}>
-      <span className="text-sm font-medium">{label}</span>
+      <span>
+        <span className="block text-sm font-medium">{label}</span>
+        {description ? <span className="mt-1 block text-xs text-muted-foreground">{description}</span> : null}
+      </span>
       <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-primary" />
     </label>
   );
+  const serverAiAvailable = health?.capabilities.document_ai?.ready === true;
 
   return <div className="mx-auto w-full max-w-3xl space-y-8">
     <section className="divide-y rounded-xl border bg-card px-5">
       <div className="flex flex-wrap items-center justify-between gap-4 py-5"><h3 className="font-medium">{t("uiLanguage")}</h3>{languageSelect(settings.uiLanguage, uiLanguage => updateAppSettings({ uiLanguage }))}</div>
-      <div className="flex flex-wrap items-center justify-between gap-4 py-5"><div><h3 className="font-medium">{t("reportLanguage")}</h3><p className="text-sm text-muted-foreground">Applied to newly generated AI explanations.</p></div>{languageSelect(settings.reportLanguage, reportLanguage => updateAppSettings({ reportLanguage }))}</div>
+      <div className="flex flex-wrap items-center justify-between gap-4 py-5"><div><h3 className="font-medium">{t("reportLanguage")}</h3><p className="text-sm text-muted-foreground">{t("reportLanguageDescription")}</p></div>{languageSelect(settings.reportLanguage, reportLanguage => updateAppSettings({ reportLanguage }))}</div>
     </section>
     <section className="rounded-xl border bg-card p-5">
-      <h3 className="font-medium">Analysis settings</h3>
-      <p className="mt-1 text-sm text-muted-foreground">Choose which public searches run after analysis.</p>
+      <h3 className="font-medium">{t("analysisSettings")}</h3>
+      <p className="mt-1 text-sm text-muted-foreground">{t("analysisSettingsDescription")}</p>
       <div className="mt-3 divide-y">
+        {toggle("ai-enabled", t("useAiFeatures"), settings.aiEnabled && serverAiAvailable, aiEnabled => updateAppSettings({ aiEnabled }), !serverAiAvailable, serverAiAvailable ? t("useAiFeaturesDescription") : t("aiUnavailable"))}
         {toggle("preview-findings-on-hover", t("previewFindingsOnHover"), settings.previewFindingsOnHover, previewFindingsOnHover => updateAppSettings({ previewFindingsOnHover }))}
-        {toggle("auto-research", "Run research automatically", settings.autoResearchEnabled, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }))}
+        {toggle("expand-sections-by-default", t("expandSectionsByDefault"), settings.expandSectionsByDefault, expandSectionsByDefault => updateAppSettings({ expandSectionsByDefault }))}
+        {settings.aiEnabled && serverAiAvailable ? <>
+        {toggle("auto-research", t("runResearchAutomatically"), settings.autoResearchEnabled, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }))}
         <div className="pl-4">
-          {toggle("auto-company", "Company research", settings.autoCompanyResearch, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled)}
-          {toggle("auto-education", "Education research", settings.autoEducationResearch, autoEducationResearch => updateAppSettings({ autoEducationResearch }), !settings.autoResearchEnabled)}
-          {toggle("auto-linkedin", "LinkedIn discovery", settings.autoLinkedinDiscovery, autoLinkedinDiscovery => updateAppSettings({ autoLinkedinDiscovery }), !settings.autoResearchEnabled)}
+          {toggle("auto-company", t("companyResearch"), settings.autoCompanyResearch, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled)}
+          {toggle("auto-education", t("educationResearch"), settings.autoEducationResearch, autoEducationResearch => updateAppSettings({ autoEducationResearch }), !settings.autoResearchEnabled)}
+          {toggle("auto-linkedin", t("linkedinDiscovery"), settings.autoLinkedinDiscovery, autoLinkedinDiscovery => updateAppSettings({ autoLinkedinDiscovery }), !settings.autoResearchEnabled)}
         </div>
+        </> : null}
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">LinkedIn discovery suggests possible public profiles only.</p>
+      {settings.aiEnabled && serverAiAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
     </section>
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
@@ -143,8 +151,8 @@ export function SettingsPanel() {
       <div className="mb-4 flex items-center justify-between gap-4"><h3 className="font-medium">{t("health")}</h3><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>
       <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{health?.ready ? t("ready") : t("degraded")}</div>
       <div className="divide-y">
-        {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ?? name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
-        {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-4 text-sm text-destructive">The API health check is unavailable.</p> : null}
+        {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ? t(capabilityLabels[name]) : name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
+        {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-4 text-sm text-destructive">{t("apiHealthUnavailable")}</p> : null}
       </div>
     </section>
   </div>;

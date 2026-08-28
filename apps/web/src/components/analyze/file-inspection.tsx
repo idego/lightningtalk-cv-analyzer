@@ -11,6 +11,7 @@ import type {
 } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
+import { useCopy, type CopyKey } from "@/lib/app-settings";
 
 const FILE_DETAIL_ORDER: FileDetailField[] = [
   "author",
@@ -26,21 +27,22 @@ const FILE_DETAIL_ORDER: FileDetailField[] = [
   "revision",
 ];
 
-const FILE_DETAIL_LABELS: Record<FileDetailField, string> = {
-  author: "Author",
-  creator: "Creator",
-  producer: "Producer",
-  title: "Title",
-  subject: "Subject",
-  creation_time: "Creation time",
-  modification_time: "Modification time",
-  created: "Created",
-  modified: "Modified",
-  last_modifier: "Last modifier",
-  revision: "Revision",
+const FILE_DETAIL_LABELS: Record<FileDetailField, CopyKey> = {
+  author: "author",
+  creator: "creator",
+  producer: "producer",
+  title: "title",
+  subject: "subject",
+  creation_time: "creationTime",
+  modification_time: "modificationTime",
+  created: "created",
+  modified: "modified",
+  last_modifier: "lastModifier",
+  revision: "revision",
 };
 
 export function FileDetailsDisclosure({ details }: { details?: FileDetails | null }) {
+  const { t } = useCopy();
   if (!details) return null;
 
   return (
@@ -50,7 +52,7 @@ export function FileDetailsDisclosure({ details }: { details?: FileDetails | nul
       title={
         <span className="flex min-w-0 items-center gap-2">
           <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-          <span>File details</span>
+          <span>{t("fileDetails")}</span>
           <span className="text-xs font-normal text-muted-foreground">({details.source_format.toUpperCase()})</span>
         </span>
       }
@@ -61,7 +63,7 @@ export function FileDetailsDisclosure({ details }: { details?: FileDetails | nul
           const detail = details.fields[field];
           return (
             <div key={field} className="min-w-0">
-              <dt className="text-xs font-semibold text-muted-foreground">{FILE_DETAIL_LABELS[field]}</dt>
+              <dt className="text-xs font-semibold text-muted-foreground">{t(FILE_DETAIL_LABELS[field])}</dt>
               <dd className="mt-0.5 break-words leading-relaxed">
                 {detail ? <FileDetailValue detail={detail} /> : <UnavailableValue />}
               </dd>
@@ -70,7 +72,7 @@ export function FileDetailsDisclosure({ details }: { details?: FileDetails | nul
         })}
       </dl>
       <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-        Metadata is document context only. It does not establish authenticity, identity, or location.
+        {t("metadataDisclaimer")}
       </p>
     </HoverDisclosure>
   );
@@ -82,10 +84,12 @@ function FileDetailValue({ detail }: { detail: FileDetail }) {
 }
 
 function UnavailableValue() {
-  return <span className="text-muted-foreground">Unavailable</span>;
+  const { t } = useCopy();
+  return <span className="text-muted-foreground">{t("unavailable")}</span>;
 }
 
 export function LinkInspectionPanel({ inspection }: { inspection?: LinkInspection | null }) {
+  const { t } = useCopy();
   if (!inspection || !inspection.links.length) return null;
 
   const suspicious = inspection.links.filter((link) => link.status === "SUSPICIOUS");
@@ -94,44 +98,45 @@ export function LinkInspectionPanel({ inspection }: { inspection?: LinkInspectio
   const notChecked = inspection.links.filter((link) => link.status === "NOT_CHECKED");
 
   return (
-    <section aria-label="Link inspection" className="space-y-2 rounded-md border p-3">
+    <section aria-label={t("linkInspection")} className="space-y-2 rounded-md border p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div>
-          <h3 className="font-medium">Link inspection</h3>
+          <h3 className="font-medium">{t("linkInspection")}</h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Document-level checks only; they do not make a candidate-level finding.
+            {t("documentLinkChecksOnly")}
           </p>
         </div>
         <p className="text-xs text-muted-foreground">
-          {inspection.links.length} inspected
+          {t("inspected", { count: inspection.links.length })}
         </p>
       </div>
 
       {suspicious.length ? (
-        <div className="space-y-2 pt-1" aria-label={`${suspicious.length} suspicious document links`}>
+        <div className="space-y-2 pt-1" aria-label={t("suspiciousDocumentLinks", { count: suspicious.length })}>
           {suspicious.map((link) => <LinkResultCard key={link.link_id} link={link} />)}
         </div>
       ) : null}
 
       {unavailable.length ? (
-        <div className="space-y-2 pt-1" aria-label={`${unavailable.length} unavailable document links`}>
+        <div className="space-y-2 pt-1" aria-label={t("unavailableDocumentLinks", { count: unavailable.length })}>
           {unavailable.map((link) => <LinkResultCard key={link.link_id} link={link} />)}
         </div>
       ) : null}
 
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1"><CheckCircle2 aria-hidden="true" className="size-3.5" /> Reachable: {reachable.length}</span>
-        <span>Unavailable: {unavailable.length}</span>
-        {notChecked.length ? <span>Not checked: {notChecked.length}</span> : null}
+        <span className="inline-flex items-center gap-1"><CheckCircle2 aria-hidden="true" className="size-3.5" /> {t("reachable")}: {reachable.length}</span>
+        <span>{t("unavailable")}: {unavailable.length}</span>
+        {notChecked.length ? <span>{t("notChecked")}: {notChecked.length}</span> : null}
       </p>
     </section>
   );
 }
 
 function LinkResultCard({ link }: { link: LinkCheckResult }) {
+  const { t } = useCopy();
   const suspicious = link.status === "SUSPICIOUS";
   const statusLabel: LinkOutcomeStatus = suspicious ? "SUSPICIOUS" : "UNAVAILABLE";
-  const title = link.title || "Document link needs review.";
+  const title = link.title || t("documentLinkNeedsReview");
 
   return (
     <HoverDisclosure
@@ -148,7 +153,7 @@ function LinkResultCard({ link }: { link: LinkCheckResult }) {
               <span className="font-medium leading-snug">{title}</span>
             </span>
             <span className="mt-1 block break-words text-xs font-normal leading-relaxed text-muted-foreground">
-              {link.displayed_value ?? link.sanitized_target ?? "Embedded hyperlink target"}
+              {link.displayed_value ?? link.sanitized_target ?? t("embeddedHyperlinkTarget")}
             </span>
           </span>
         </span>
@@ -156,20 +161,20 @@ function LinkResultCard({ link }: { link: LinkCheckResult }) {
       contentClassName="pt-3"
     >
       <dl className="grid gap-x-6 gap-y-3 border-t pt-3 text-sm sm:grid-cols-2">
-        <LinkDetail label="Displayed value" value={link.displayed_value} />
-        <LinkDetail label="Sanitized target" value={link.sanitized_target} wrap />
-        <LinkDetail label="Reason code" value={link.reason_code} />
-        <LinkDetail label="Source" value={`${link.source_location}${link.source_page ? ` · page ${link.source_page}` : ""}`} />
-        <LinkDetail label="Terminal status" value={link.terminal_status ? String(link.terminal_status) : null} />
-        <LinkDetail label="Terminal domain" value={link.terminal_registrable_domain} wrap />
+        <LinkDetail label={t("displayedValue")} value={link.displayed_value} />
+        <LinkDetail label={t("sanitizedTarget")} value={link.sanitized_target} wrap />
+        <LinkDetail label={t("reasonCode")} value={link.reason_code} />
+        <LinkDetail label={t("source")} value={`${link.source_location}${link.source_page ? ` · ${t("page")} ${link.source_page}` : ""}`} />
+        <LinkDetail label={t("terminalStatus")} value={link.terminal_status ? String(link.terminal_status) : null} />
+        <LinkDetail label={t("terminalDomain")} value={link.terminal_registrable_domain} wrap />
       </dl>
       {link.source_evidence.length ? (
         <p className="mt-3 border-l-2 pl-2 text-xs leading-relaxed text-muted-foreground">
-          Source evidence: “{link.source_evidence[0].excerpt}”
+          {t("sourceEvidence")}: “{link.source_evidence[0].excerpt}”
         </p>
       ) : null}
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-        Review the declaration and its source in the CV. This outcome is not proof of a candidate problem.
+        {t("reviewDeclaration")}
       </p>
     </HoverDisclosure>
   );

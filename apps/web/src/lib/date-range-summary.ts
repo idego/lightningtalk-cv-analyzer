@@ -67,18 +67,34 @@ function parseRange(value: string, now: Date): ParsedRange | null {
   };
 }
 
-function durationLabel(totalMonths: number) {
+function polishCountWord(value: number, one: string, few: string, many: string) {
+  if (value === 1) return one;
+  const lastTwo = value % 100;
+  const last = value % 10;
+  return last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14) ? few : many;
+}
+
+function durationLabel(totalMonths: number, language: "en" | "pl") {
   const years = Math.floor(totalMonths / 12);
   const months = totalMonths % 12;
   const parts: string[] = [];
-  if (years) parts.push(`${years} ${years === 1 ? "yr" : "yrs"}`);
-  if (months) parts.push(`${months} ${months === 1 ? "mo" : "mos"}`);
+  if (years) {
+    parts.push(language === "pl"
+      ? `${years} ${polishCountWord(years, "rok", "lata", "lat")}`
+      : `${years} ${years === 1 ? "yr" : "yrs"}`);
+  }
+  if (months) {
+    parts.push(language === "pl"
+      ? `${months} ${polishCountWord(months, "miesiąc", "miesiące", "miesięcy")}`
+      : `${months} ${months === 1 ? "mo" : "mos"}`);
+  }
   return parts.join(" ");
 }
 
 export function summarizeDateRanges(
   values: Array<string | null | undefined>,
   now = new Date(),
+  language: "en" | "pl" = "en",
 ) {
   const ranges = values
     .flatMap((value) => value ? [parseRange(value, now)] : [])
@@ -96,11 +112,13 @@ export function summarizeDateRanges(
     return result;
   }, []);
   const totalMonths = merged.reduce((sum, range) => sum + range.endMonth - range.startMonth, 0);
-  const duration = durationLabel(totalMonths);
+  const duration = durationLabel(totalMonths, language);
   if (!duration) return null;
 
   const startYear = Math.min(...ranges.map((range) => range.startYear));
   const endYear = Math.max(...ranges.map((range) => range.endYear));
-  const endLabel = ranges.some((range) => range.openEnded) ? "present" : String(endYear);
+  const endLabel = ranges.some((range) => range.openEnded)
+    ? language === "pl" ? "obecnie" : "present"
+    : String(endYear);
   return `${startYear}–${endLabel} · ${duration}`;
 }

@@ -6,6 +6,7 @@ import { authClient } from "@/lib/auth-client";
 import { IDEGO_LOGO_URL } from "@/lib/idego";
 import { Loader2 } from "lucide-react";
 import { type JSX, type SVGProps, useState } from "react";
+import { useCopy } from "@/lib/app-settings";
 
 const GoogleIcon = (props: JSX.IntrinsicAttributes & SVGProps<SVGSVGElement>) => (
   <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden {...props}>
@@ -14,6 +15,7 @@ const GoogleIcon = (props: JSX.IntrinsicAttributes & SVGProps<SVGSVGElement>) =>
 );
 
 export default function Login07() {
+  const { t } = useCopy();
   const [pending, setPending] = useState(false);
 
   async function signInWithGoogle() {
@@ -43,10 +45,9 @@ export default function Login07() {
               decoding="async"
             />
           </div>
-          <h1 className="text-balance text-3xl font-semibold">Sign in</h1>
+          <h1 className="text-balance text-3xl font-semibold">{t("signIn")}</h1>
           <p className="text-pretty text-muted-foreground text-sm">
-            Continue with your Idego Google account. Only <span className="font-mono">@idego.io</span> addresses can
-            access this service.
+            {t("signInDescription")}
           </p>
         </div>
 
@@ -62,7 +63,7 @@ export default function Login07() {
           ) : (
             <GoogleIcon className="h-4 w-4 shrink-0" />
           )}
-          Continue with Google
+          {t("continueWithGoogle")}
         </Button>
       </div>
     </div>
