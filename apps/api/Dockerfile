@@ -17,6 +17,8 @@ FROM base AS dev
 
 COPY tests ./tests
 COPY fixtures ./fixtures
+COPY scripts ./scripts
+COPY reference_data ./reference_data
 
 RUN pip install --no-cache-dir ".[dev]"
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { BriefcaseBusiness, Globe2, GraduationCap, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { BriefcaseBusiness, Globe2, GraduationCap, Map as MapIcon, MapPin, Phone, UserRound, Wrench } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type {
   AnalysisReport,
@@ -151,16 +151,18 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
   const selectedRecords = selectStructuredRecords(report);
   const education = selectedRecords.filter((record) => record.kind === "education");
   const employment = selectedRecords.filter((record) => record.kind === "employment");
+  const skills = report.document_understanding?.skills ?? [];
   const timelineNow = new Date();
   const educationTimeline = summarizeDateRanges(education.map((fact) => fact.study_dates), timelineNow, settings.uiLanguage);
   const employmentTimeline = summarizeDateRanges(employment.map((fact) => fact.employment_dates), timelineNow, settings.uiLanguage);
   const hasContact = Boolean(candidateName || phone);
   const hasLocation = Boolean(statedLocation || resolvedLocation || postalCode || postalCountryFact || euStatus);
-  const hasFacts = hasContact || hasLocation || education.length > 0 || employment.length > 0;
+  const hasFacts = hasContact || hasLocation || education.length > 0 || employment.length > 0 || skills.length > 0;
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
+  const skillsTone = "bg-cyan-500/10 text-cyan-800 dark:text-cyan-200";
 
   return (
     <HoverDisclosure
@@ -228,6 +230,20 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 value={fact.role ?? t("employmentEntry")}
                 detail={[employmentDetail(fact.organization ?? "", fact.location, fact.employment_dates), `${fact.authority} · ${fact.confidence}`, fact.unknown_fields.length ? `unknown: ${fact.unknown_fields.join(", ")}` : null].filter(Boolean).join(" · ")}
                 tone={employmentTone}
+              />)}
+            </div>
+          </section> : null}
+
+          {skills.length ? <section aria-labelledby="overview-skills" className="border-t pt-4">
+            <h4 id="overview-skills" className="mb-2 text-xs font-semibold text-foreground">{t("skills")}</h4>
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+              {skills.map((skill) => <OverviewRow
+                key={skill.id}
+                icon={<Wrench className="size-4" />}
+                label={t("explicitSkill")}
+                value={skill.display_label}
+                detail={`code · ${skill.confidence} · ESCO ${skill.taxonomy_version}`}
+                tone={skillsTone}
               />)}
             </div>
           </section> : null}
