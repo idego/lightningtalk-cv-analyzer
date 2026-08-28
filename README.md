@@ -20,7 +20,18 @@ Decision-support tool that checks whether a candidate's **stated location** on t
 
 ## Docker (recommended)
 
-For local development without external sign-in, run:
+Create the ignored local environment file, enable AI, provide the OpenAI key,
+and point it at the approved GeoNames directory:
+
+```bash
+cp .env.example .env.local
+# edit .env.local; never commit it
+make dev
+```
+
+`make dev` is the canonical full-stack development command. It validates the
+environment and pinned GeoNames checksums, builds the services, waits for every
+required capability, and then verifies the public health endpoint.
 
 ```bash
 make dev
@@ -33,13 +44,8 @@ configured Google OAuth.
 
 Stop the local stack with `make dev-down`.
 
-Run the full stack (web + private api):
-
-```bash
-docker compose up --build
-```
-
-The web app is available at `http://localhost:3000` by default. Set `WEB_PORT=3001` in `.env` to publish on port 3001 instead (container always listens on `3000`).
+The web app is available at `http://127.0.0.1:3001`. A plain Compose invocation
+retains safe defaults and is not the supported full-development path.
 
 - `web` is the only host-exposed service.
 - `api` is reachable only on the internal compose network (`http://api:8000`).
@@ -61,7 +67,7 @@ Optional environment variables (via shell or `.env`):
 - `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
 - `CV_VALIDATOR_MINIMUM_MEANINGFUL_TOKENS` — minimum document-level meaningful-token count (default `5`)
 - `CV_VALIDATOR_SMALL_LOCALITY_MAX_POPULATION` — informational review threshold for resolved non-EU localities (default `10000`; set `0` to disable; never changes score)
-- `CV_VALIDATOR_AI_ENABLED` — enables synchronous AI document analysis and recruiter-triggered company research; defaults to `false`
+- `CV_VALIDATOR_AI_ENABLED` — makes Document AI and company, education, and LinkedIn research available; defaults to `false`
 - `CV_VALIDATOR_AI_TRANSPORT_RETRY_LIMIT` — retryable timeout/network/429/5xx retries per AI analysis (default `1`)
 - `CV_VALIDATOR_AI_INVALID_RESPONSE_RETRY_LIMIT` — fresh retries after invalid model output (default `1`)
 - `CV_VALIDATOR_AI_ABSOLUTE_ATTEMPT_LIMIT` — absolute attempts including the initial AI call (default `3`)
@@ -99,8 +105,10 @@ retry context remains available; this does not repeat upload or research.
 The API stores the validated AI result, model and contract versions, token
 usage, and audit payload under one stable analysis ID. AI findings are review
 notes and never change the deterministic score, band, facts, or rule findings.
-The neutral-name boundary is documented in
-[`docs/candidate-name-boundary.md`](docs/candidate-name-boundary.md).
+The Settings master AI switch opts a user out of Document AI and every manual
+or automatic research feature without restarting the stack. Deterministic
+analysis remains available. The server environment remains authoritative: the
+browser cannot enable AI on a deployment where it is unavailable.
 
 The tracked Document Analyzer prompt and strict output schema live in
 `apps/api/src/cv_validator/ai/contracts/`. Runtime request construction and the
@@ -114,10 +122,13 @@ GeoNames runtime data is optional and is never baked into the image. See
 [`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for the
 approved-pair layout and explicit Compose overlay command.
 
-Start from the root `.env.example`:
+For production, start from the root `.env.example` using an ignored `.env`:
 
 ```bash
 cp .env.example .env
+make deploy-check
+# after checking out the exact reviewed commit:
+make deploy
 ```
 
 ## Deployment note (subdomain + TLS)

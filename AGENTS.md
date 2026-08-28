@@ -30,7 +30,10 @@ See `README.md` for usage. Specs and active work live under `openspec/`.
 
 | Task | Command |
 | --- | --- |
-| Run API (Docker) | `docker compose up --build` |
+| Run full local stack | `make dev` |
+| Stop local stack | `make dev-down` |
+| Check production config | `make deploy-check` |
+| Deploy current reviewed SHA | `make deploy` |
 | Run tests (Docker) | `docker compose --profile test run --rm test` |
 | Run tests (local) | `cd apps/api && PYTHONPATH=src pytest` |
 | Run API (local) | `cd apps/api && uvicorn cv_validator.api.app:app --reload` |
@@ -121,8 +124,8 @@ openspec/
 Use OpenSpec for non-trivial features (new capabilities, API contracts,
 scoring changes). Skip for pure tooling/config unless the user asks.
 
-Active change: `cv-location-consistency` (implementation complete; ready
-to archive when accepted).
+Check `openspec status` for the current active changes; do not rely on a name
+copied into agent context.
 
 ---
 
