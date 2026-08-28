@@ -61,11 +61,22 @@ from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LI
 from cv_validator.research.domain import LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
 from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearcher
 from cv_validator.operations import OperationsTelemetry, safe_log
-from cv_validator.ai.application import ProfileExtractionError, ProfileExtractor, extract_candidate_profile
-from cv_validator.ai.openai_client import OpenAIResponsesProfileExtractor
+from cv_validator.ai.application import (
+    ProfileExtractionError,
+    ProfileExtractor,
+    ProfileSummarizer,
+    ProfileSummaryError,
+    extract_candidate_profile,
+    generate_candidate_profile_summary,
+)
+from cv_validator.ai.openai_client import (
+    OpenAIResponsesProfileExtractor,
+    OpenAIResponsesProfileSummarizer,
+)
 from cv_validator.profile_builder import (
     ProfileBuilderSnapshot,
     ProfileExportRequest,
+    ProfileSummaryGenerationRequest,
     ProfileTemplate,
     default_profile_template,
     render_candidate_profile_docx,
@@ -135,6 +146,7 @@ def create_app(
     link_dns_resolver: DNSResolver | None = None,
     link_http_client: LinkHTTPClient | None = None,
     profile_extractor: ProfileExtractor | None = None,
+    profile_summarizer: ProfileSummarizer | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_link_check_config = link_check_config or load_link_check_config()
@@ -147,6 +159,11 @@ def create_app(
     selected_profile_extractor = profile_extractor
     if selected_ai_settings.enabled and selected_profile_extractor is None:
         selected_profile_extractor = OpenAIResponsesProfileExtractor(
+            selected_ai_settings
+        )
+    selected_profile_summarizer = profile_summarizer
+    if selected_ai_settings.enabled and selected_profile_summarizer is None:
+        selected_profile_summarizer = OpenAIResponsesProfileSummarizer(
             selected_ai_settings
         )
     selected_company_researcher = company_researcher
@@ -528,6 +545,33 @@ def create_app(
                 "warnings": [],
             }
         )
+
+    @app.post("/profile-builder/summary")
+    def profile_builder_generate_summary(
+        request: ProfileSummaryGenerationRequest,
+        x_ai_enabled: bool = Header(default=True),
+    ) -> JSONResponse:
+        if not x_ai_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="profile_builder_ai_disabled_for_request",
+            )
+        if not selected_ai_settings.enabled or selected_profile_summarizer is None:
+            raise HTTPException(status_code=503, detail="profile_builder_ai_disabled")
+        try:
+            summary = generate_candidate_profile_summary(
+                selected_ai_settings,
+                selected_profile_summarizer,
+                request.profile,
+                request.instruction,
+            )
+        except ProfileSummaryError as exc:
+            safe_log("profile_builder_summary_failed", error_code=str(exc))
+            raise HTTPException(
+                status_code=502,
+                detail="profile_summary_failed",
+            ) from exc
+        return JSONResponse({"summary": summary})
 
     @app.post("/profile-builder/export/docx")
     def profile_builder_export_docx(request: ProfileExportRequest) -> Response:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from typing import Literal
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -138,6 +141,28 @@ class ProfileTemplateHeader(_StrictModel):
     show_contact: bool = True
 
 
+class ProfileTemplateLogo(_StrictModel):
+    data_url: str = Field(
+        min_length=32,
+        max_length=6_000_000,
+        pattern=r"^data:image/png;base64,[A-Za-z0-9+/=]+$",
+    )
+    original_name: str = Field(min_length=1, max_length=255)
+    x_pct: float = Field(default=72, ge=0, le=100)
+    y_pct: float = Field(default=4, ge=0, le=100)
+    width_pct: float = Field(default=18, ge=2, le=60)
+    aspect_ratio: float = Field(default=2, gt=0.05, le=20)
+
+    @model_validator(mode="after")
+    def validate_page_bounds(self) -> ProfileTemplateLogo:
+        if self.x_pct + self.width_pct > 100.001:
+            raise ValueError("template logo must fit inside page width")
+        height_pct = self.width_pct * (210 / 297) / self.aspect_ratio
+        if self.y_pct + height_pct > 100.001:
+            raise ValueError("template logo must fit inside page height")
+        return self
+
+
 class ProfileTemplateSection(_StrictModel):
     id: str = Field(min_length=1, max_length=80)
     kind: TemplateSectionKind
@@ -154,6 +179,7 @@ class ProfileTemplate(_StrictModel):
     branding: ProfileTemplateBranding = Field(default_factory=ProfileTemplateBranding)
     typography: ProfileTemplateTypography = Field(default_factory=ProfileTemplateTypography)
     header: ProfileTemplateHeader = Field(default_factory=ProfileTemplateHeader)
+    logo: ProfileTemplateLogo | None = None
     sections: list[ProfileTemplateSection] = Field(min_length=1, max_length=8)
 
     @model_validator(mode="after")
@@ -172,6 +198,11 @@ class ProfileBuilderSnapshot(_StrictModel):
     profile: CandidateProfile
     anonymization: AnonymizationPolicy = Field(default_factory=AnonymizationPolicy)
     template: ProfileTemplate
+
+
+class ProfileSummaryGenerationRequest(_StrictModel):
+    profile: CandidateProfile
+    instruction: str | None = Field(default=None, max_length=12_000)
 
 
 class ProfileExportRequest(_StrictModel):
@@ -300,6 +331,8 @@ def render_candidate_profile_docx(
         header.runs[0].font.bold = True
         header.runs[0].font.size = Pt(max(body_size + 2.5, 12))
         header.runs[0].font.color.rgb = accent
+    if selected_template.logo is not None:
+        _add_floating_template_logo(header, section, selected_template.logo)
 
     _render_profile_header(document, presentation, selected_template)
     for template_section in selected_template.sections:
@@ -325,6 +358,69 @@ def render_candidate_profile_docx(
     stream = BytesIO()
     document.save(stream)
     return stream.getvalue()
+
+
+def _add_floating_template_logo(paragraph, section, logo: ProfileTemplateLogo) -> None:
+    encoded = logo.data_url.split(",", 1)[1]
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise ValueError("invalid template logo data") from exc
+
+    page_width = int(section.page_width)
+    page_height = int(section.page_height)
+    width = max(1, int(page_width * logo.width_pct / 100))
+    height = max(1, int(width / logo.aspect_ratio))
+    x = int(page_width * logo.x_pct / 100)
+    y = int(page_height * logo.y_pct / 100)
+
+    run = paragraph.add_run()
+    run.add_picture(BytesIO(image_bytes), width=width, height=height)
+    drawing = run._r.drawing_lst[-1]
+    inline = drawing[0]
+    inline.tag = qn("wp:anchor")
+    for name, value in {
+        "distT": "0",
+        "distB": "0",
+        "distL": "0",
+        "distR": "0",
+        "simplePos": "0",
+        "relativeHeight": "251658240",
+        "behindDoc": "0",
+        "locked": "0",
+        "layoutInCell": "1",
+        "allowOverlap": "1",
+    }.items():
+        inline.set(name, value)
+
+    simple_pos = OxmlElement("wp:simplePos")
+    simple_pos.set("x", "0")
+    simple_pos.set("y", "0")
+    position_h = OxmlElement("wp:positionH")
+    position_h.set("relativeFrom", "page")
+    pos_x = OxmlElement("wp:posOffset")
+    pos_x.text = str(x)
+    position_h.append(pos_x)
+    position_v = OxmlElement("wp:positionV")
+    position_v.set("relativeFrom", "page")
+    pos_y = OxmlElement("wp:posOffset")
+    pos_y.text = str(y)
+    position_v.append(pos_y)
+
+    inline.insert(0, simple_pos)
+    inline.insert(1, position_h)
+    inline.insert(2, position_v)
+
+    extent_index = next(
+        (index for index, child in enumerate(inline) if child.tag == qn("wp:extent")),
+        3,
+    )
+    effect_extent = OxmlElement("wp:effectExtent")
+    for name in ("l", "t", "r", "b"):
+        effect_extent.set(name, "0")
+    wrap_none = OxmlElement("wp:wrapNone")
+    inline.insert(extent_index + 1, effect_extent)
+    inline.insert(extent_index + 2, wrap_none)
 
 
 def _render_profile_header(

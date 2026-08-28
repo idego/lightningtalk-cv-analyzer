@@ -1,11 +1,14 @@
+import base64
 import io
+import zipfile
 
 from docx import Document
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from cv_validator.ai.config import AISettings
 from cv_validator.api.app import create_app
-from cv_validator.ai.domain import ProfileExtractionResponse
+from cv_validator.ai.domain import ProfileExtractionResponse, ProfileSummaryResponse
 from cv_validator.profile_builder import (
     AnonymizationPolicy,
     CandidateProfile,
@@ -13,6 +16,7 @@ from cv_validator.profile_builder import (
     PersonalInformation,
     ProfileTemplate,
     ProfileTemplateBranding,
+    ProfileTemplateLogo,
     ProfileTemplateSection,
     default_profile_template,
     apply_profile_anonymization,
@@ -84,13 +88,33 @@ class _Extractor:
         )
 
 
-def _client(tmp_path, location_resolver, extractor: _Extractor) -> TestClient:
+class _Summarizer:
+    def __init__(self, summary: str = "Generated recruiter summary.") -> None:
+        self.summary = summary
+        self.requests = []
+
+    def summarize(self, request):
+        self.requests.append(request)
+        return ProfileSummaryResponse(
+            summary=self.summary,
+            response_model="gpt-5.6-luna",
+            usage={},
+        )
+
+
+def _client(
+    tmp_path,
+    location_resolver,
+    extractor: _Extractor,
+    summarizer: _Summarizer | None = None,
+) -> TestClient:
     return TestClient(
         create_app(
             db_path=tmp_path / "profile-builder.db",
             location_resolver=location_resolver,
             ai_settings=AISettings(enabled=True, api_key="test-key"),
             profile_extractor=extractor,
+            profile_summarizer=summarizer or _Summarizer(),
         )
     )
 
@@ -202,6 +226,54 @@ def test_profile_builder_reports_ai_disabled(tmp_path, location_resolver) -> Non
     )
     assert response.status_code == 503
     assert response.json() == {"detail": "profile_builder_ai_disabled"}
+
+
+def test_profile_builder_summary_uses_luna_without_reasoning_and_excludes_contact_and_old_summary(
+    tmp_path,
+    location_resolver,
+) -> None:
+    summarizer = _Summarizer("Python backend engineer aligned with the role.")
+    client = _client(tmp_path, location_resolver, _Extractor(), summarizer)
+    profile = _profile_snapshot()["profile"]
+
+    response = client.post(
+        "/profile-builder/summary",
+        json={
+            "profile": profile,
+            "instruction": "Focus on backend Python work for this job: Senior Python Engineer.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "summary": "Python backend engineer aligned with the role."
+    }
+    payload = summarizer.requests[0].to_openai_payload()
+    assert payload["model"] == "gpt-5.6-luna"
+    assert payload["reasoning"] == {"effort": "none"}
+    assert payload["tools"] == []
+    assert payload["store"] is False
+    assert payload["max_output_tokens"] <= 384
+    input_text = payload["input"][0]["content"][0]["text"]
+    assert "Senior Python Engineer" in input_text
+    assert "jane@example.com" not in input_text
+    assert "Backend engineer focused on Python services." not in input_text
+    assert "Built APIs" in input_text
+
+
+def test_profile_builder_summary_respects_request_ai_opt_out(
+    tmp_path,
+    location_resolver,
+) -> None:
+    summarizer = _Summarizer()
+    client = _client(tmp_path, location_resolver, _Extractor(), summarizer)
+    response = client.post(
+        "/profile-builder/summary",
+        headers={"X-AI-Enabled": "false"},
+        json={"profile": _profile_snapshot()["profile"], "instruction": None},
+    )
+    assert response.status_code == 409
+    assert summarizer.requests == []
 
 
 def test_anonymization_is_derived_and_does_not_mutate_canonical_profile() -> None:
@@ -578,3 +650,47 @@ def test_docx_export_rejects_custom_template_id_without_snapshot(
         },
     )
     assert response.status_code == 422
+
+
+
+def _transparent_logo_data_url() -> str:
+    image = Image.new("RGBA", (240, 80), (0, 0, 0, 0))
+    for x in range(30, 210):
+        for y in range(20, 60):
+            image.putpixel((x, y), (60, 194, 217, 180))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def test_template_logo_is_rendered_as_floating_page_positioned_image(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    template = default_profile_template().model_copy(deep=True)
+    template.logo = ProfileTemplateLogo(
+        data_url=_transparent_logo_data_url(),
+        original_name="brand.svg",
+        x_pct=63,
+        y_pct=8,
+        width_pct=22,
+        aspect_ratio=3,
+    )
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": _profile_snapshot()["profile"],
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": template.id,
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        header_xml = archive.read("word/header1.xml").decode("utf-8")
+        media_names = [name for name in archive.namelist() if name.startswith("word/media/")]
+    assert "<wp:anchor" in header_xml
+    assert 'relativeFrom="page"' in header_xml
+    assert "<wp:wrapNone" in header_xml
+    assert media_names

@@ -30,3 +30,11 @@
 - [x] 7.1 Add persistence/template/API/export regression tests, including owner isolation and custom-template semantics.
 - [x] 7.2 Run backend full suite, frontend typecheck/lint/unit tests, and Node 22 production build.
 - [x] 7.3 Review the whole diff from `origin/feature/cv-analyzer-development` for standards/spec drift and push the updated branch.
+
+
+## 8. Creator direct manipulation and AI summary
+- [x] 8.1 Replace block move arrows with drag-and-drop and move visibility to the block eye icon.
+- [x] 8.2 Make Template Creator a fixed no-scroll viewport and protect dirty Back/browser-unload navigation.
+- [x] 8.3 Add sanitized PNG/JPG/WebP/SVG logo upload, direct page dragging/resizing, persistence, preview, and floating DOCX rendering.
+- [x] 8.4 Add promptable/regeneratable GPT-5.6 Luna Summary generation with reasoning disabled and a small token budget.
+- [x] 8.5 Run full regression, production build, browser smoke, and whole-diff review after these changes.

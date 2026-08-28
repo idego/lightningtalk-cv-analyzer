@@ -80,3 +80,36 @@ The Template Creator SHALL let HR visually assemble a template from supported do
 #### Scenario: Custom template is exported
 - **WHEN** a profile using a custom template is exported
 - **THEN** DOCX section order, visible sections, headings, branding, and supported typography derive from the exact submitted template snapshot
+
+
+### Requirement: Promptable AI Summary
+The Profile Builder SHALL allow HR to generate or regenerate the one canonical profile Summary using the current professional profile plus an optional recruiter instruction or pasted job description. Generation SHALL use the pinned GPT-5.6 Luna model with no reasoning and a small output limit, and SHALL NOT send personal/contact fields or the existing Summary as generation input.
+
+#### Scenario: Recruiter generates a role-focused summary
+- **WHEN** HR enters an optional instruction or job description and chooses Generate or Regenerate
+- **THEN** the generated source-faithful summary replaces `profile.summary` and the same value is immediately used by preview, autosave, and export
+
+### Requirement: Direct-manipulation Template Creator
+The Template Creator SHALL fit inside one application viewport without vertical scrolling. HR SHALL reorder blocks by drag-and-drop and SHALL toggle block visibility directly from the block eye icon rather than a separate visibility switch.
+
+#### Scenario: Recruiter rearranges profile sections
+- **WHEN** a block is dragged to another position
+- **THEN** the normalized template section order changes and preview/export use that new order
+
+#### Scenario: Recruiter hides a section
+- **WHEN** the eye icon on a block is activated
+- **THEN** the block visibility changes immediately and the preview reflects it
+
+### Requirement: Freely positioned template logo
+A template MAY contain one uploaded company logo. HR SHALL be able to upload PNG, JPG, WebP, or SVG, resize it, and drag it anywhere within the A4 page bounds. Preview, saved template snapshots, reopened templates, and DOCX export SHALL use the same normalized logo asset and position.
+
+#### Scenario: Recruiter uploads and positions a transparent logo
+- **WHEN** HR uploads a supported logo and drags it to a new page position
+- **THEN** its normalized PNG data, size, and page-relative coordinates are persisted and the exported DOCX contains a floating image at the corresponding position
+
+### Requirement: Protect unsaved template work
+The Template Creator SHALL warn before its explicit Back action or browser unload discards dirty template changes.
+
+#### Scenario: Recruiter presses Back after editing a new template
+- **WHEN** unsaved template changes exist
+- **THEN** the recruiter must confirm discarding them before leaving the creator

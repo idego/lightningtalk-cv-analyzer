@@ -85,6 +85,19 @@ export async function POST(req: Request, context: Context) {
     return NextResponse.json(data, { status: upstream.status });
   }
 
+  if (action === "summary") {
+    const upstream = await fetch(`${INTERNAL_API_URL}/profile-builder/summary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AI-Enabled": req.headers.get("X-AI-Enabled") === "false" ? "false" : "true",
+      },
+      body: await req.text(),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    return NextResponse.json(data, { status: upstream.status });
+  }
+
   if (action === "export/docx") {
     const upstream = await fetch(`${INTERNAL_API_URL}/profile-builder/export/docx`, {
       method: "POST",

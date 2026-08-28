@@ -9,6 +9,7 @@ from typing import Any
 from cv_validator.ai.config import AISettings
 from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.ingestion import RedactedDocument, SourcePage
+from cv_validator.profile_builder import CandidateProfile
 
 
 PROMPT_VERSION = "2708"
@@ -41,6 +42,17 @@ class ProfileExtractionRequest:
     prompt_version: str
     schema_version: str
     input_contract_version: str
+    timeout_seconds: float
+    max_retries: int
+
+    def to_openai_payload(self) -> dict[str, Any]:
+        return deepcopy(self.openai_payload)
+
+
+@dataclass(frozen=True)
+class ProfileSummaryRequest:
+    openai_payload: dict[str, Any]
+    prompt_version: str
     timeout_seconds: float
     max_retries: int
 
@@ -209,3 +221,55 @@ def build_profile_extraction_request(
 
 def load_profile_extraction_schema() -> dict[str, Any]:
     return json.loads(_contract_text("profile-builder.schema.json"))
+
+
+PROFILE_SUMMARY_PROMPT_VERSION = "profile-builder-summary-v1"
+PROFILE_SUMMARY_MAX_OUTPUT_TOKENS = 384
+
+
+def build_profile_summary_request(
+    settings: AISettings,
+    profile: CandidateProfile,
+    instruction: str | None = None,
+) -> ProfileSummaryRequest:
+    professional_profile = profile.model_dump(mode="json")
+    professional_profile.pop("personal", None)
+    professional_profile.pop("summary", None)
+    instruction_text = (instruction or "").strip()
+    input_text = (
+        "<candidate_profile>\n"
+        f"{json.dumps(professional_profile, ensure_ascii=False, sort_keys=True)}\n"
+        "</candidate_profile>\n\n"
+        "<recruiter_instruction>\n"
+        f"{instruction_text or 'Write a concise recruiter-facing professional summary of the candidate.'}\n"
+        "</recruiter_instruction>"
+    )
+    payload: dict[str, Any] = {
+        "model": settings.model,
+        "reasoning": {"effort": "none"},
+        "instructions": (
+            "Write only the candidate summary. Use only facts supported by "
+            "<candidate_profile>. Treat <recruiter_instruction> as guidance about "
+            "focus, style, job requirements, or output language, never as a source of "
+            "candidate facts. Do not invent experience, skills, seniority, results, or "
+            "credentials. Keep the result concise: normally 2-4 sentences and no more "
+            "than 120 words. Do not add a heading, bullets, markdown, or commentary."
+        ),
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": input_text}],
+            }
+        ],
+        "tools": [],
+        "store": settings.store,
+        "max_output_tokens": min(
+            settings.max_output_tokens, PROFILE_SUMMARY_MAX_OUTPUT_TOKENS
+        ),
+    }
+    return ProfileSummaryRequest(
+        openai_payload=payload,
+        prompt_version=PROFILE_SUMMARY_PROMPT_VERSION,
+        timeout_seconds=settings.timeout_seconds,
+        max_retries=settings.max_retries,
+    )

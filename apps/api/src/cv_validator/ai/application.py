@@ -14,12 +14,15 @@ from cv_validator.ai.domain import (
     AIReportComposition,
     DocumentAnalyzerResponse,
     ProfileExtractionResponse,
+    ProfileSummaryResponse,
 )
 from cv_validator.ai.request import (
     DocumentAnalysisRequest,
     ProfileExtractionRequest,
+    ProfileSummaryRequest,
     build_document_analysis_request,
     build_profile_extraction_request,
+    build_profile_summary_request,
     load_profile_extraction_schema,
 )
 from cv_validator.ai.validation import (
@@ -67,6 +70,17 @@ class ProfileExtractor(Protocol):
 
 class ProfileExtractionError(RuntimeError):
     """Safe Profile Builder extraction failure without candidate content."""
+
+
+class ProfileSummarizer(Protocol):
+    def summarize(
+        self,
+        request: ProfileSummaryRequest,
+    ) -> ProfileSummaryResponse: ...
+
+
+class ProfileSummaryError(RuntimeError):
+    """Safe Profile Builder summary failure without candidate content."""
 
 
 def analyze_report_with_ai(
@@ -310,3 +324,45 @@ def _dedupe_profile_strings(values: list[str]) -> list[str]:
         seen.add(key)
         result.append(value)
     return result
+
+
+def generate_candidate_profile_summary(
+    settings: AISettings,
+    summarizer: ProfileSummarizer,
+    profile: CandidateProfile,
+    instruction: str | None = None,
+) -> str:
+    if not settings.enabled:
+        raise ProfileSummaryError("profile_builder_ai_disabled")
+    request = build_profile_summary_request(settings, profile, instruction)
+    attempts = 0
+    transport_retries = 0
+    while attempts < settings.absolute_attempt_limit:
+        attempts += 1
+        try:
+            response = summarizer.summarize(request)
+        except DocumentAnalyzerTimeoutError as exc:
+            if (
+                transport_retries < settings.transport_retry_limit
+                and attempts < settings.absolute_attempt_limit
+            ):
+                transport_retries += 1
+                continue
+            raise ProfileSummaryError("profile_summary_timeout") from exc
+        except DocumentAnalyzerClientError as exc:
+            if (
+                exc.retryable
+                and transport_retries < settings.transport_retry_limit
+                and attempts < settings.absolute_attempt_limit
+            ):
+                transport_retries += 1
+                continue
+            raise ProfileSummaryError("profile_summary_client_error") from exc
+
+        if response.refused or response.summary is None:
+            raise ProfileSummaryError("profile_summary_refused")
+        summary = response.summary.strip()
+        if not summary or len(summary) > 3_000:
+            raise ProfileSummaryError("profile_summary_invalid_response")
+        return summary
+    raise ProfileSummaryError("profile_summary_failed")

@@ -11,8 +11,16 @@ from cv_validator.ai.application import (
     DocumentAnalyzerTimeoutError,
 )
 from cv_validator.ai.config import AISettings
-from cv_validator.ai.domain import DocumentAnalyzerResponse, ProfileExtractionResponse
-from cv_validator.ai.request import DocumentAnalysisRequest, ProfileExtractionRequest
+from cv_validator.ai.domain import (
+    DocumentAnalyzerResponse,
+    ProfileExtractionResponse,
+    ProfileSummaryResponse,
+)
+from cv_validator.ai.request import (
+    DocumentAnalysisRequest,
+    ProfileExtractionRequest,
+    ProfileSummaryRequest,
+)
 
 
 class _ResponsesAPI(Protocol):
@@ -137,4 +145,56 @@ class OpenAIResponsesProfileExtractor:
             response_model=response_model,
             usage=usage,
             refused=refused,
+        )
+
+
+class OpenAIResponsesProfileSummarizer:
+    """Short, non-reasoning Profile Builder summary generation."""
+
+    def __init__(
+        self,
+        settings: AISettings,
+        *,
+        client: _OpenAIClient | None = None,
+    ) -> None:
+        if not settings.enabled or settings.api_key is None:
+            raise ValueError("enabled AI settings are required")
+        self._client = client or openai.OpenAI(
+            api_key=settings.api_key,
+            timeout=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+        )
+
+    def summarize(self, request: ProfileSummaryRequest) -> ProfileSummaryResponse:
+        try:
+            response = self._client.responses.create(**request.to_openai_payload())
+        except openai.APITimeoutError as exc:
+            raise DocumentAnalyzerTimeoutError() from exc
+        except openai.APIStatusError as exc:
+            status = exc.status_code
+            raise DocumentAnalyzerClientError(
+                retryable=status == 429 or status >= 500,
+                http_status_class=f"{status // 100}xx",
+                provider_request_id=_safe_request_id(
+                    exc.response.headers.get("x-request-id")
+                ),
+            ) from exc
+        except openai.APIConnectionError as exc:
+            raise DocumentAnalyzerClientError(retryable=True) from exc
+        except openai.APIError as exc:
+            raise DocumentAnalyzerClientError(retryable=False) from exc
+
+        usage = response.usage.model_dump() if response.usage is not None else {}
+        if _contains_refusal(response):
+            return ProfileSummaryResponse(
+                summary=None,
+                response_model=response.model,
+                usage=usage,
+                refused=True,
+            )
+        summary = response.output_text.strip() if isinstance(response.output_text, str) else ""
+        return ProfileSummaryResponse(
+            summary=summary or None,
+            response_model=response.model,
+            usage=usage,
         )

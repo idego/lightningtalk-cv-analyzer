@@ -11,6 +11,8 @@ IDEGO currently relies on an external CV-to-profile workflow whose editor, previ
 - Export one IDEGO-style, meaningfully editable DOCX directly from the submitted current profile snapshot.
 - Persist extracted/edited profile snapshots for a Recent profiles workflow without storing the original CV bytes.
 - Add persistent constrained templates, a template picker/manager, and a visual Template Creator screen.
+- Add a promptable GPT-5.6 Luna AI Summary action that writes into the canonical Summary field.
+- Make Template Creator a fixed no-scroll workspace with drag-reordered blocks, direct eye visibility toggles, unsaved-change protection, and one freely positioned uploaded logo.
 - Keep PDF conversion and unconstrained canvas editing outside this slice.
 
 ## Capabilities

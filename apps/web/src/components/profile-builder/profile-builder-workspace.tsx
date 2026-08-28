@@ -19,6 +19,7 @@ import {
   Plus,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -132,6 +133,15 @@ export type ProfileTemplateSection = {
   layout: "default" | "inline" | "bullets";
 };
 
+export type ProfileTemplateLogo = {
+  data_url: string;
+  original_name: string;
+  x_pct: number;
+  y_pct: number;
+  width_pct: number;
+  aspect_ratio: number;
+};
+
 export type ProfileTemplate = {
   schema_version: "profile-template-v1";
   id: string;
@@ -152,6 +162,7 @@ export type ProfileTemplate = {
     show_headline: boolean;
     show_contact: boolean;
   };
+  logo: ProfileTemplateLogo | null;
   sections: ProfileTemplateSection[];
 };
 
@@ -235,6 +246,7 @@ export const DEFAULT_PROFILE_TEMPLATE: ProfileTemplate = {
     show_headline: true,
     show_contact: true,
   },
+  logo: null,
   sections: [
     { id: "summary", kind: "summary", title: "Summary", visible: true, layout: "default" },
     { id: "skills", kind: "skills", title: "Skills", visible: true, layout: "inline" },
@@ -571,15 +583,31 @@ export function ProfileDocumentPreview({
   profile,
   template,
   label = "Profile layout preview",
+  logoEditable = false,
+  onLogoChange,
+  onLogoSelect,
+  fillHeight = false,
 }: {
   profile: CandidateProfile;
   template: ProfileTemplate;
   label?: string;
+  logoEditable?: boolean;
+  onLogoChange?: (logo: ProfileTemplateLogo) => void;
+  onLogoSelect?: () => void;
+  fillHeight?: boolean;
 }) {
   const [previewPage, setPreviewPage] = useState(1);
   const [previewPageCount, setPreviewPageCount] = useState(1);
   const previewViewportRef = useRef<HTMLDivElement>(null);
   const previewFlowRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const logoDragRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    xPct: number;
+    yPct: number;
+  } | null>(null);
 
   useEffect(() => {
     const viewport = previewViewportRef.current;
@@ -614,9 +642,44 @@ export function ProfileDocumentPreview({
     ...profile.personal.links.other.map((link) => link.label ? `${link.label}: ${link.url}` : link.url),
   ].filter(Boolean);
 
+  function startLogoDrag(event: React.PointerEvent<HTMLImageElement>) {
+    if (!logoEditable || !template.logo || !onLogoChange) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    logoDragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      xPct: template.logo.x_pct,
+      yPct: template.logo.y_pct,
+    };
+    onLogoSelect?.();
+  }
+
+  function moveLogo(event: React.PointerEvent<HTMLImageElement>) {
+    const drag = logoDragRef.current;
+    const page = pageRef.current;
+    const logo = template.logo;
+    if (!drag || drag.pointerId !== event.pointerId || !page || !logo || !onLogoChange) return;
+    const rect = page.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const logoHeightPct = ((rect.width * logo.width_pct / 100) / logo.aspect_ratio) / rect.height * 100;
+    const nextX = Math.min(100 - logo.width_pct, Math.max(0, drag.xPct + (event.clientX - drag.clientX) / rect.width * 100));
+    const nextY = Math.min(100 - logoHeightPct, Math.max(0, drag.yPct + (event.clientY - drag.clientY) / rect.height * 100));
+    onLogoChange({ ...logo, x_pct: nextX, y_pct: nextY });
+  }
+
+  function endLogoDrag(event: React.PointerEvent<HTMLImageElement>) {
+    if (logoDragRef.current?.pointerId !== event.pointerId) return;
+    logoDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   return (
-    <div className="min-w-0">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+    <div className={fillHeight ? "flex h-full min-h-0 min-w-0 flex-col" : "min-w-0"}>
+      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="size-4" />{label} · {template.name}
         </div>
@@ -626,7 +689,8 @@ export function ProfileDocumentPreview({
           <Button variant="ghost" size="icon-sm" aria-label="Next preview page" disabled={previewPage >= previewPageCount} onClick={() => setPreviewPage((current) => Math.min(previewPageCount, current + 1))}><ChevronRight /></Button>
         </div>
       </div>
-      <div className="relative mx-auto aspect-[210/297] w-full max-w-[760px] overflow-hidden bg-white text-[#081932] shadow-[0_8px_30px_rgba(8,25,50,0.12)] ring-1 ring-black/10 dark:text-[#081932]">
+      <div className={fillHeight ? "flex min-h-0 flex-1 items-center justify-center" : ""}>
+      <div ref={pageRef} className={fillHeight ? "relative h-full max-h-full aspect-[210/297] w-auto max-w-full overflow-hidden bg-white text-[#081932] shadow-[0_8px_30px_rgba(8,25,50,0.12)] ring-1 ring-black/10 dark:text-[#081932]" : "relative mx-auto aspect-[210/297] w-full max-w-[760px] overflow-hidden bg-white text-[#081932] shadow-[0_8px_30px_rgba(8,25,50,0.12)] ring-1 ring-black/10 dark:text-[#081932]"}>
         <div ref={previewViewportRef} className="absolute inset-x-[7.5%] bottom-[7%] top-[6.5%] overflow-hidden">
           <div
             ref={previewFlowRef}
@@ -655,12 +719,34 @@ export function ProfileDocumentPreview({
             </div>
           </div>
         </div>
+        {template.logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={template.logo.data_url}
+            alt="Template logo"
+            draggable={false}
+            onPointerDown={startLogoDrag}
+            onPointerMove={moveLogo}
+            onPointerUp={endLogoDrag}
+            onPointerCancel={endLogoDrag}
+            onClick={() => onLogoSelect?.()}
+            className={logoEditable ? "absolute z-20 cursor-move select-none rounded-sm outline outline-1 outline-primary/60" : "pointer-events-none absolute z-20 select-none"}
+            style={{
+              left: `${template.logo.x_pct}%`,
+              top: `${template.logo.y_pct}%`,
+              width: `${template.logo.width_pct}%`,
+              height: "auto",
+              touchAction: "none",
+            }}
+          />
+        ) : null}
         <div className="absolute inset-x-[7.5%] bottom-[2.5%] flex items-center justify-between border-t pt-2 text-[10px] text-slate-400">
           <span><FileText className="mr-1 inline size-3" />{template.branding.show_brand ? `${template.branding.brand_name} Candidate Profile` : "Candidate Profile"}</span>
           <span>Page {previewPage} of {previewPageCount}</span>
         </div>
       </div>
-      <p className="mx-auto mt-2 max-w-[760px] text-[11px] leading-relaxed text-muted-foreground">
+      </div>
+      <p className={fillHeight ? "mt-1 shrink-0 text-center text-[10px] leading-tight text-muted-foreground" : "mx-auto mt-2 max-w-[760px] text-[11px] leading-relaxed text-muted-foreground"}>
         Page breaks reflect this browser preview. Final DOCX pagination can vary slightly between Word-compatible renderers.
       </p>
     </div>
@@ -734,6 +820,9 @@ export function ProfileBuilderWorkspace() {
   const [openingProfileId, setOpeningProfileId] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [summaryInstruction, setSummaryInstruction] = useState("");
+  const [summaryGenerating, setSummaryGenerating] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<EditorSectionId>>(
@@ -1088,6 +1177,46 @@ export function ProfileBuilderWorkspace() {
     router.push(`/profile-builder/templates/${encodeURIComponent(templateId ?? "new")}${returnQuery}`);
   }
 
+  async function generateSummary() {
+    if (!profile || summaryGenerating) return;
+    if (!settings.aiEnabled) {
+      setSummaryError("Enable AI features in Settings before generating a summary.");
+      return;
+    }
+    setSummaryGenerating(true);
+    setSummaryError(null);
+    try {
+      const response = await fetch("/api/profile-builder/summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AI-Enabled": String(settings.aiEnabled),
+        },
+        body: JSON.stringify({
+          profile,
+          instruction: summaryInstruction.trim() || null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        summary?: string;
+        detail?: string;
+      };
+      if (!response.ok || !payload.summary) {
+        if (payload.detail === "profile_builder_ai_disabled_for_request") {
+          throw new Error("Enable AI features in Settings before generating a summary.");
+        }
+        throw new Error("AI summary generation failed. Try again.");
+      }
+      mutate((draft) => {
+        draft.summary = payload.summary ?? null;
+      });
+    } catch (cause) {
+      setSummaryError(cause instanceof Error ? cause.message : "AI summary generation failed.");
+    } finally {
+      setSummaryGenerating(false);
+    }
+  }
+
   async function exportDocx() {
     if (!profile) return;
     setError(null);
@@ -1133,6 +1262,8 @@ export function ProfileBuilderWorkspace() {
     setSourceFilename(null);
     setSourceFile(null);
     setAnonymization(DEFAULT_ANONYMIZATION);
+    setSummaryInstruction("");
+    setSummaryError(null);
     setExpandedSections(new Set(EDITOR_SECTIONS));
     setSaveStatus("idle");
     setError(null);
@@ -1349,6 +1480,36 @@ export function ProfileBuilderWorkspace() {
             {sectionIsOpen("profile") ? <CardContent className="space-y-3">
               <Field label="Headline" value={profile.headline} onChange={(value) => mutate((draft) => { draft.headline = value; })} />
               <TextareaField label="Summary" value={profile.summary ?? ""} rows={5} onChange={(value) => mutate((draft) => { draft.summary = value || null; })} />
+              <div className="rounded-xl border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4" />AI Summary</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">GPT-5.6 Luna · reasoning none · max 384 output tokens</p>
+                  </div>
+                  <Button
+                    variant={profile.summary ? "outline" : "default"}
+                    size="sm"
+                    disabled={summaryGenerating || !settings.aiEnabled}
+                    onClick={() => void generateSummary()}
+                  >
+                    {summaryGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                    {summaryGenerating ? "Generating…" : profile.summary ? "Regenerate" : "Generate"}
+                  </Button>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  <Label htmlFor="profile-summary-instruction">Instruction or job description (optional)</Label>
+                  <textarea
+                    id="profile-summary-instruction"
+                    rows={3}
+                    maxLength={12000}
+                    value={summaryInstruction}
+                    onChange={(event) => setSummaryInstruction(event.target.value)}
+                    placeholder="Example: Focus on Python backend experience and leadership, or paste the job description here."
+                    className="w-full resize-y rounded-lg border border-input bg-background px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                </div>
+                {summaryError ? <p className="mt-2 text-sm text-destructive">{summaryError}</p> : null}
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <TextareaField label="Skills" value={profile.skills.join("\n")} rows={5} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.skills = nonEmptyLines(value); })} />
                 <TextareaField label="Technologies" value={profile.technologies.join("\n")} rows={5} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.technologies = nonEmptyLines(value); })} />

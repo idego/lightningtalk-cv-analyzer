@@ -50,3 +50,16 @@ The same exact template snapshot is sent with DOCX export, avoiding a save/expor
 ### D8: Keep template management inside the Profile Builder flow
 
 The upload state shows the current template beside Recent profiles. A template manager dialog can select a template, create a new one, or navigate to editing an existing one. `/profile-builder/templates/new` and `/profile-builder/templates/<id>` render the same Template Creator screen. The built-in `idego-default` can be owner-customized without changing other users; deleting that override falls back to the built-in default.
+
+
+### D9: Keep AI Summary cheap and source-faithful
+
+AI Summary uses the existing pinned `gpt-5.6-luna` model with `reasoning.effort = none`, no tools, response storage disabled, and a 384-token output ceiling. The request excludes personal/contact data and the existing Summary so regeneration is grounded in professional profile facts rather than its own previous output. Recruiter instructions or pasted job descriptions may steer focus, tone, or language but are explicitly not a source of candidate facts. The returned text replaces the one canonical `profile.summary` value and therefore flows through autosave, preview, and export automatically.
+
+### D10: Allow one constrained free-position logo element
+
+The document flow remains constrained to semantic profile blocks. The only V1 free-positioned canvas element is an optional company logo. HR may upload PNG, JPG, WebP, or SVG; the browser sanitizes SVG network/script content and normalizes every upload to bounded PNG data stored in the template snapshot. Position and width are normalized as page percentages. The browser preview supports pointer dragging and DOCX writes the same logo as a floating page-positioned image, preserving transparency.
+
+### D11: Template Creator is a single-viewport tool
+
+Template Creator intentionally disables page/footer scrolling. Blocks are reordered with native drag-and-drop and their eye icons directly toggle visibility. Properties are split into Template/Header/Block/Logo tabs so all editing controls remain reachable within one viewport. Back/refresh warns before discarding dirty template changes.
