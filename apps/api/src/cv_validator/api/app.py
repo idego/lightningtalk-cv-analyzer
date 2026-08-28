@@ -526,12 +526,16 @@ def create_app(
                     context = retry_contexts.get(analysis_id)
                 if context is None or context.redacted_document is None:
                     raise HTTPException(status_code=409, detail="ai_retry_context_unavailable")
+                from cv_validator.document_understanding.visibility import build_visibility_exclusion_index
+                exclusion = build_visibility_exclusion_index(context.redacted_document)
                 outcome = run_document_analysis(
                     selected_ai_settings,
                     selected_document_analyzer,
                     context.redacted_document,
                     context.deterministic,
                     report_language=context.report_language,
+                    exclusion_intervals=exclusion.intervals,
+                    understanding_context=context.report.document_understanding,
                 )
                 with retry_contexts_guard:
                     if analysis_id in retry_invalidated:

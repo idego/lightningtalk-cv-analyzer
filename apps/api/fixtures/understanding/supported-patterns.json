@@ -1,23 +1,9 @@
 [
-  {
-    "id": "mixed-language-records",
-    "text": "Doświadczenie zawodowe\nExample Labs\nSoftware Engineer\n01/2020 - 02/2022\nWykształcenie\nExample University\nBachelor of Science\n09/2015 - 06/2019\nUmiejętności\nPython, SQL",
-    "sections": ["employment", "education", "skills"],
-    "identities": [["employment", "Example Labs"], ["education", "Example University"]],
-    "skills": ["Python (computer programming)", "SQL"]
-  },
-  {
-    "id": "self-employment-abstention",
-    "text": "Experience\nSelf employment\nSoftware Engineer\n01/2020 - Present\nSkills\nTypeScript",
-    "sections": ["employment", "skills"],
-    "identities": [],
-    "skills": ["TypeScript"]
-  },
-  {
-    "id": "duplicate-periods",
-    "text": "Experience\nFirst Company Ltd\nSoftware Engineer\n01/2020 - 02/2022\nSecond Company Ltd\nProduct Manager\n01/2020 - 02/2022",
-    "sections": ["employment"],
-    "identities": [["employment", "First Company Ltd"], ["employment", "Second Company Ltd"]],
-    "skills": []
-  }
+  {"id":"mixed-language-records","text":"Doświadczenie zawodowe\nCompany: Example Labs Ltd\nRole: Software Engineer\n01/2020 - 02/2022\nWykształcenie\nExample University\nBachelor of Science\n09/2015 - 06/2019\nUmiejętności\nPython, SQL","sections":["employment","education","skills"],"records":[["employment","Example Labs Ltd","Software Engineer","01/2020 - 02/2022"],["education","Example University",null,"09/2015 - 06/2019"]],"skills":["Python (computer programming)","SQL"],"subjects":[["company","Example Labs Ltd"],["education","Example University"]],"coverage":"completed"},
+  {"id":"self-employment-abstention","text":"Experience\nSamozatrudnienie\nRole: Software Engineer\n01/2020 - Present\nSkills\nTypeScript","sections":["employment","skills"],"records":[["employment","Samozatrudnienie","Software Engineer","01/2020 - Present"]],"skills":["TypeScript"],"subjects":[],"coverage":"completed"},
+  {"id":"duplicate-periods","text":"Experience\nFirst Company Ltd\nRole: Software Engineer\n01/2020 - 02/2022\nSecond Company Ltd\nRole: Product Manager\n01/2020 - 02/2022","sections":["employment"],"records":[["employment","First Company Ltd","Software Engineer","01/2020 - 02/2022"],["employment","Second Company Ltd","Product Manager","01/2020 - 02/2022"]],"skills":[],"subjects":[["company","First Company Ltd"],["company","Second Company Ltd"]],"coverage":"completed"},
+  {"id":"date-first-employment","text":"Experience\n03/2022 - 04/2024\nCompany: Northwind GmbH\nRole: Developer","sections":["employment"],"records":[["employment","Northwind GmbH","Developer","03/2022 - 04/2024"]],"skills":[],"subjects":[["company","Northwind GmbH"]],"coverage":"completed"},
+  {"id":"same-line-employment","text":"Experience\nCompany: Northwind GmbH | Role: Developer | 03/2022 - 04/2024","sections":["employment"],"records":[["employment","Northwind GmbH","Developer","03/2022 - 04/2024"]],"skills":[],"subjects":[["company","Northwind GmbH"]],"coverage":"completed"},
+  {"id":"short-skill-abstention","text":"Skills\nC, R, Go\nPython","sections":["skills"],"records":[],"skills":["Python (computer programming)"],"subjects":[],"coverage":"completed"},
+  {"id":"unknown-boundary","text":"Experience\nExample Labs Ltd\nRole: Engineer\n01/2020 - 02/2022\nINTERESTS\n03/2022 - 04/2022","sections":["employment","other"],"records":[["employment","Example Labs Ltd","Engineer","01/2020 - 02/2022"]],"skills":[],"subjects":[["company","Example Labs Ltd"]],"coverage":"completed"}
 ]

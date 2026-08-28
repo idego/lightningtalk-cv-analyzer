@@ -15,6 +15,7 @@ from cv_validator.ai.request import (
     load_document_analysis_schema,
 )
 from cv_validator.ingestion import RedactedDocument, SourcePage
+from cv_validator.document_understanding.relationships import is_self_employment_label
 
 
 REQUIRED_CHECK_IDS = frozenset(
@@ -381,6 +382,7 @@ def _materialize_evidence(
             or line_id not in source_lines
             or source_lines[line_id][0] != page_id
             or not source_lines[line_id][1]
+            or "█" in source_lines[line_id][1]
         ):
             if line_id in seen:
                 continue
@@ -490,6 +492,8 @@ def _line_ids_to_evidence(
     evidence: list[dict[str, str]] = []
     for line_id in line_ids:
         if not isinstance(line_id, str) or line_id not in source_lines:
+            return None
+        if "█" in source_lines[line_id][1]:
             return None
         evidence.append(
             {"page_id": source_lines[line_id][0], "line_id": line_id}
@@ -651,16 +655,7 @@ def _derive_research_candidates(
 
 
 def _is_named_organization(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    normalized = re.sub(r"[^a-z]+", " ", value.casefold()).strip()
-    return normalized not in {
-        "",
-        "self employed",
-        "self employment",
-        "freelance",
-        "freelancer",
-    }
+    return isinstance(value, str) and bool(value.strip()) and not is_self_employment_label(value)
 
 
 def _dedupe_facts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -15,6 +15,7 @@ from cv_validator.research.domain import (
     CompanyResearchRequest,
 )
 from cv_validator.research.subjects import derive_subject_union
+from cv_validator.document_understanding.relationships import is_self_employment_label
 
 RESEARCH_VERSION = "company-research-v1"
 PROMPT_VERSION = "company-research-prompt-v2"
@@ -102,7 +103,6 @@ def _safe_organization_subject(value: str) -> bool:
         return False
     if re.search(r"\+?\d[\d\s().-]{6,}\d", stripped):
         return False
-    normalized = re.sub(r"[^a-z]+", " ", stripped.casefold()).strip()
-    if normalized in {"self employed", "self employment", "freelance", "freelancer"}:
+    if is_self_employment_label(value):
         return False
     return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2

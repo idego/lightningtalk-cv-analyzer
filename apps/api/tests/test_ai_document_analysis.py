@@ -1629,6 +1629,33 @@ def test_application_boundary_converts_invalid_fake_response_to_safe_failure() -
     assert outcome.response_model == "gpt-5.6-luna-runtime"
 
 
+def test_quarantined_line_cannot_support_an_ai_finding() -> None:
+    raw = RawDocument(
+        pages=(SourcePage("page-0001", 1, "Hidden employment detail"),),
+        source_format="text",
+    )
+    redacted = redact_national_ids(raw)
+    response = _valid_response()
+    response["facts"]["education"] = []
+    response["findings"] = [{
+        "category": "timeline_gap", "status": "unconfirmed",
+        "observation": "A gap may be present.", "reason": "The cited entry leaves a gap.",
+        "importance": "worth_knowing", "confidence": "medium",
+        "limitation": "The document may omit activity.",
+        "material_effect": "none", "affected_fact": "not_applicable",
+        "evidence": [{"page_id": "page-0001", "line_id": "page-0001-line-0001"}],
+    }]
+    outcome = run_document_analysis(
+        AISettings(enabled=True, api_key="test-key", invalid_response_retry_limit=0),
+        FakeDocumentAnalyzer(DocumentAnalyzerResponse(payload=response, response_model="test", usage={})),
+        redacted,
+        analyze_deterministically(redacted, "test"),
+        exclusion_intervals=(("page-0001", 0, len("Hidden employment detail")),),
+    )
+    assert outcome.status is AIAnalysisStatus.FAILED
+    assert outcome.failure_reason is AIFailureReason.INVALID_RESPONSE
+
+
 @pytest.mark.parametrize(
     "kind",
     ("root-array", "page-id-array", "line-id-array", "facts-array"),

@@ -52,6 +52,11 @@ SECTION_ALIASES = {
 _EXCLUDED = re.compile(r"\b(?:birth|born|dob|date of birth|urodz|certificate|certification|publication|project|award)\b", re.I)
 
 
+def date_range_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Expose the shared range grammar without creating a second parser."""
+    return tuple(match.span() for match in _RANGE.finditer(text))
+
+
 def build_shared_annotations(document: RedactedDocument, *, snapshot_month: str | None = None, config: StructuralAuditConfig | None = None):
     """Own the shared section/date/visibility grammar for all projections."""
     cfg = config or StructuralAuditConfig()
@@ -242,6 +247,8 @@ def detect_sections(document: RedactedDocument, exclusion: VisibilityExclusionIn
     for index, line in enumerate(lines):
         normalized = normalize_text(line.text.strip().rstrip(":"))
         kind = next((candidate for candidate, aliases in SECTION_ALIASES.items() if normalized in aliases), None)
+        if kind is None and _looks_unknown_heading(line.text):
+            kind = SectionKind.OTHER
         if kind is None or exclusion.intersects(line.page_id, line.start_offset, line.end_offset):
             continue
         headings.append((index, line, kind))
@@ -253,6 +260,12 @@ def detect_sections(document: RedactedDocument, exclusion: VisibilityExclusionIn
         evidence = UnderstandingEvidence(line.page_id, pages[line.page_id].page_number, line.line_id, line.start_offset, line.end_offset, "exact", line.text[:256])
         result.append(SectionSpan(stable_source_id(f"section-{kind.value}", line.page_id, line.start_offset, line.end_offset), kind, Confidence.HIGH, line.text.strip(), line.line_id, end_line.line_id, (evidence,), index))
     return tuple(result)
+
+
+def _looks_unknown_heading(value: str) -> bool:
+    text = value.strip().rstrip(":")
+    words = text.split()
+    return bool(text) and len(words) <= 5 and (value.strip().endswith(":") or (text.upper() == text and any(ch.isalpha() for ch in text)))
 
 
 def _month_index(value: str | None) -> int:

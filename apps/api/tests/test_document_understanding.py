@@ -15,6 +15,8 @@ from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.ingestion import PresentationSpan, RawDocument, SourcePage
 from cv_validator.ingestion.redaction import redact_national_ids
 from cv_validator.structural import audit_document
+from cv_validator.research.company import build_company_research_request
+from cv_validator.research.cache import company_cache_descriptor
 
 
 SYNTHETIC_CV = """Contact
@@ -197,14 +199,88 @@ def test_partly_hidden_unrelated_token_preserves_visible_record_evidence() -> No
 
 
 def test_date_anchor_stays_with_preceding_entry_and_identical_dates_do_not_join() -> None:
-    text = "Experience\nExample Labs\nSoftware Engineer\n01/2020 - 02/2022\nOther Company Ltd\nProduct Manager\n01/2020 - 02/2022"
+    text = "Experience\nExample Labs Ltd\nSoftware Engineer\n01/2020 - 02/2022\nOther Company Ltd\nProduct Manager\n01/2020 - 02/2022"
     payload = understanding_to_payload(_result(text))
     records = payload["records"]
     assert [next(field["value"] for field in record["fields"] if field["name"] == "organization") for record in records] == [
-        "Example Labs", "Other Company Ltd"
+        "Example Labs Ltd", "Other Company Ltd"
     ]
     assert len({record["date_range_ids"][0] for record in records}) == 2
     assert {link["record_id"] for link in payload["timeline_record_links"]} == {record["id"] for record in records}
+
+
+@pytest.mark.parametrize("text", [
+    "Experience\n01/2020 - 02/2022\nExample Labs Ltd\nSoftware Engineer",
+    "Experience\nExample Labs Ltd\nSoftware Engineer\n01/2020 - 02/2022",
+    "Education\n09/2015 - 06/2019\nExample University\nBachelor of Science",
+    "Education\nExample University\nBachelor of Science\n09/2015 - 06/2019",
+])
+def test_date_first_and_date_last_entries_keep_explicit_links(text: str) -> None:
+    payload = understanding_to_payload(_result(text))
+    assert len(payload["records"]) == 1
+    assert len(payload["records"][0]["date_range_ids"]) == 1
+    assert payload["timeline_record_links"][0]["record_id"] == payload["records"][0]["id"]
+
+
+@pytest.mark.parametrize("value", ["Product Owner", "Team Coordinator", "Customer Success"])
+def test_generic_title_case_role_does_not_become_company(value: str) -> None:
+    payload = understanding_to_payload(_result(f"Experience\n{value}\n01/2020 - 02/2022"))
+    assert payload["records"] == []
+    assert payload["code_research_subjects"] == []
+
+
+def test_hidden_company_label_cannot_own_visible_value_or_research_subject() -> None:
+    text = "Experience\nCompany: Example Labs Ltd\nRole: Software Engineer\n01/2020 - 02/2022"
+    start = text.index("Company")
+    span = PresentationSpan("page-0001", 1, "Company", start, start + 7, association="exact", explicit_hidden=True)
+    payload = understanding_to_payload(_result(text, spans=(span,)))
+    assert payload["records"] == []
+    assert payload["code_research_subjects"] == []
+
+
+def test_label_and_value_keep_separate_evidence_through_research_projection() -> None:
+    payload = understanding_to_payload(_result(
+        "Experience\nCompany: Example Labs Ltd | Role: Software Engineer | 01/2020 - 02/2022"
+    ))
+    record = payload["records"][0]
+    organization = next(field for field in record["fields"] if field["name"] == "organization")
+    role = next(field for field in record["fields"] if field["name"] == "role")
+    assert [item["association"] for item in organization["evidence"]] == ["exact", "exact"]
+    assert [item["excerpt"] for item in organization["evidence"]] == ["Company", "Example Labs Ltd"]
+    assert role["value"] == "Software Engineer"
+    assert record["date_range_ids"]
+    assert payload["code_research_subjects"][0]["subject"] == "Example Labs Ltd"
+    request = build_company_research_request({"document_understanding": payload, "ai_analysis": {"status": "failed"}})
+    descriptor = company_cache_descriptor(request)
+    assert request.input_facts == ({"organization": "Example Labs Ltd"},)
+    assert descriptor.normalized_subjects == ("example labs ltd",)
+    assert "Company" not in descriptor.normalized_subjects
+
+
+def test_quarantined_evidence_never_serializes_and_marks_coverage_partial() -> None:
+    text = "Education\nExample University\nBachelor of Science\nHIDDEN_DECORATION"
+    start = text.index("HIDDEN_DECORATION")
+    span = PresentationSpan("page-0001", 1, "HIDDEN_DECORATION", start, len(text), association="exact", explicit_hidden=True)
+    payload = understanding_to_payload(_result(text, spans=(span,)))
+    assert payload["coverage"]["status"] == "partial"
+    assert "HIDDEN_DECORATION" not in json.dumps(payload)
+
+
+def test_unknown_heading_stops_timeline_category_inheritance() -> None:
+    result = _result("Experience\nExample Labs Ltd\nSoftware Engineer\n01/2020 - 02/2022\nINTERESTS\n03/2022 - 04/2022")
+    assert result.structural_audits.timeline.entries[-1].category == "unknown"
+    assert any(section.kind.value == "other" for section in result.sections)
+
+
+def test_ingestion_omitted_surfaces_make_understanding_coverage_partial() -> None:
+    raw = RawDocument(
+        pages=(SourcePage("page-0001", 1, "Skills\nPython"),),
+        source_format="docx",
+        presentation_omitted_parts=("docx_headers", "docx_footnotes", "docx_comments", "docx_drawings", "docx_embedded_files"),
+    )
+    payload = understanding_to_payload(understand_document(redact_national_ids(raw), "test", snapshot_month="2026-08"))
+    assert payload["coverage"]["status"] == "partial"
+    assert set(payload["coverage"]["omitted_parts"]) >= {"docx_headers", "docx_footnotes_endnotes", "docx_comments", "docx_drawings", "docx_embedded_files"}
 
 
 @pytest.mark.parametrize("mutation", [

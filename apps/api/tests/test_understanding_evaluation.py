@@ -23,25 +23,36 @@ def _prf(expected, actual):
 
 def test_supported_pattern_evaluation_thresholds_and_reproducibility() -> None:
     fixtures = json.loads((Path(__file__).parents[1] / "fixtures" / "understanding" / "supported-patterns.json").read_text(encoding="utf-8"))
-    section_expected = []; section_actual = []; identity_expected = []; identity_actual = []; skill_expected = []; skill_actual = []
+    section_expected = []; section_actual = []; record_expected = []; record_actual = []; skill_expected = []; skill_actual = []; subject_expected = []; subject_actual = []
     unsupported_positive_fields = 0
     for fixture in fixtures:
         first = _analyze(fixture["text"]); second = _analyze(fixture["text"])
         assert first == second
         section_expected.extend((fixture["id"], value) for value in fixture["sections"])
         section_actual.extend((fixture["id"], item["kind"]) for item in first["sections"])
-        identity_expected.extend((fixture["id"], *value) for value in fixture["identities"])
+        record_expected.extend((fixture["id"], *value) for value in fixture["records"])
         for record in first["records"]:
             identity_name = "institution" if record["kind"] == "education" else "organization"
             identity = next(field for field in record["fields"] if field["name"] == identity_name)
-            if identity["status"] == "supported": identity_actual.append((fixture["id"], record["kind"], identity["value"]))
+            if identity["status"] != "supported" and record["kind"] == "employment":
+                identity = next(field for field in record["fields"] if field["name"] == "relationship_type")
+            secondary_name = "program" if record["kind"] == "education" else "role"
+            dates_name = "study_dates" if record["kind"] == "education" else "employment_dates"
+            secondary = next(field for field in record["fields"] if field["name"] == secondary_name)
+            dates = next(field for field in record["fields"] if field["name"] == dates_name)
+            if identity["status"] == "supported": record_actual.append((fixture["id"], record["kind"], identity["value"], secondary["value"], dates["value"]))
             unsupported_positive_fields += sum(field["status"] == "supported" and (not field["evidence"] or field["value"] is None) for field in record["fields"])
         skill_expected.extend((fixture["id"], value) for value in fixture["skills"])
         skill_actual.extend((fixture["id"], item["display_label"]) for item in first["skills"])
+        subject_expected.extend((fixture["id"], *value) for value in fixture["subjects"])
+        subject_actual.extend((fixture["id"], item["category"], item["subject"]) for item in first["code_research_subjects"])
+        assert first["coverage"]["status"] == fixture["coverage"]
     section_precision, section_recall, _ = _prf(section_expected, section_actual)
-    identity_precision, _, entry_f1 = _prf(identity_expected, identity_actual)
+    record_precision, _, record_exact_match_f1 = _prf(record_expected, record_actual)
     skill_precision, _, _ = _prf(skill_expected, skill_actual)
+    subject_precision, subject_recall, _ = _prf(subject_expected, subject_actual)
     assert section_precision >= .98 and section_recall >= .95
-    assert identity_precision >= .98 and entry_f1 >= .90
+    assert record_precision >= .98 and record_exact_match_f1 >= .90
     assert skill_precision >= .99
+    assert subject_precision >= .98 and subject_recall >= .95
     assert unsupported_positive_fields == 0

@@ -300,18 +300,20 @@ entry point for one release, but its section/date/visibility grammar is owned by
 the document-understanding slice. Legacy reports without the new payload continue
 to use validated AI facts in the UI.
 
-The checked-in ESCO index is an offline, reviewed English/Polish subset of ESCO
-1.2.0 intended for supported explicit-skill patterns. It is built without runtime
-network access:
+The checked-in ESCO index is compiled from the pinned official ESCO 1.2.0 RDF
+classification export. It includes the reviewed English/Polish preferred and
+alternative labels for non-obsolete skill concepts and is built without runtime
+network access. Source/license metadata and checksums are pinned in
+`apps/api/reference_data/esco/official-export-v1.2.0.json`.
 
 ```bash
 cd apps/api
 python scripts/build_esco_skill_index.py \
-  reference_data/esco/reviewed-skills-v1.csv \
+  /path/to/esco-v1.2.0-rdf.zip \
   src/cv_validator/document_understanding/data/esco-skills-v1.json \
-  --expected-checksum 8487d8db1061d1ea07ba89ba322e5416b6333641c054fa5fbde8722e4b8f704a \
-  --source-version ESCO-1.2.0-reviewed-subset-v1 \
-  --source-url https://esco.ec.europa.eu/en/use-esco/download
+  --expected-checksum 49526f51ea5a26126c866e010c5552e1af084ed3eb5a53e1a3602bc06957d66d \
+  --source-version ESCO-v1.2.0-official-rdf-en-pl \
+  --source-url 'https://ec.europa.eu/esco/download/ESCO%20dataset%20-%20v1.2.0%20-%20classification%20-%20%20-%20rdf.zip'
 ```
 
 The compiled manifest records source and license URLs, filtering rules,

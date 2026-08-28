@@ -20,6 +20,7 @@ from cv_validator.extraction.postal import POSTAL_PATTERNS
 from cv_validator.ingestion import RedactedDocument, SourcePage
 from cv_validator.ingestion.redaction import NATIONAL_ID_REDACTION_VERSION
 from cv_validator.phone_policy import PHONE_CANDIDATE_EXTRACTOR
+from cv_validator.document_understanding.annotations import date_range_spans
 
 CANDIDATE_EXTRACTOR_VERSION = PHONE_CANDIDATE_EXTRACTOR.version
 
@@ -37,10 +38,6 @@ _PHONE = re.compile(
     r"(?<![\w])(?:\+|00)?\d(?:[\d \t()./-]*\d){6,}"
     r"(?:[ \t]*(?:ext\.?|x)[ \t]*\d{1,6})?(?!\w)",
     re.IGNORECASE,
-)
-_DATE_RANGE = re.compile(
-    r"\b(?:\d{4}|\d{1,2}[/.]\d{4}|\d{4}[/.]\d{1,2})"
-    r"\s*[-–—]\s*(?:\d{4}|\d{1,2}[/.]\d{4}|\d{4}[/.]\d{1,2})\b"
 )
 _EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _URL = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>]+")
@@ -256,7 +253,7 @@ def _from_matches(
         if kind is CandidateKind.PHONE:
             explicitly_labeled = _phone_subject(page.text, start_offset) is Subject.PERSON
             has_international_prefix = bool(re.match(r"\s*(?:\+|00)", value))
-            if _DATE_RANGE.search(value) and not (
+            if any(left <= start_offset and end_offset <= right for left, right in date_range_spans(page.text)) and not (
                 explicitly_labeled and has_international_prefix
             ):
                 continue

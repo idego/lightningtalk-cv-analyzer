@@ -13,24 +13,24 @@ from cv_validator.document_understanding.domain import (
     UnderstandingEvidence, stable_source_id,
 )
 from cv_validator.document_understanding.normalization import normalize_text, subject_key
+from cv_validator.document_understanding.relationships import is_self_employment_label
 from cv_validator.document_understanding.skills import DEFAULT_INDEX, SkillIndexError, match_explicit_skills
 from cv_validator.extraction.deterministic import analyze_deterministically
 from cv_validator.location import LocationResolver
 
 PARSER_VERSION = "document-understanding-parser-v1"
 RULESET_VERSION = "document-understanding-rules-v1"
-_RELATIONSHIPS = {"freelance", "freelancer", "self employed", "self employment", "self-employed", "self-employment", "samozatrudnienie", "samozatrudniony", "wolny strzelec"}
 _INSTITUTIONS = ("university", "college", "academy", "school", "institute", "faculty", "uniwersytet", "politechnika", "akademia", "szkola", "wydzial")
 _DEGREES = ("bachelor", "master", "phd", "doctorate", "licencjat", "magister", "inzynier", "mba", "bsc", "msc")
 _ROLES = ("engineer", "developer", "manager", "consultant", "analyst", "designer", "specialist", "architect", "director", "lead", "intern", "programista", "inzynier", "konsultant", "analityk", "specjalista", "kierownik")
 _ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag|sa|s\.a\.|sp\.\s*z\s*o\.o\.|labs?|studio|group)\b")
 _LABELS = {
-    "organization": re.compile(r"(?i)^(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>.+)$"),
-    "client": re.compile(r"(?i)^(?:client|klient)\s*:\s*(?P<value>.+)$"),
-    "role": re.compile(r"(?i)^(?:role|position|title|stanowisko)\s*:\s*(?P<value>.+)$"),
-    "program": re.compile(r"(?i)^(?:program|programme|course|field of study|kierunek)\s*:\s*(?P<value>.+)$"),
-    "location": re.compile(r"(?i)^(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>.+)$"),
-    "result": re.compile(r"(?i)^(?:result|grade|wynik|ocena)\s*:\s*(?P<value>.+)$"),
+    "organization": re.compile(r"(?i)(?:^|[|;]\s*)(?:company|employer|organization|pracodawca|firma)\s*:\s*(?P<value>[^|;]+)"),
+    "client": re.compile(r"(?i)(?:^|[|;]\s*)(?:client|klient)\s*:\s*(?P<value>[^|;]+)"),
+    "role": re.compile(r"(?i)(?:^|[|;]\s*)(?:role|position|title|stanowisko)\s*:\s*(?P<value>[^|;]+)"),
+    "program": re.compile(r"(?i)(?:^|[|;]\s*)(?:program|programme|course|field of study|kierunek)\s*:\s*(?P<value>[^|;]+)"),
+    "location": re.compile(r"(?i)(?:^|[|;]\s*)(?:location|lokalizacja|city|miasto)\s*:\s*(?P<value>[^|;]+)"),
+    "result": re.compile(r"(?i)(?:^|[|;]\s*)(?:result|grade|wynik|ocena)\s*:\s*(?P<value>[^|;]+)"),
 }
 
 
@@ -50,10 +50,23 @@ def understand_document(document, deterministic_ruleset_version: str, *, snapsho
         skills_available = False
     deterministic = analyze_deterministically(document, deterministic_ruleset_version, location_resolver=location_resolver, small_locality_population_max=small_locality_population_max, exclusion_index=exclusion)
     omitted = []
+    omitted_map = {
+        "docx_headers": "docx_headers", "docx_footers": "docx_footers",
+        "docx_textboxes": "docx_textboxes", "docx_comments": "docx_comments",
+        "docx_drawings": "docx_drawings", "docx_footnotes": "docx_footnotes_endnotes",
+        "docx_endnotes": "docx_footnotes_endnotes", "docx_embedded_files": "docx_embedded_files",
+        "pdf_non_text_content": "pdf_non_text_content",
+    }
+    for part in document.presentation_omitted_parts:
+        mapped = omitted_map.get(part)
+        if mapped and mapped not in omitted: omitted.append(mapped)
     if document.source_blocks_partial: omitted.append("source_blocks_unavailable")
     if exclusion.partial_coverage: omitted.append("presentation_spans_unavailable")
     if not skills_available: omitted.append("skills_unavailable")
-    status = Status.PARTIAL if omitted else Status.COMPLETED
+    # Quarantined presentation evidence is intentionally excluded from every
+    # downstream collection.  The visible projection is therefore honest but
+    # necessarily partial even when the extraction adapter covered the file.
+    status = Status.PARTIAL if omitted or exclusion.intervals else Status.COMPLETED
     audited = ["canonical_pages", "source_blocks", "presentation_spans", "section_annotations", "date_annotations", "entry_annotations"]
     if skills_available: audited.append("skill_taxonomy")
     coverage = UnderstandingCoverage(status, document.source_format, tuple(audited), tuple(omitted))
@@ -94,15 +107,19 @@ def _entries(document, sections, dates):
         if section.kind not in {SectionKind.EDUCATION,SectionKind.EMPLOYMENT}: continue
         start,end=line_order[section.start_line_id],line_order[section.end_line_id]
         blocks=[b for b in document.source_blocks if b.line_ids and any(start < line_order.get(line_id,-1) <= end for line_id in b.line_ids)]
-        current=[]; anchors=[]; table=None; row=None
+        current=[]; anchors=[]; table=None; row=None; anchor_first=False
         for block in blocks:
             row_boundary=current and block.table_id is not None and table==block.table_id and row is not None and block.row_index!=row
-            if current and (anchors or row_boundary):
-                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]
-            current.append(block); table,row=block.table_id,block.row_index
             found=[d for line_id in block.line_ids for d in dates_by_line.get(line_id,())]
+            if current and (row_boundary or (found and anchors)):
+                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False
+            non_date_before=bool(current)
+            current.append(block); table,row=block.table_id,block.row_index
             anchors.extend(d for d in found if d.id not in {x.id for x in anchors})
+            if found and not non_date_before: anchor_first=True
             if len(anchors)>1: issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
+            if found and non_date_before and not anchor_first:
+                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False
         if current: result.append(_entry(section.id,current,anchors,len(result)))
     return tuple(result),tuple(issues)
 
@@ -126,22 +143,22 @@ def _records(document,sections,dates,entries,exclusion):
 
 def _education(document,section,entry,lines,dates,exclusion):
     identity=_unique(lines,lambda s:any(m in normalize_text(s) for m in _INSTITUTIONS)); degree=_unique(lines,lambda s:any(m in normalize_text(s) for m in _DEGREES)); program=_label(lines,"program")
-    if identity is None: return None,_issue(document,lines,"unsupported_education_identity",entry.source_order)
+    if identity is None: return None,_issue(document,lines,"unsupported_education_identity",entry.source_order,exclusion)
     institution=_field(document,"institution",identity,exclusion)
-    if institution.status!="supported" or not (degree or program or dates): return None,_issue(document,lines,"insufficient_education_support",entry.source_order)
+    if institution.status!="supported" or not (degree or program or dates): return None,_issue(document,lines,"insufficient_education_support",entry.source_order,exclusion)
     fields=(institution,_field(document,"program",program,exclusion),_field(document,"degree",degree,exclusion),_date_field("study_dates",dates),_field(document,"result",_label(lines,"result"),exclusion),_field(document,"education_location",_label(lines,"location"),exclusion))
     return _record("education",section,entry,lines,fields,dates),()
 
 
 def _employment(document,section,entry,lines,dates,exclusion):
-    relationship=_unique(lines,lambda s:normalize_text(s) in _RELATIONSHIPS); role=_label(lines,"role") or _unique(lines,lambda s:any(m in normalize_text(s) for m in _ROLES)); client=_label(lines,"client"); organization=_label(lines,"organization")
-    remaining=[line for line in lines if line not in {relationship,role,client} and not _has_date(line,dates) and not _LABELS["location"].match(line.text.strip())]
+    relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role") or _unique(lines,lambda s:any(m in normalize_text(s) for m in _ROLES)); client=_label(lines,"client"); organization=_label(lines,"organization")
+    remaining=[line for line in lines if line not in {relationship,role,client} and not _has_date(line,dates) and not _LABELS["location"].search(line.text.strip())]
     if organization is None:
         names=[line for line in remaining if _looks_org(line.text)]; organization=names[0] if len(names)==1 else None
-    issues=_issue(document,(client,),"employer_client_ambiguity",entry.source_order) if client and organization is None else ()
+    issues=_issue(document,(client,),"employer_client_ambiguity",entry.source_order,exclusion) if client and organization is None else ()
     org_field=_field(document,"organization",organization,exclusion); rel_field=_field(document,"relationship_type",relationship,exclusion); role_field=_field(document,"role",role,exclusion)
-    if org_field.status!="supported" and rel_field.status!="supported": return None,(*issues,*_issue(document,lines,"unsupported_employment_identity",entry.source_order))
-    if role_field.status!="supported" and not dates: return None,(*issues,*_issue(document,lines,"insufficient_employment_support",entry.source_order))
+    if org_field.status!="supported" and rel_field.status!="supported": return None,(*issues,*_issue(document,lines,"unsupported_employment_identity",entry.source_order,exclusion))
+    if role_field.status!="supported" and not dates: return None,(*issues,*_issue(document,lines,"insufficient_employment_support",entry.source_order,exclusion))
     fields=(org_field,role_field,rel_field,_date_field("employment_dates",dates),_field(document,"employment_location",_label(lines,"location"),exclusion))
     return _record("employment",section,entry,lines,fields,dates),issues
 
@@ -161,18 +178,44 @@ def _lines(document,blocks):
 def _unique(lines,predicate):
     values=[line for line in lines if predicate(line.text.strip())]; return values[0] if len(values)==1 else None
 def _label(lines,name):
-    values=[line for line in lines if _LABELS[name].match(line.text.strip())]; return values[0] if len(values)==1 else None
+    values=[line for line in lines if _LABELS[name].search(line.text.strip())]; return values[0] if len(values)==1 else None
 def _has_date(line,dates): return any(d.evidence and d.evidence[0].line_id==line.line_id for d in dates)
 def _looks_org(value):
     text=value.strip(); words=text.split()
-    return normalize_text(text) not in _RELATIONSHIPS and not _LABELS["client"].match(text) and (bool(_ORG_SUFFIX.search(text)) or (len(words)>=2 and all(not w[:1].isalpha() or w[:1].isupper() for w in words)))
+    return not is_self_employment_label(text) and not _LABELS["client"].search(text) and bool(_ORG_SUFFIX.search(text))
 
 
 def _field(document,name,line,exclusion):
     if line is None: return StructuredField(name,"unknown",None,Confidence.LOW,())
-    value,evidence=_value_evidence(document,line)
+    label_kind = {"organization":"organization", "role":"role", "program":"program", "result":"result", "education_location":"location", "employment_location":"location"}.get(name)
+    label_match = _LABELS[label_kind].search(line.text) if label_kind else None
+    if label_match:
+        value_start, value_end = label_match.span("value")
+        label_start = label_match.start()
+        while label_start < value_start and line.text[label_start] in "|; \t": label_start += 1
+        label_end = line.start_offset + value_start
+        if exclusion.intersects(line.page_id, line.start_offset + label_start, label_end):
+            return StructuredField(name,"unknown",None,Confidence.LOW,())
+        raw_value=label_match.group("value")
+        value=raw_value.strip()
+        value_relative=value_start + raw_value.find(value)
+        page=next(p for p in document.pages if p.page_id==line.page_id)
+        evidence=UnderstandingEvidence(line.page_id,page.page_number,line.line_id,line.start_offset+value_relative,line.start_offset+value_relative+len(value),"exact",value[:256])
+    else:
+        value,evidence=_value_evidence(document,line)
     if exclusion.intersects(evidence.page_id,evidence.start_offset or 0,evidence.end_offset or 0): return StructuredField(name,"unknown",None,Confidence.LOW,())
-    return StructuredField(name,"supported",value[:256],Confidence.HIGH,(evidence,))
+    field_evidence = (evidence,)
+    if label_match:
+        page=next(p for p in document.pages if p.page_id==line.page_id)
+        label_text=line.text[label_start:value_start].rstrip(" :\t")
+        label_relative=label_start
+        label_evidence=UnderstandingEvidence(
+            line.page_id,page.page_number,line.line_id,
+            line.start_offset+label_relative,
+            line.start_offset+label_relative+len(label_text),"exact",label_text[:256],
+        )
+        field_evidence=(label_evidence,evidence)
+    return StructuredField(name,"supported",value[:256],Confidence.HIGH,field_evidence)
 
 
 def _date_field(name,dates):
@@ -187,9 +230,12 @@ def _value_evidence(document,line):
     return value,UnderstandingEvidence(line.page_id,page.page_number,line.line_id,line.start_offset+relative,line.start_offset+relative+len(value),"exact",value[:256])
 
 
-def _issue(document,lines,reason,order):
+def _issue(document,lines,reason,order,exclusion=None):
     if not lines:return ()
-    evidence=tuple(_value_evidence(document,line)[1] for line in lines[:4]); return _ambiguous_from_evidence(evidence,reason,order)
+    evidence=tuple(_value_evidence(document,line)[1] for line in lines[:4])
+    if exclusion is not None:
+        evidence=tuple(item for item in evidence if not exclusion.intersects(item.page_id,item.start_offset or 0,item.end_offset or 0))
+    return _ambiguous_from_evidence(evidence,reason,order)
 def _ambiguous_from_evidence(evidence,reason,order):
     if not evidence:return ()
     first,last=evidence[0],evidence[-1]
@@ -207,7 +253,7 @@ def _subjects(records):
     seen=set();result=[]
     for record in records:
         name="institution" if record.kind=="education" else "organization";category="education" if record.kind=="education" else "company";field=next((f for f in record.fields if f.name==name and f.status=="supported" and f.value),None)
-        if field is None or normalize_text(field.value) in _RELATIONSHIPS:continue
+        if field is None or is_self_employment_label(field.value):continue
         key=subject_key(category,field.value)
         if key in seen:continue
         seen.add(key);e=field.evidence[0];result.append(ResearchSubject(stable_source_id(f"research-{category}",e.page_id,e.start_offset or 0,e.end_offset or 0),category,field.value,record.id,name,record.source_order))

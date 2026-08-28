@@ -1,0 +1,7 @@
+{
+  "archive_sha256": "49526f51ea5a26126c866e010c5552e1af084ed3eb5a53e1a3602bc06957d66d",
+  "archive_url": "https://ec.europa.eu/esco/download/ESCO%20dataset%20-%20v1.2.0%20-%20classification%20-%20%20-%20rdf.zip",
+  "content": "official full multilingual RDF classification export",
+  "license_url": "https://esco.ec.europa.eu/en/about-esco/escopedia/escopedia/european-union-public-licence",
+  "version": "ESCO v1.2.0"
+}

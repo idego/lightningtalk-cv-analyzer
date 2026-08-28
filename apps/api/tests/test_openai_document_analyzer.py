@@ -399,8 +399,12 @@ def test_enabled_app_defers_ai_until_the_follow_up_request(tmp_path) -> None:
         document_analyzer=analyzer,
     )
     document = Document()
-    document.add_paragraph("Candidate Example")
-    document.add_paragraph("Experienced engineer profile skills")
+    document.add_heading("Experience", 1)
+    document.add_paragraph("Company: Example Labs Ltd")
+    document.add_paragraph("Role: Software Engineer")
+    document.add_paragraph("01/2020 - 02/2022")
+    hidden = document.add_paragraph().add_run("QUARANTINED_TOKEN")
+    hidden.font.hidden = True
     buffer = io.BytesIO()
     document.save(buffer)
 
@@ -430,3 +434,8 @@ def test_enabled_app_defers_ai_until_the_follow_up_request(tmp_path) -> None:
     assert retry.status_code == 200
     assert len(analyzer.requests) == 1
     assert retry.json()["ai_analysis"]["status"] == "succeeded"
+    provider_input = analyzer.requests[0].openai_payload["input"][0]["content"][0]["text"]
+    assert "QUARANTINED_TOKEN" not in provider_input
+    assert "█" in provider_input
+    assert '"records":' in provider_input
+    assert "Example Labs Ltd" in provider_input
