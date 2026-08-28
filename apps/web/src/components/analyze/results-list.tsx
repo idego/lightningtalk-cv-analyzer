@@ -243,7 +243,6 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<Wrench className="size-4" />}
                 label={t("explicitSkill")}
                 value={skill.display_label}
-                detail={`code · ${skill.confidence} · ESCO ${skill.taxonomy_version}`}
                 tone={skillsTone}
               />)}
             </div>
