@@ -5,7 +5,8 @@
 - OpenSpec tasks: 40/40 checked after implementation and verification.
 - Backend: 563 tests passed in the rebuilt Docker test image; one upstream
   Starlette/httpx deprecation warning remains.
-- Frontend: four Node test files passed, TypeScript passed, and the Next.js
+- Frontend: five Node test files passed, including production record-detail
+  rendering for education AI enrichment/conflicts; TypeScript passed, and the Next.js
   production build passed both locally and in the rebuilt development stack.
 - OpenSpec: strict validation passed and all four planning artifacts are complete.
 - Real UI: the previously verified synthetic-only UI flow rendered code-owned education,
@@ -18,7 +19,9 @@
   code-owned employment, explicit ESCO skills, and bounded research subjects
   from an anonymous synthetic document. Temporary containers and volumes were
   removed afterwards.
-- Evaluation: the committed anonymous supported-pattern suite passed every
+- Evaluation: the committed anonymous supported-pattern suite includes partial
+  DOCX presentation coverage, full education fields, abstention, and research
+  subjects, and passed every
   specified precision, recall, exact-match F1, unsupported-positive-field, and
   same-input reproducibility threshold.
 - Persistence and compatibility: focused tests cover initial save, reload, AI
