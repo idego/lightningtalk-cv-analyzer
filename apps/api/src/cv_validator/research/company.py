@@ -16,7 +16,7 @@ from cv_validator.research.domain import (
 )
 
 RESEARCH_VERSION = "company-research-v1"
-PROMPT_VERSION = "company-research-prompt-v1"
+PROMPT_VERSION = "company-research-prompt-v2"
 SCHEMA_VERSION = "company-research-schema-v1"
 MAX_ORGANIZATIONS = 12
 
@@ -110,5 +110,8 @@ def _safe_organization_subject(value: str) -> bool:
     if "@" in stripped or re.search(r"(?:https?://|www\.)", stripped, re.IGNORECASE):
         return False
     if re.search(r"\+?\d[\d\s().-]{6,}\d", stripped):
+        return False
+    normalized = re.sub(r"[^a-z]+", " ", stripped.casefold()).strip()
+    if normalized in {"self employed", "self employment", "freelance", "freelancer"}:
         return False
     return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2

@@ -639,13 +639,28 @@ def _derive_research_candidates(
         )
     for employment in facts.get("employment", []):
         evidence = employment.get("field_evidence", {})
-        add(
-            "company",
-            employment.get("organization"),
-            evidence.get("organization", []),
-            "Check the public organization details without inferring a person relationship.",
-        )
+        organization = employment.get("organization")
+        if _is_named_organization(organization):
+            add(
+                "company",
+                organization,
+                evidence.get("organization", []),
+                "Check the public organization details without inferring a person relationship.",
+            )
     return candidates
+
+
+def _is_named_organization(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = re.sub(r"[^a-z]+", " ", value.casefold()).strip()
+    return normalized not in {
+        "",
+        "self employed",
+        "self employment",
+        "freelance",
+        "freelancer",
+    }
 
 
 def _dedupe_facts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

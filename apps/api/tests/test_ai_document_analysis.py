@@ -964,6 +964,14 @@ def test_code_derives_research_candidates_only_from_accepted_facts() -> None:
     ]
 
 
+def test_prompt_does_not_treat_self_employment_as_an_organization() -> None:
+    instructions = _prompt_instructions()
+
+    assert '"Self-Employed"' in instructions
+    assert "set the organization value to `null`" in instructions
+    assert "preserve the literal employment mode in" in instructions
+
+
 def test_partial_field_validation_keeps_valid_finding_and_fact_fields() -> None:
     _, redacted = _documents()
     response = _valid_response()

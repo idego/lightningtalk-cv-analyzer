@@ -11,7 +11,7 @@ from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.ingestion import RedactedDocument, SourcePage
 
 
-PROMPT_VERSION = "2708"
+PROMPT_VERSION = "2709"
 SCHEMA_VERSION = "document-analysis-schema-v9"
 LEGACY_SCHEMA_VERSION = "document-analysis-schema-v7"
 INPUT_CONTRACT_VERSION = "document-analysis-input-v3"

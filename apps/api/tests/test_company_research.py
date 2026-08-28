@@ -280,7 +280,7 @@ def test_company_research_inputs_are_candidate_isolated():
 
 
 def test_company_candidate_must_be_safe_and_match_employment_fact():
-    for unsafe in ("candidate@example.com", "+48 600 123 456", "https://profile.example"):
+    for unsafe in ("candidate@example.com", "+48 600 123 456", "https://profile.example", "Self-Employed", "Freelancer"):
         try:
             build_company_research_request(_stored_payload(unsafe))
         except ValueError as exc:
