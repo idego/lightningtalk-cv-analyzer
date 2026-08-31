@@ -54,6 +54,14 @@ class ProfileSummaryResponse:
 
 
 @dataclass(frozen=True)
+class ProfileTransformResponse:
+    payload: Any | None
+    response_model: str
+    usage: dict[str, Any]
+    refused: bool = False
+
+
+@dataclass(frozen=True)
 class AIDocumentAnalysisOutcome:
     status: AIAnalysisStatus
     analysis: ValidatedDocumentAnalysis | None = None

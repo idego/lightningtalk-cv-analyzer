@@ -10,6 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml README.md weights.yaml ./
 COPY src ./src
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 

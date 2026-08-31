@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import base64
+import os
+import shutil
+import subprocess
+import tempfile
 from io import BytesIO
+from pathlib import Path
 from typing import Literal
 
 from docx import Document
@@ -83,6 +88,38 @@ class AdditionalSection(_StrictModel):
     items: list[str] = Field(default_factory=list)
 
 
+CustomFieldKind = Literal["text", "number", "boolean", "date", "select"]
+CustomFieldScalar = str | float | bool | None
+
+
+class ProfileCustomFieldDefinition(_StrictModel):
+    id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
+    label: str = Field(min_length=1, max_length=120)
+    kind: CustomFieldKind = "text"
+    options: list[str] = Field(default_factory=list, max_length=30)
+    default_value: CustomFieldScalar = None
+
+    @model_validator(mode="after")
+    def validate_options(self) -> ProfileCustomFieldDefinition:
+        clean = [option.strip() for option in self.options if option.strip()]
+        if self.kind == "select" and not clean:
+            raise ValueError("select custom fields require at least one option")
+        if self.kind != "select" and clean:
+            raise ValueError("only select custom fields may define options")
+        if self.kind == "select" and self.default_value not in {None, *clean}:
+            raise ValueError("select default must be one of the configured options")
+        self.options = clean
+        return self
+
+
+class ProfileCustomFieldValue(_StrictModel):
+    id: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=120)
+    kind: CustomFieldKind = "text"
+    value: CustomFieldScalar = None
+    options: list[str] = Field(default_factory=list, max_length=30)
+
+
 class CandidateProfile(_StrictModel):
     schema_version: Literal["candidate-profile-v1"] = "candidate-profile-v1"
     personal: PersonalInformation = Field(default_factory=PersonalInformation)
@@ -95,6 +132,7 @@ class CandidateProfile(_StrictModel):
     languages: list[LanguageEntry] = Field(default_factory=list)
     certifications: list[CertificationEntry] = Field(default_factory=list)
     additional_sections: list[AdditionalSection] = Field(default_factory=list)
+    custom_fields: list[ProfileCustomFieldValue] = Field(default_factory=list)
 
 
 class AnonymizationPolicy(_StrictModel):
@@ -119,6 +157,7 @@ TemplateSectionKind = Literal[
     "languages",
     "certifications",
     "additional_sections",
+    "custom_fields",
 ]
 TemplateSectionLayout = Literal["default", "inline", "bullets"]
 
@@ -169,18 +208,20 @@ class ProfileTemplateSection(_StrictModel):
     title: str = Field(min_length=1, max_length=80)
     visible: bool = True
     layout: TemplateSectionLayout = "default"
+    placement: Literal["full", "left", "right"] = "full"
 
 
 class ProfileTemplate(_StrictModel):
     schema_version: Literal["profile-template-v1"] = "profile-template-v1"
     id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9._-]+$")
     name: str = Field(min_length=1, max_length=120)
+    visibility: Literal["private", "shared"] = "private"
     description: str | None = Field(default=None, max_length=300)
     branding: ProfileTemplateBranding = Field(default_factory=ProfileTemplateBranding)
     typography: ProfileTemplateTypography = Field(default_factory=ProfileTemplateTypography)
     header: ProfileTemplateHeader = Field(default_factory=ProfileTemplateHeader)
     logo: ProfileTemplateLogo | None = None
-    sections: list[ProfileTemplateSection] = Field(min_length=1, max_length=8)
+    sections: list[ProfileTemplateSection] = Field(min_length=1, max_length=9)
 
     @model_validator(mode="after")
     def validate_unique_sections(self) -> ProfileTemplate:
@@ -193,6 +234,31 @@ class ProfileTemplate(_StrictModel):
         return self
 
 
+def _default_profile_builder_anonymization() -> AnonymizationPolicy:
+    return AnonymizationPolicy(
+        hide_first_name=True,
+        hide_last_name=True,
+        hide_email=True,
+        hide_phone=True,
+        hide_location=True,
+        hide_linkedin=True,
+        hide_github=True,
+        hide_portfolio=True,
+        employer_mode="hide",
+        institution_mode="hide",
+    )
+
+
+class ProfileBuilderPreferences(_StrictModel):
+    auto_summary: bool = False
+    summary_instruction: str = Field(default="", max_length=12_000)
+    anonymization: AnonymizationPolicy = Field(default_factory=_default_profile_builder_anonymization)
+    aggregate_technologies: bool = True
+    date_format: Literal["preserve", "yyyy-mm", "mm/yyyy", "yyyy"] = "preserve"
+    default_template_id: str = "idego-default"
+    filename_pattern: str = Field(default="{name}-profile", min_length=1, max_length=120)
+
+
 class ProfileBuilderSnapshot(_StrictModel):
     source_filename: str = Field(min_length=1, max_length=512)
     profile: CandidateProfile
@@ -203,6 +269,61 @@ class ProfileBuilderSnapshot(_StrictModel):
 class ProfileSummaryGenerationRequest(_StrictModel):
     profile: CandidateProfile
     instruction: str | None = Field(default=None, max_length=12_000)
+
+
+ProfessionalSectionName = Literal[
+    "headline",
+    "summary",
+    "skills",
+    "technologies",
+    "experience",
+    "education",
+    "languages",
+    "certifications",
+    "additional_sections",
+]
+
+
+class ProfessionalProfile(_StrictModel):
+    headline: str | None = None
+    summary: str | None = None
+    skills: list[str] = Field(default_factory=list)
+    technologies: list[str] = Field(default_factory=list)
+    experience: list[ExperienceEntry] = Field(default_factory=list)
+    education: list[EducationEntry] = Field(default_factory=list)
+    languages: list[LanguageEntry] = Field(default_factory=list)
+    certifications: list[CertificationEntry] = Field(default_factory=list)
+    additional_sections: list[AdditionalSection] = Field(default_factory=list)
+
+
+class ProfileTransformGenerationRequest(_StrictModel):
+    profile: CandidateProfile
+    sections: list[ProfessionalSectionName] = Field(min_length=1, max_length=10)
+    instruction: str = Field(default="", max_length=12_000)
+    mode: Literal["action", "translation"] = "action"
+    target_language: Literal["en", "pl", "de", "fr", "es"] | None = None
+
+    @model_validator(mode="after")
+    def validate_transform(self) -> ProfileTransformGenerationRequest:
+        if len(set(self.sections)) != len(self.sections):
+            raise ValueError("transform sections must be unique")
+        if self.mode == "translation" and self.target_language is None:
+            raise ValueError("translation requires target language")
+        return self
+
+
+def professional_profile_from_candidate(profile: CandidateProfile) -> ProfessionalProfile:
+    return ProfessionalProfile(
+        headline=profile.headline,
+        summary=profile.summary,
+        skills=profile.skills,
+        technologies=profile.technologies,
+        experience=profile.experience,
+        education=profile.education,
+        languages=profile.languages,
+        certifications=profile.certifications,
+        additional_sections=profile.additional_sections,
+    )
 
 
 class ProfileExportRequest(_StrictModel):
@@ -224,10 +345,15 @@ IDEGO_NAVY = RGBColor(0x08, 0x19, 0x32)
 MUTED = RGBColor(0x5C, 0x67, 0x73)
 
 
+class ProfilePdfExportError(RuntimeError):
+    """Safe PDF conversion failure without candidate content."""
+
+
 def default_profile_template() -> ProfileTemplate:
     return ProfileTemplate(
         id="idego-default",
         name="IDEGO Default",
+        visibility="shared",
         description="Default IDEGO candidate profile layout.",
         sections=[
             ProfileTemplateSection(id="summary", kind="summary", title="Summary"),
@@ -257,8 +383,99 @@ def default_profile_template() -> ProfileTemplate:
                 title="Additional",
                 layout="bullets",
             ),
+            ProfileTemplateSection(
+                id="custom-fields",
+                kind="custom_fields",
+                title="Details",
+                layout="default",
+            ),
         ],
     )
+
+
+def materialize_custom_fields(
+    profile: CandidateProfile,
+    definitions: list[ProfileCustomFieldDefinition],
+) -> CandidateProfile:
+    result = profile.model_copy(deep=True)
+    existing = {field.id: field for field in result.custom_fields}
+    result.custom_fields = [
+        existing.get(
+            definition.id,
+            ProfileCustomFieldValue(
+                id=definition.id,
+                label=definition.label,
+                kind=definition.kind,
+                value=definition.default_value,
+                options=definition.options,
+            ),
+        )
+        for definition in definitions
+    ]
+    return result
+
+
+def apply_profile_conversion_preferences(
+    profile: CandidateProfile,
+    preferences: ProfileBuilderPreferences,
+) -> CandidateProfile:
+    result = profile.model_copy(deep=True)
+    if preferences.aggregate_technologies:
+        combined = [*result.technologies]
+        for entry in result.experience:
+            combined.extend(entry.technologies)
+        result.technologies = _dedupe_strings(combined)
+    if preferences.date_format != "preserve":
+        for entry in result.experience:
+            entry.start_date = _format_profile_date(entry.start_date, preferences.date_format)
+            entry.end_date = _format_profile_date(entry.end_date, preferences.date_format)
+        for entry in result.education:
+            entry.start_date = _format_profile_date(entry.start_date, preferences.date_format)
+            entry.end_date = _format_profile_date(entry.end_date, preferences.date_format)
+        for entry in result.certifications:
+            entry.date = _format_profile_date(entry.date, preferences.date_format)
+    return result
+
+
+def _format_profile_date(value: str | None, format_name: str) -> str | None:
+    if not value:
+        return value
+    normalized = value.strip()
+    year: str | None = None
+    month: str | None = None
+    import re
+    match = re.fullmatch(r"(\d{4})[-/.](\d{1,2})(?:[-/.]\d{1,2})?", normalized)
+    if match:
+        year, month = match.group(1), match.group(2).zfill(2)
+    else:
+        match = re.fullmatch(r"(\d{1,2})[-/.](\d{4})", normalized)
+        if match:
+            month, year = match.group(1).zfill(2), match.group(2)
+        elif re.fullmatch(r"\d{4}", normalized):
+            year = normalized
+    if year is None:
+        return value
+    if format_name == "yyyy":
+        return year
+    if month is None:
+        return year
+    if format_name == "yyyy-mm":
+        return f"{year}-{month}"
+    if format_name == "mm/yyyy":
+        return f"{month}/{year}"
+    return value
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in values:
+        value = raw.strip()
+        key = value.casefold()
+        if value and key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
 
 
 def apply_profile_anonymization(
@@ -335,14 +552,12 @@ def render_candidate_profile_docx(
         _add_floating_template_logo(header, section, selected_template.logo)
 
     _render_profile_header(document, presentation, selected_template)
-    for template_section in selected_template.sections:
-        if template_section.visible:
-            _render_profile_section(
-                document,
-                presentation,
-                template_section,
-                accent=accent,
-            )
+    _render_profile_template_sections(
+        document,
+        presentation,
+        selected_template.sections,
+        accent=accent,
+    )
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -358,6 +573,63 @@ def render_candidate_profile_docx(
     stream = BytesIO()
     document.save(stream)
     return stream.getvalue()
+
+
+def render_candidate_profile_pdf(
+    profile: CandidateProfile,
+    policy: AnonymizationPolicy,
+    template: ProfileTemplate | None = None,
+    *,
+    converter_path: str | None = None,
+    timeout_seconds: float = 30.0,
+) -> bytes:
+    docx_bytes = render_candidate_profile_docx(profile, policy, template)
+    converter = converter_path or shutil.which("libreoffice") or shutil.which("soffice")
+    if not converter:
+        raise ProfilePdfExportError("profile_pdf_converter_unavailable")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="profile-pdf-") as temp_dir:
+            root = Path(temp_dir)
+            source = root / "candidate-profile.docx"
+            source.write_bytes(docx_bytes)
+            profile_dir = root / "lo-profile"
+            profile_dir.mkdir()
+            command = [
+                converter,
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--nofirststartwizard",
+                f"-env:UserInstallation={profile_dir.as_uri()}",
+                "--convert-to",
+                "pdf:writer_pdf_Export",
+                "--outdir",
+                str(root),
+                str(source),
+            ]
+            env = os.environ.copy()
+            env["HOME"] = str(root)
+            completed = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout_seconds,
+                env=env,
+            )
+            output = root / "candidate-profile.pdf"
+            if completed.returncode != 0 or not output.is_file():
+                raise ProfilePdfExportError("profile_pdf_conversion_failed")
+            pdf_bytes = output.read_bytes()
+            if not pdf_bytes.startswith(b"%PDF-"):
+                raise ProfilePdfExportError("profile_pdf_invalid_output")
+            return pdf_bytes
+    except subprocess.TimeoutExpired as exc:
+        raise ProfilePdfExportError("profile_pdf_conversion_timeout") from exc
+    except OSError as exc:
+        raise ProfilePdfExportError("profile_pdf_conversion_failed") from exc
 
 
 def _add_floating_template_logo(paragraph, section, logo: ProfileTemplateLogo) -> None:
@@ -470,6 +742,40 @@ def _render_profile_header(
             )
             run.font.size = Pt(max(template.typography.body_size - 1.5, 8))
             run.font.color.rgb = MUTED
+
+
+def _render_profile_template_sections(
+    document: Document,
+    presentation: CandidateProfile,
+    sections: list[ProfileTemplateSection],
+    *,
+    accent: RGBColor,
+) -> None:
+    visible = [section for section in sections if section.visible]
+    index = 0
+    while index < len(visible):
+        current = visible[index]
+        if current.placement == "full":
+            _render_profile_section(document, presentation, current, accent=accent)
+            index += 1
+            continue
+
+        group: list[ProfileTemplateSection] = []
+        while index < len(visible) and visible[index].placement != "full":
+            group.append(visible[index])
+            index += 1
+        table = document.add_table(rows=1, cols=2)
+        table.autofit = False
+        row = table.rows[0]
+        left_cell, right_cell = row.cells
+        for section in group:
+            target = left_cell if section.placement == "left" else right_cell
+            _render_profile_section(target, presentation, section, accent=accent)
+        for cell in (left_cell, right_cell):
+            if cell.paragraphs and not cell.paragraphs[0].text and len(cell.paragraphs) > 1:
+                first = cell.paragraphs[0]._element
+                first.getparent().remove(first)
+        document.add_paragraph().paragraph_format.space_after = Pt(0)
 
 
 def _render_profile_section(
@@ -615,6 +921,20 @@ def _render_profile_section(
             item_heading.add_run(extra_section.title)
             for item in extra_section.items:
                 document.add_paragraph(item, style="List Bullet")
+
+
+    if kind == "custom_fields":
+        values = [field for field in presentation.custom_fields if field.value not in (None, "")]
+        if not values:
+            return
+        _add_profile_heading(document, template_section.title, accent)
+        for field in values:
+            paragraph = document.add_paragraph()
+            paragraph.add_run(f"{field.label}: ").bold = True
+            if isinstance(field.value, bool):
+                paragraph.add_run("Yes" if field.value else "No")
+            else:
+                paragraph.add_run(str(field.value))
 
 
 def _render_string_values(

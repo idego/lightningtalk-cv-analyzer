@@ -15,11 +15,13 @@ from cv_validator.ai.domain import (
     DocumentAnalyzerResponse,
     ProfileExtractionResponse,
     ProfileSummaryResponse,
+    ProfileTransformResponse,
 )
 from cv_validator.ai.request import (
     DocumentAnalysisRequest,
     ProfileExtractionRequest,
     ProfileSummaryRequest,
+    ProfileTransformRequest,
 )
 
 
@@ -197,4 +199,26 @@ class OpenAIResponsesProfileSummarizer:
             summary=summary or None,
             response_model=response.model,
             usage=usage,
+        )
+
+
+class OpenAIResponsesProfileTransformer:
+    """Source-faithful professional profile rewrites and translations."""
+
+    def __init__(self, settings: AISettings, *, client: _OpenAIClient | None = None) -> None:
+        if not settings.enabled or settings.api_key is None:
+            raise ValueError("enabled AI settings are required")
+        self._client = client or openai.OpenAI(
+            api_key=settings.api_key,
+            timeout=settings.timeout_seconds,
+            max_retries=settings.max_retries,
+        )
+
+    def transform(self, request: ProfileTransformRequest) -> ProfileTransformResponse:
+        payload, response_model, usage, refused = _create_json_response(self._client, request)
+        return ProfileTransformResponse(
+            payload=payload,
+            response_model=response_model,
+            usage=usage,
+            refused=refused,
         )

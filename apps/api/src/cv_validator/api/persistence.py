@@ -23,7 +23,12 @@ from cv_validator.errors import PersistenceError
 from cv_validator.file_links.normalization import URLNormalizationError, normalize_url
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
-from cv_validator.profile_builder import ProfileBuilderSnapshot, ProfileTemplate
+from cv_validator.profile_builder import (
+    ProfileBuilderPreferences,
+    ProfileBuilderSnapshot,
+    ProfileCustomFieldDefinition,
+    ProfileTemplate,
+)
 from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
 
 
@@ -31,6 +36,7 @@ _SAFE_NATIONAL_ID_TYPES = frozenset(
     {"LABELED_NATIONAL_ID", "PL_PESEL", "UK_NINO", "US_SSN"}
 )
 _URL_TOKEN_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"']+")
+_SHARED_TEMPLATE_SCOPE = "__profile_builder_shared__"
 
 
 @dataclass
@@ -182,6 +188,17 @@ class PersistenceStore:
                 );
                 CREATE INDEX IF NOT EXISTS profile_templates_owner_updated
                     ON profile_templates(access_token_hash, updated_at DESC);
+                CREATE TABLE IF NOT EXISTS profile_custom_fields (
+                    field_id TEXT PRIMARY KEY,
+                    field_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS profile_builder_preferences (
+                    access_token_hash TEXT PRIMARY KEY,
+                    preferences_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -480,7 +497,6 @@ class PersistenceStore:
                 FROM candidate_profiles
                 WHERE access_token_hash = ?
                 ORDER BY updated_at DESC
-                LIMIT 50
                 """,
                 (_token_hash(access_token),),
             ).fetchall()
@@ -598,29 +614,40 @@ class PersistenceStore:
     def list_profile_templates(self, access_token: str | None) -> list[dict[str, Any]]:
         if not access_token:
             return []
+        owner_hash = _token_hash(access_token)
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT template_id, template_json, created_at, updated_at
+                SELECT access_token_hash, template_id, template_json, created_at, updated_at
                 FROM profile_templates
-                WHERE access_token_hash = ?
-                ORDER BY updated_at DESC
+                WHERE access_token_hash IN (?, ?)
+                ORDER BY CASE WHEN access_token_hash = ? THEN 0 ELSE 1 END, updated_at DESC
                 """,
-                (_token_hash(access_token),),
+                (owner_hash, _SHARED_TEMPLATE_SCOPE, owner_hash),
             ).fetchall()
         templates: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for row in rows:
+            if row["template_id"] in seen:
+                continue
             try:
                 template = ProfileTemplate.model_validate(
                     json.loads(row["template_json"])
                 )
             except (json.JSONDecodeError, ValueError):
                 continue
+            template.visibility = (
+                "shared"
+                if row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE
+                else "private"
+            )
+            seen.add(template.id)
             templates.append(
                 {
                     "template": template.model_dump(mode="json"),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "shared": row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE,
                 }
             )
         return templates
@@ -632,14 +659,17 @@ class PersistenceStore:
     ) -> dict[str, Any] | None:
         if not access_token:
             return None
+        owner_hash = _token_hash(access_token)
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT template_json, created_at, updated_at
+                SELECT access_token_hash, template_json, created_at, updated_at
                 FROM profile_templates
-                WHERE access_token_hash = ? AND template_id = ?
+                WHERE template_id = ? AND access_token_hash IN (?, ?)
+                ORDER BY CASE WHEN access_token_hash = ? THEN 0 ELSE 1 END
+                LIMIT 1
                 """,
-                (_token_hash(access_token), template_id),
+                (template_id, owner_hash, _SHARED_TEMPLATE_SCOPE, owner_hash),
             ).fetchone()
         if row is None:
             return None
@@ -647,10 +677,16 @@ class PersistenceStore:
             template = ProfileTemplate.model_validate(json.loads(row["template_json"]))
         except (json.JSONDecodeError, ValueError):
             return None
+        template.visibility = (
+            "shared"
+            if row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE
+            else "private"
+        )
         return {
             "template": template.model_dump(mode="json"),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "shared": row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE,
         }
 
     def upsert_profile_template(
@@ -660,8 +696,17 @@ class PersistenceStore:
     ) -> None:
         if not access_token:
             raise PersistenceError("profile builder access token required")
+        owner_hash = _token_hash(access_token)
+        stored_template = template.model_copy(deep=True)
+        if stored_template.id == "idego-default":
+            stored_template.visibility = "shared"
+        target_scope = (
+            _SHARED_TEMPLATE_SCOPE
+            if stored_template.visibility == "shared"
+            else owner_hash
+        )
         now = _utc_now()
-        payload = template.model_dump(mode="json")
+        payload = stored_template.model_dump(mode="json")
         try:
             with self._connect() as conn:
                 conn.execute(
@@ -676,14 +721,19 @@ class PersistenceStore:
                         updated_at = excluded.updated_at
                     """,
                     (
-                        _token_hash(access_token),
-                        template.id,
-                        template.name,
+                        target_scope,
+                        stored_template.id,
+                        stored_template.name,
                         json.dumps(payload),
                         now,
                         now,
                     ),
                 )
+                if target_scope == _SHARED_TEMPLATE_SCOPE:
+                    conn.execute(
+                        "DELETE FROM profile_templates WHERE access_token_hash = ? AND template_id = ?",
+                        (owner_hash, stored_template.id),
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("profile template persistence failed") from exc
 
@@ -694,18 +744,116 @@ class PersistenceStore:
     ) -> bool:
         if not access_token:
             return False
+        owner_hash = _token_hash(access_token)
         try:
             with self._connect() as conn:
                 deleted = conn.execute(
                     """
                     DELETE FROM profile_templates
-                    WHERE access_token_hash = ? AND template_id = ?
+                    WHERE template_id = ? AND access_token_hash = ?
                     """,
-                    (_token_hash(access_token), template_id),
+                    (template_id, owner_hash),
                 ).rowcount
+                if not deleted:
+                    deleted = conn.execute(
+                        "DELETE FROM profile_templates WHERE template_id = ? AND access_token_hash = ?",
+                        (template_id, _SHARED_TEMPLATE_SCOPE),
+                    ).rowcount
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("profile template delete failed") from exc
         return deleted == 1
+
+    def list_profile_custom_fields(self) -> list[ProfileCustomFieldDefinition]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT field_json FROM profile_custom_fields ORDER BY created_at, field_id"
+            ).fetchall()
+        result: list[ProfileCustomFieldDefinition] = []
+        for row in rows:
+            try:
+                result.append(
+                    ProfileCustomFieldDefinition.model_validate(
+                        json.loads(row["field_json"])
+                    )
+                )
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return result
+
+    def upsert_profile_custom_field(
+        self, definition: ProfileCustomFieldDefinition
+    ) -> None:
+        now = _utc_now()
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO profile_custom_fields (field_id, field_json, created_at, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(field_id) DO UPDATE SET
+                        field_json = excluded.field_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (definition.id, json.dumps(definition.model_dump(mode="json")), now, now),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("profile custom field persistence failed") from exc
+
+    def delete_profile_custom_field(self, field_id: str) -> bool:
+        try:
+            with self._connect() as conn:
+                deleted = conn.execute(
+                    "DELETE FROM profile_custom_fields WHERE field_id = ?",
+                    (field_id,),
+                ).rowcount
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("profile custom field delete failed") from exc
+        return deleted == 1
+
+    def get_profile_builder_preferences(
+        self, access_token: str | None
+    ) -> ProfileBuilderPreferences:
+        if not access_token:
+            return ProfileBuilderPreferences()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT preferences_json FROM profile_builder_preferences WHERE access_token_hash = ?",
+                (_token_hash(access_token),),
+            ).fetchone()
+        if row is None:
+            return ProfileBuilderPreferences()
+        try:
+            return ProfileBuilderPreferences.model_validate(
+                json.loads(row["preferences_json"])
+            )
+        except (json.JSONDecodeError, ValueError):
+            return ProfileBuilderPreferences()
+
+    def set_profile_builder_preferences(
+        self,
+        access_token: str | None,
+        preferences: ProfileBuilderPreferences,
+    ) -> None:
+        if not access_token:
+            raise PersistenceError("profile builder access token required")
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO profile_builder_preferences (access_token_hash, preferences_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(access_token_hash) DO UPDATE SET
+                        preferences_json = excluded.preferences_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        _token_hash(access_token),
+                        json.dumps(preferences.model_dump(mode="json")),
+                        _utc_now(),
+                    ),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("profile builder preferences persistence failed") from exc
 
     def get_retention_days(self) -> int:
         with self._connect() as conn:

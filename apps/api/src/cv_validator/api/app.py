@@ -66,20 +66,31 @@ from cv_validator.ai.application import (
     ProfileExtractor,
     ProfileSummarizer,
     ProfileSummaryError,
+    ProfileTransformer,
+    ProfileTransformError,
     extract_candidate_profile,
     generate_candidate_profile_summary,
+    generate_candidate_profile_transform,
 )
 from cv_validator.ai.openai_client import (
     OpenAIResponsesProfileExtractor,
     OpenAIResponsesProfileSummarizer,
+    OpenAIResponsesProfileTransformer,
 )
 from cv_validator.profile_builder import (
+    ProfileBuilderPreferences,
     ProfileBuilderSnapshot,
+    ProfileCustomFieldDefinition,
     ProfileExportRequest,
     ProfileSummaryGenerationRequest,
+    ProfileTransformGenerationRequest,
     ProfileTemplate,
+    ProfilePdfExportError,
+    apply_profile_conversion_preferences,
     default_profile_template,
+    materialize_custom_fields,
     render_candidate_profile_docx,
+    render_candidate_profile_pdf,
 )
 
 DEFAULT_DB = Path("data/cv_validator.db")
@@ -147,6 +158,7 @@ def create_app(
     link_http_client: LinkHTTPClient | None = None,
     profile_extractor: ProfileExtractor | None = None,
     profile_summarizer: ProfileSummarizer | None = None,
+    profile_transformer: ProfileTransformer | None = None,
 ) -> FastAPI:
     ingestion_config = load_ingestion_config()
     selected_link_check_config = link_check_config or load_link_check_config()
@@ -164,6 +176,11 @@ def create_app(
     selected_profile_summarizer = profile_summarizer
     if selected_ai_settings.enabled and selected_profile_summarizer is None:
         selected_profile_summarizer = OpenAIResponsesProfileSummarizer(
+            selected_ai_settings
+        )
+    selected_profile_transformer = profile_transformer
+    if selected_ai_settings.enabled and selected_profile_transformer is None:
+        selected_profile_transformer = OpenAIResponsesProfileTransformer(
             selected_ai_settings
         )
     selected_company_researcher = company_researcher
@@ -503,6 +520,7 @@ def create_app(
     async def profile_builder_extract(
         file: UploadFile = File(...),
         x_ai_enabled: bool = Header(default=True),
+        x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
         if not x_ai_enabled:
             raise HTTPException(
@@ -525,6 +543,26 @@ def create_app(
                 selected_profile_extractor,
                 redacted_document,
             )
+            preferences = store.get_profile_builder_preferences(
+                x_profile_builder_access_token
+            )
+            profile = apply_profile_conversion_preferences(profile, preferences)
+            profile = materialize_custom_fields(
+                profile, store.list_profile_custom_fields()
+            )
+            if preferences.auto_summary and selected_profile_summarizer is not None:
+                try:
+                    profile.summary = generate_candidate_profile_summary(
+                        selected_ai_settings,
+                        selected_profile_summarizer,
+                        profile,
+                        preferences.summary_instruction,
+                    )
+                except ProfileSummaryError as exc:
+                    safe_log(
+                        "profile_builder_auto_summary_failed",
+                        error_code=str(exc),
+                    )
         except IngestionError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ProfileExtractionError as exc:
@@ -573,6 +611,39 @@ def create_app(
             ) from exc
         return JSONResponse({"summary": summary})
 
+    @app.post("/profile-builder/transform")
+    def profile_builder_transform(
+        request: ProfileTransformGenerationRequest,
+        x_ai_enabled: bool = Header(default=True),
+    ) -> JSONResponse:
+        if not x_ai_enabled:
+            raise HTTPException(
+                status_code=409,
+                detail="profile_builder_ai_disabled_for_request",
+            )
+        if not selected_ai_settings.enabled or selected_profile_transformer is None:
+            raise HTTPException(status_code=503, detail="profile_builder_ai_disabled")
+        try:
+            proposal = generate_candidate_profile_transform(
+                selected_ai_settings,
+                selected_profile_transformer,
+                request.profile,
+                request.sections,
+                request.instruction,
+                mode=request.mode,
+                target_language=request.target_language,
+            )
+        except ProfileTransformError as exc:
+            safe_log("profile_builder_transform_failed", error_code=str(exc))
+            raise HTTPException(status_code=502, detail="profile_transform_failed") from exc
+        return JSONResponse(
+            {
+                "mode": request.mode,
+                "sections": request.sections,
+                "proposal": proposal.model_dump(mode="json"),
+            }
+        )
+
     @app.post("/profile-builder/export/docx")
     def profile_builder_export_docx(request: ProfileExportRequest) -> Response:
         content = render_candidate_profile_docx(
@@ -588,6 +659,26 @@ def create_app(
             ),
             headers={
                 "Content-Disposition": 'attachment; filename="candidate-profile.docx"'
+            },
+        )
+
+    @app.post("/profile-builder/export/pdf")
+    def profile_builder_export_pdf(request: ProfileExportRequest) -> Response:
+        try:
+            content = render_candidate_profile_pdf(
+                request.profile,
+                request.anonymization,
+                request.template,
+            )
+        except ProfilePdfExportError as exc:
+            detail = str(exc)
+            status = 503 if detail == "profile_pdf_converter_unavailable" else 500
+            raise HTTPException(status_code=status, detail=detail) from exc
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'attachment; filename="candidate-profile.pdf"'
             },
         )
 
@@ -667,6 +758,80 @@ def create_app(
         if not deleted:
             raise HTTPException(status_code=404, detail="profile_not_found")
         return JSONResponse({"deleted": True})
+
+    @app.get("/profile-builder/custom-fields")
+    def profile_builder_list_custom_fields(
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
+        return JSONResponse(
+            {
+                "fields": [
+                    field.model_dump(mode="json")
+                    for field in store.list_profile_custom_fields()
+                ]
+            }
+        )
+
+    @app.put("/profile-builder/custom-fields/{field_id}")
+    def profile_builder_put_custom_field(
+        field_id: str,
+        definition: ProfileCustomFieldDefinition,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
+        if definition.id != field_id:
+            raise HTTPException(status_code=400, detail="custom_field_id_mismatch")
+        try:
+            store.upsert_profile_custom_field(definition)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        return JSONResponse({"saved": True, "field": definition.model_dump(mode="json")})
+
+    @app.delete("/profile-builder/custom-fields/{field_id}")
+    def profile_builder_delete_custom_field(
+        field_id: str,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
+        try:
+            deleted = store.delete_profile_custom_field(field_id)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="custom_field_not_found")
+        return JSONResponse({"deleted": True})
+
+    @app.get("/profile-builder/preferences")
+    def profile_builder_get_preferences(
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        return JSONResponse(
+            store.get_profile_builder_preferences(token).model_dump(mode="json")
+        )
+
+    @app.put("/profile-builder/preferences")
+    def profile_builder_put_preferences(
+        preferences: ProfileBuilderPreferences,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        try:
+            store.set_profile_builder_preferences(token, preferences)
+        except PersistenceError as exc:
+            raise HTTPException(
+                status_code=500, detail="profile_builder_persistence_failed"
+            ) from exc
+        return JSONResponse({"saved": True, "preferences": preferences.model_dump(mode="json")})
 
     @app.get("/profile-builder/templates")
     def profile_builder_list_templates(

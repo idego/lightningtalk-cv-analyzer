@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import zipfile
 
 from docx import Document
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from cv_validator.ai.config import AISettings
 from cv_validator.api.app import create_app
-from cv_validator.ai.domain import ProfileExtractionResponse, ProfileSummaryResponse
+from cv_validator.ai.domain import ProfileExtractionResponse, ProfileSummaryResponse, ProfileTransformResponse
 from cv_validator.profile_builder import (
     AnonymizationPolicy,
     CandidateProfile,
@@ -102,11 +103,26 @@ class _Summarizer:
         )
 
 
+class _Transformer:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.requests = []
+
+    def transform(self, request):
+        self.requests.append(request)
+        return ProfileTransformResponse(
+            payload=self.payload,
+            response_model="gpt-5.6-luna",
+            usage={},
+        )
+
+
 def _client(
     tmp_path,
     location_resolver,
     extractor: _Extractor,
     summarizer: _Summarizer | None = None,
+    transformer: _Transformer | None = None,
 ) -> TestClient:
     return TestClient(
         create_app(
@@ -115,6 +131,7 @@ def _client(
             ai_settings=AISettings(enabled=True, api_key="test-key"),
             profile_extractor=extractor,
             profile_summarizer=summarizer or _Summarizer(),
+            profile_transformer=transformer,
         )
     )
 
@@ -197,7 +214,7 @@ def test_profile_builder_respects_request_level_ai_opt_out(
         files={
             "file": (
                 "candidate.docx",
-                _docx_bytes("Jane Example\nBackend Engineer"),
+                _docx_bytes("Jane Example\nBackend Engineer\nPython FastAPI PostgreSQL"),
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
         },
@@ -235,6 +252,13 @@ def test_profile_builder_summary_uses_luna_without_reasoning_and_excludes_contac
     summarizer = _Summarizer("Python backend engineer aligned with the role.")
     client = _client(tmp_path, location_resolver, _Extractor(), summarizer)
     profile = _profile_snapshot()["profile"]
+    profile["custom_fields"] = [{
+        "id": "internal-rate",
+        "label": "Internal rate",
+        "kind": "text",
+        "value": "SECRET_RATE_123",
+        "options": [],
+    }]
 
     response = client.post(
         "/profile-builder/summary",
@@ -258,6 +282,7 @@ def test_profile_builder_summary_uses_luna_without_reasoning_and_excludes_contac
     assert "Senior Python Engineer" in input_text
     assert "jane@example.com" not in input_text
     assert "Backend engineer focused on Python services." not in input_text
+    assert "SECRET_RATE_123" not in input_text
     assert "Built APIs" in input_text
 
 
@@ -482,6 +507,7 @@ def test_profile_builder_templates_have_builtin_fallback_and_owner_scoped_overri
     custom = default_profile_template().model_copy(deep=True)
     custom.id = "client-compact"
     custom.name = "Client Compact"
+    custom.visibility = "private"
     custom.description = "Compact client-facing profile"
     custom.branding = ProfileTemplateBranding(
         brand_name="CLIENT",
@@ -694,3 +720,247 @@ def test_template_logo_is_rendered_as_floating_page_positioned_image(
     assert 'relativeFrom="page"' in header_xml
     assert "<wp:wrapNone" in header_xml
     assert media_names
+
+
+def test_pdf_export_converts_exact_docx_snapshot_with_libreoffice(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    template = default_profile_template().model_copy(deep=True)
+    template.name = "PDF Snapshot"
+    response = client.post(
+        "/profile-builder/export/pdf",
+        json={
+            "profile": _profile_snapshot()["profile"],
+            "anonymization": AnonymizationPolicy(hide_email=True).model_dump(mode="json"),
+            "template_id": template.id,
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-")
+    assert len(response.content) > 1_000
+
+
+def test_shared_templates_are_visible_cross_owner_but_private_templates_are_not(tmp_path, location_resolver) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    private = default_profile_template().model_copy(deep=True)
+    private.id = "private-template"
+    private.name = "Private Template"
+    private.visibility = "private"
+    shared = default_profile_template().model_copy(deep=True)
+    shared.id = "shared-template"
+    shared.name = "Shared Template"
+    shared.visibility = "shared"
+    for template in (private, shared):
+        response = client.put(
+            f"/profile-builder/templates/{template.id}",
+            headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+            json=template.model_dump(mode="json"),
+        )
+        assert response.status_code == 200
+    owner_b = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+    )
+    template_ids = {item["template"]["id"] for item in owner_b.json()["templates"]}
+    assert "shared-template" in template_ids
+    assert "private-template" not in template_ids
+
+    private_override = shared.model_copy(deep=True)
+    private_override.visibility = "private"
+    private_override.name = "My Private Override"
+    assert client.put(
+        "/profile-builder/templates/shared-template",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+        json=private_override.model_dump(mode="json"),
+    ).status_code == 200
+    owner_b_after = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+    ).json()["templates"]
+    assert next(item for item in owner_b_after if item["template"]["id"] == "shared-template")["template"]["name"] == "My Private Override"
+    owner_a_after = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+    ).json()["templates"]
+    assert next(item for item in owner_a_after if item["template"]["id"] == "shared-template")["template"]["name"] == "Shared Template"
+
+
+def test_custom_field_defaults_and_conversion_preferences_are_applied_during_extraction(tmp_path, location_resolver) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    assert client.put(
+        "/profile-builder/custom-fields/availability",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json={"id":"availability","label":"Availability","kind":"text","options":[],"default_value":"2 weeks"},
+    ).status_code == 200
+    preferences = {
+        "auto_summary": False,
+        "summary_instruction": "",
+        "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+        "aggregate_technologies": True,
+        "date_format": "mm/yyyy",
+        "default_template_id": "idego-default",
+        "filename_pattern": "{name}-blind",
+    }
+    assert client.put(
+        "/profile-builder/preferences",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=preferences,
+    ).status_code == 200
+    response = client.post(
+        "/profile-builder/extract",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        files={"file": ("candidate.docx", _docx_bytes("Jane Example\nBackend Engineer\nPython FastAPI PostgreSQL"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert response.status_code == 200
+    profile = response.json()["profile"]
+    assert profile["custom_fields"][0]["value"] == "2 weeks"
+    assert profile["experience"][0]["start_date"] == "01/2024"
+    assert profile["technologies"] == ["PostgreSQL", "Python", "FastAPI"]
+
+
+def test_profile_ai_action_excludes_personal_data_and_changes_only_selected_section(tmp_path, location_resolver) -> None:
+    profile = CandidateProfile.model_validate(_profile_snapshot()["profile"])
+    professional = {"summary": "More concise backend summary."}
+    transformer = _Transformer(professional)
+    client = _client(tmp_path, location_resolver, _Extractor(), transformer=transformer)
+    response = client.post(
+        "/profile-builder/transform",
+        json={"profile": profile.model_dump(mode="json"), "sections":["summary"], "instruction":"Make the summary more concise.", "mode":"action", "target_language":None},
+    )
+    assert response.status_code == 200
+    payload = transformer.requests[0].to_openai_payload()
+    request_text = payload["input"][0]["content"][0]["text"]
+    assert "jane@example.com" not in request_text
+    assert "+48 500 600 700" not in request_text
+    assert "custom_fields" not in request_text
+    assert payload["reasoning"] == {"effort": "none"}
+    assert payload["tools"] == []
+    assert set(payload["text"]["format"]["schema"]["properties"]) == {"summary"}
+    assert '"default"' not in json.dumps(payload["text"]["format"]["schema"])
+
+
+def test_profile_ai_action_rejects_unselected_section_changes(tmp_path, location_resolver) -> None:
+    profile = CandidateProfile.model_validate(_profile_snapshot()["profile"])
+    professional = {"headline": "Illegally changed headline", "summary": "Allowed summary change"}
+    client = _client(tmp_path, location_resolver, _Extractor(), transformer=_Transformer(professional))
+    response = client.post(
+        "/profile-builder/transform",
+        json={"profile": profile.model_dump(mode="json"), "sections":["summary"], "instruction":"Shorten summary.", "mode":"action", "target_language":None},
+    )
+    assert response.status_code == 502
+
+
+def test_canvas_side_lanes_render_as_editable_docx_columns(tmp_path, location_resolver) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    template = default_profile_template().model_copy(deep=True)
+    for section in template.sections:
+        section.visible = section.kind in {"skills", "technologies"}
+        if section.kind == "skills":
+            section.placement = "left"
+        elif section.kind == "technologies":
+            section.placement = "right"
+    response = client.post(
+        "/profile-builder/export/docx",
+        json={
+            "profile": _profile_snapshot()["profile"],
+            "anonymization": AnonymizationPolicy().model_dump(mode="json"),
+            "template_id": template.id,
+            "template": template.model_dump(mode="json"),
+        },
+    )
+    assert response.status_code == 200
+    document = Document(io.BytesIO(response.content))
+    assert len(document.tables) == 1
+    row = document.tables[0].rows[0]
+    left = "\n".join(paragraph.text for paragraph in row.cells[0].paragraphs)
+    right = "\n".join(paragraph.text for paragraph in row.cells[1].paragraphs)
+    assert "Skills" in left
+    assert "Python" in left
+    assert "Technologies" in right
+    assert "PostgreSQL" in right
+
+
+def test_organization_custom_fields_require_internal_access_token(tmp_path, location_resolver) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    assert client.get("/profile-builder/custom-fields").status_code == 401
+    assert client.get(
+        "/profile-builder/custom-fields",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+    ).status_code == 200
+
+
+def test_profile_translation_returns_only_selected_schema_and_preserves_protected_facts(
+    tmp_path,
+    location_resolver,
+) -> None:
+    profile = CandidateProfile.model_validate(_profile_snapshot()["profile"])
+    transformer = _Transformer(
+        {
+            "summary": "Inżynier backendu pracujący z usługami Python.",
+            "experience": [
+                {
+                    **profile.experience[0].model_dump(mode="json"),
+                    "role": "Inżynier backendu",
+                    "responsibilities": ["Budował API"],
+                }
+            ],
+        }
+    )
+    client = _client(
+        tmp_path,
+        location_resolver,
+        _Extractor(),
+        transformer=transformer,
+    )
+    response = client.post(
+        "/profile-builder/transform",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "sections": ["summary", "experience"],
+            "instruction": "",
+            "mode": "translation",
+            "target_language": "pl",
+        },
+    )
+    assert response.status_code == 200
+    proposal = response.json()["proposal"]
+    assert proposal["summary"].startswith("Inżynier backendu")
+    assert proposal["experience"][0]["company"] == profile.experience[0].company
+    assert proposal["experience"][0]["start_date"] == profile.experience[0].start_date
+    assert proposal["experience"][0]["technologies"] == profile.experience[0].technologies
+    payload = transformer.requests[0].to_openai_payload()
+    assert set(payload["text"]["format"]["schema"]["properties"]) == {
+        "summary",
+        "experience",
+    }
+    assert "Translate the selected sections to pl" in payload["instructions"]
+
+
+def test_profile_translation_rejects_changed_company_or_technology(
+    tmp_path,
+    location_resolver,
+) -> None:
+    profile = CandidateProfile.model_validate(_profile_snapshot()["profile"])
+    changed = profile.experience[0].model_dump(mode="json")
+    changed["company"] = "Translated Company"
+    client = _client(
+        tmp_path,
+        location_resolver,
+        _Extractor(),
+        transformer=_Transformer({"experience": [changed]}),
+    )
+    response = client.post(
+        "/profile-builder/transform",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "sections": ["experience"],
+            "instruction": "",
+            "mode": "translation",
+            "target_language": "pl",
+        },
+    )
+    assert response.status_code == 502

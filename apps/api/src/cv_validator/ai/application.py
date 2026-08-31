@@ -15,14 +15,17 @@ from cv_validator.ai.domain import (
     DocumentAnalyzerResponse,
     ProfileExtractionResponse,
     ProfileSummaryResponse,
+    ProfileTransformResponse,
 )
 from cv_validator.ai.request import (
     DocumentAnalysisRequest,
     ProfileExtractionRequest,
     ProfileSummaryRequest,
+    ProfileTransformRequest,
     build_document_analysis_request,
     build_profile_extraction_request,
     build_profile_summary_request,
+    build_profile_transform_request,
     load_profile_extraction_schema,
 )
 from cv_validator.ai.validation import (
@@ -31,7 +34,11 @@ from cv_validator.ai.validation import (
 )
 from cv_validator.domain import DeterministicAnalysisResult, Report
 from cv_validator.ingestion import RedactedDocument
-from cv_validator.profile_builder import CandidateProfile
+from cv_validator.profile_builder import (
+    CandidateProfile,
+    ProfessionalProfile,
+    ProfessionalSectionName,
+)
 
 
 class DocumentAnalyzerTimeoutError(TimeoutError):
@@ -81,6 +88,17 @@ class ProfileSummarizer(Protocol):
 
 class ProfileSummaryError(RuntimeError):
     """Safe Profile Builder summary failure without candidate content."""
+
+
+class ProfileTransformer(Protocol):
+    def transform(
+        self,
+        request: ProfileTransformRequest,
+    ) -> ProfileTransformResponse: ...
+
+
+class ProfileTransformError(RuntimeError):
+    """Safe Profile Builder transform failure without candidate content."""
 
 
 def analyze_report_with_ai(
@@ -366,3 +384,102 @@ def generate_candidate_profile_summary(
             raise ProfileSummaryError("profile_summary_invalid_response")
         return summary
     raise ProfileSummaryError("profile_summary_failed")
+
+
+def generate_candidate_profile_transform(
+    settings: AISettings,
+    transformer: ProfileTransformer,
+    profile: CandidateProfile,
+    sections: list[ProfessionalSectionName],
+    instruction: str,
+    *,
+    mode: str,
+    target_language: str | None = None,
+) -> ProfessionalProfile:
+    if not settings.enabled:
+        raise ProfileTransformError("profile_builder_ai_disabled")
+    request = build_profile_transform_request(
+        settings,
+        profile,
+        sections,
+        instruction,
+        mode=mode,
+        target_language=target_language,
+    )
+    attempts = 0
+    transport_retries = 0
+    invalid_retries = 0
+    while attempts < settings.absolute_attempt_limit:
+        attempts += 1
+        try:
+            response = transformer.transform(request)
+        except DocumentAnalyzerTimeoutError as exc:
+            if transport_retries < settings.transport_retry_limit and attempts < settings.absolute_attempt_limit:
+                transport_retries += 1
+                continue
+            raise ProfileTransformError("profile_transform_timeout") from exc
+        except DocumentAnalyzerClientError as exc:
+            if exc.retryable and transport_retries < settings.transport_retry_limit and attempts < settings.absolute_attempt_limit:
+                transport_retries += 1
+                continue
+            raise ProfileTransformError("profile_transform_client_error") from exc
+        if response.refused or response.payload is None:
+            raise ProfileTransformError("profile_transform_refused")
+        original = ProfessionalProfile(
+            headline=profile.headline, summary=profile.summary, skills=profile.skills,
+            technologies=profile.technologies, experience=profile.experience, education=profile.education,
+            languages=profile.languages, certifications=profile.certifications,
+            additional_sections=profile.additional_sections,
+        )
+        selected = set(sections)
+        if not isinstance(response.payload, dict) or set(response.payload) != selected:
+            if invalid_retries < settings.invalid_response_retry_limit and attempts < settings.absolute_attempt_limit:
+                invalid_retries += 1
+                continue
+            raise ProfileTransformError("profile_transform_invalid_response")
+        try:
+            merged = original.model_dump(mode="json")
+            merged.update(response.payload)
+            proposed = ProfessionalProfile.model_validate(merged)
+        except Exception as exc:
+            if invalid_retries < settings.invalid_response_retry_limit and attempts < settings.absolute_attempt_limit:
+                invalid_retries += 1
+                continue
+            raise ProfileTransformError("profile_transform_invalid_response") from exc
+
+        for field_name in ("experience", "education", "languages", "certifications", "additional_sections"):
+            if field_name not in selected:
+                continue
+            original_ids = [item.id for item in getattr(original, field_name)]
+            proposed_ids = [item.id for item in getattr(proposed, field_name)]
+            if proposed_ids != original_ids:
+                raise ProfileTransformError("profile_transform_modified_entry_structure")
+
+        if mode == "translation":
+            if proposed.technologies != original.technologies:
+                raise ProfileTransformError("profile_translation_modified_technologies")
+            for before, after in zip(original.experience, proposed.experience):
+                if (
+                    after.company != before.company
+                    or after.company_category != before.company_category
+                    or after.project != before.project
+                    or after.location != before.location
+                    or after.start_date != before.start_date
+                    or after.end_date != before.end_date
+                    or after.current != before.current
+                    or after.technologies != before.technologies
+                ):
+                    raise ProfileTransformError("profile_translation_modified_protected_fact")
+            for before, after in zip(original.education, proposed.education):
+                if (
+                    after.institution != before.institution
+                    or after.location != before.location
+                    or after.start_date != before.start_date
+                    or after.end_date != before.end_date
+                ):
+                    raise ProfileTransformError("profile_translation_modified_protected_fact")
+            for before, after in zip(original.certifications, proposed.certifications):
+                if (after.issuer, after.date, after.url) != (before.issuer, before.date, before.url):
+                    raise ProfileTransformError("profile_translation_modified_protected_fact")
+        return proposed
+    raise ProfileTransformError("profile_transform_failed")
