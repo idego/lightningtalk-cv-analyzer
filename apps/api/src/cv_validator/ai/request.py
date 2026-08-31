@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from copy import deepcopy
 from dataclasses import dataclass
 from importlib.resources import files
 from typing import Any
+
+from pydantic import BaseModel
 
 from cv_validator.ai.config import AISettings
 from cv_validator.domain import DeterministicAnalysisResult
@@ -292,7 +296,123 @@ def build_profile_summary_request(
     )
 
 
-PROFILE_TRANSFORM_PROMPT_VERSION = "profile-builder-transform-v1"
+PROFILE_TRANSFORM_PROMPT_VERSION = "profile-builder-transform-v2"
+
+_TRANSFORM_CONTEXT_DEPENDENCIES: dict[ProfessionalSectionName, tuple[ProfessionalSectionName, ...]] = {
+    "headline": ("summary", "skills", "technologies", "experience"),
+    "summary": ("headline", "skills", "technologies", "experience", "education"),
+    "skills": ("headline", "technologies", "experience"),
+    "technologies": ("headline", "skills", "experience"),
+    "experience": ("headline", "skills", "technologies"),
+    "education": ("headline",),
+    "languages": (),
+    "certifications": ("technologies",),
+    "additional_sections": ("headline",),
+}
+
+_TRANSFORM_OUTPUT_FLOORS: dict[ProfessionalSectionName, int] = {
+    "headline": 96,
+    "summary": 256,
+    "skills": 256,
+    "technologies": 256,
+    "experience": 512,
+    "education": 384,
+    "languages": 192,
+    "certifications": 256,
+    "additional_sections": 384,
+}
+
+
+def _profile_transform_context(
+    profile: ProfessionalProfile,
+    sections: list[ProfessionalSectionName],
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    selected = set(sections)
+    context_fields = set(selected)
+    if mode == "action":
+        for section in sections:
+            context_fields.update(_TRANSFORM_CONTEXT_DEPENDENCIES[section])
+
+    result: dict[str, Any] = {}
+    for field_name in ProfessionalProfile.model_fields:
+        if field_name not in context_fields:
+            continue
+        value = getattr(profile, field_name)
+        if field_name == "experience" and field_name not in selected:
+            result[field_name] = [
+                {
+                    "id": item.id,
+                    "company": item.company,
+                    "role": item.role,
+                    "project": item.project,
+                    "start_date": item.start_date,
+                    "end_date": item.end_date,
+                    "current": item.current,
+                    "responsibilities": item.responsibilities,
+                    "achievements": item.achievements,
+                    "technologies": item.technologies,
+                }
+                for item in value
+            ]
+            continue
+        if field_name == "education" and field_name not in selected:
+            result[field_name] = [
+                {
+                    "id": item.id,
+                    "institution": item.institution,
+                    "degree": item.degree,
+                    "field": item.field,
+                    "end_date": item.end_date,
+                }
+                for item in value
+            ]
+            continue
+        result[field_name] = (
+            [item.model_dump(mode="json") for item in value]
+            if isinstance(value, list) and value and isinstance(value[0], BaseModel)
+            else value
+        )
+    return result
+
+
+def _profile_transform_output_limit(
+    settings: AISettings,
+    profile: ProfessionalProfile,
+    sections: list[ProfessionalSectionName],
+    *,
+    mode: str,
+) -> int:
+    selected_payload = {
+        section: getattr(profile, section)
+        for section in sections
+    }
+    serialized = json.dumps(
+        selected_payload,
+        default=lambda value: value.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    estimated_tokens = math.ceil(len(serialized) / 2.5)
+    headroom = 1.35 if mode == "translation" else 1.5
+    content_budget = math.ceil(estimated_tokens * headroom) + 64 * len(sections)
+    floor = sum(_TRANSFORM_OUTPUT_FLOORS[section] for section in sections)
+    return min(settings.max_output_tokens, max(96, floor, content_budget))
+
+
+def _profile_transform_cache_key(
+    *,
+    mode: str,
+    target_language: str | None,
+    sections: list[ProfessionalSectionName],
+    context_json: str,
+) -> str:
+    signature = "|".join(
+        (mode, target_language or "-", ",".join(sections), context_json)
+    )
+    digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:24]
+    return f"pb-transform-v2:{mode[:1]}:{digest}"
 
 
 def build_profile_transform_request(
@@ -305,6 +425,21 @@ def build_profile_transform_request(
     target_language: str | None = None,
 ) -> ProfileTransformRequest:
     professional = professional_profile_from_candidate(profile)
+    selected_set = set(sections)
+    selected_sections = [
+        field_name
+        for field_name in ProfessionalProfile.model_fields
+        if field_name in selected_set
+    ]
+    context = _profile_transform_context(
+        professional, selected_sections, mode=mode
+    )
+    context_json = json.dumps(
+        context,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     if mode == "translation":
         task = (
             f"Translate the selected sections to {target_language}. Preserve names, company names, "
@@ -318,14 +453,14 @@ def build_profile_transform_request(
             "credentials, employers, dates, or achievements."
         )
     input_text = (
-        "<selected_sections>\n" + json.dumps(sections) + "\n</selected_sections>\n\n"
-        "<instruction>\n" + instruction.strip() + "\n</instruction>\n\n"
-        "<professional_profile>\n" + professional.model_dump_json() + "\n</professional_profile>"
+        "<selected_sections>\n" + json.dumps(selected_sections) + "\n</selected_sections>\n\n"
+        "<professional_context>\n" + context_json + "\n</professional_context>\n\n"
+        "<recruiter_instruction>\n" + instruction.strip() + "\n</recruiter_instruction>"
     )
     schema = ProfessionalProfile.model_json_schema()
     root_properties = schema.get("properties", {})
-    schema["properties"] = {section: root_properties[section] for section in sections}
-    schema["required"] = list(sections)
+    schema["properties"] = {section: root_properties[section] for section in selected_sections}
+    schema["required"] = list(selected_sections)
     schema = _openai_strict_schema(schema)
     payload: dict[str, Any] = {
         "model": settings.model,
@@ -336,16 +471,29 @@ def build_profile_transform_request(
         ),
         "input": [{"role": "user", "content": [{"type": "input_text", "text": input_text}]}],
         "text": {
+            "verbosity": "low",
             "format": {
                 "type": "json_schema",
                 "name": "candidate_professional_profile",
                 "strict": True,
                 "schema": schema,
-            }
+            },
         },
         "tools": [],
         "store": settings.store,
-        "max_output_tokens": settings.max_output_tokens,
+        "prompt_cache_key": _profile_transform_cache_key(
+            mode=mode,
+            target_language=target_language,
+            sections=selected_sections,
+            context_json=context_json,
+        ),
+        "prompt_cache_options": {"mode": "implicit", "ttl": "30m"},
+        "max_output_tokens": _profile_transform_output_limit(
+            settings,
+            professional,
+            selected_sections,
+            mode=mode,
+        ),
     }
     return ProfileTransformRequest(
         openai_payload=payload,

@@ -84,3 +84,8 @@ New custom templates are Private by default. A recruiter may explicitly change A
 ### D16: Derive PDF from DOCX and keep batch orchestration in the web workflow
 
 PDF export renders the exact current DOCX bytes and converts them through isolated headless LibreOffice with a temporary HOME/UserInstallation and timeout. The API runtime image includes LibreOffice Writer. Batch Convert accepts at most 10 PDF/DOCX files and deliberately processes them through the same single-file extraction and snapshot-persistence path with explicit queued/processing/completed/failed UI state. Source file bytes remain browser/request-local and are never persisted by Profile Builder.
+
+
+### D17: Optimize AI Actions for latency before buying priority service
+
+Profile transforms keep `gpt-5.6-luna`, `reasoning.effort = none`, no tools, and response storage disabled. The request builder prunes input context by selected section: Translation receives only selected sections, while AI Actions add only the professional dependencies needed for the selected rewrite (for example Summary gets headline/skills/technologies plus compact experience/education context). Repeated-entry dependency context omits irrelevant fields such as experience location. The recruiter instruction is placed after the stable selected/context prefix so repeated actions over the same snapshot can reuse prompt-cache prefixes. Requests use `text.verbosity = low`, a stable <=64-character `prompt_cache_key` with implicit 30-minute caching, and a dynamic `max_output_tokens` budget derived from selected output size/section floors rather than always allowing the global 4096-token ceiling.

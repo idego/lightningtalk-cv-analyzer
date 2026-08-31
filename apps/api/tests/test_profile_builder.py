@@ -839,8 +839,22 @@ def test_profile_ai_action_excludes_personal_data_and_changes_only_selected_sect
     assert "custom_fields" not in request_text
     assert payload["reasoning"] == {"effort": "none"}
     assert payload["tools"] == []
+    assert payload["text"]["verbosity"] == "low"
     assert set(payload["text"]["format"]["schema"]["properties"]) == {"summary"}
     assert '"default"' not in json.dumps(payload["text"]["format"]["schema"])
+    assert 96 <= payload["max_output_tokens"] < 4096
+    assert payload["prompt_cache_options"] == {"mode": "implicit", "ttl": "30m"}
+    assert len(payload["prompt_cache_key"]) <= 64
+    assert payload["prompt_cache_key"].startswith("pb-transform-v2:a:")
+    assert "<professional_context>" in request_text
+    assert "<recruiter_instruction>" in request_text
+    assert request_text.index("<professional_context>") < request_text.index("<recruiter_instruction>")
+    context_text = request_text.split("<professional_context>\n", 1)[1].split("\n</professional_context>", 1)[0]
+    context = json.loads(context_text)
+    assert set(context) == {"headline", "summary", "skills", "technologies", "experience", "education"}
+    assert "languages" not in context
+    assert "certifications" not in context
+    assert "location" not in context["experience"][0]
 
 
 def test_profile_ai_action_rejects_unselected_section_changes(tmp_path, location_resolver) -> None:
@@ -938,6 +952,50 @@ def test_profile_translation_returns_only_selected_schema_and_preserves_protecte
         "experience",
     }
     assert "Translate the selected sections to pl" in payload["instructions"]
+    assert payload["text"]["verbosity"] == "low"
+    assert payload["prompt_cache_key"].startswith("pb-transform-v2:t:")
+    translation_text = payload["input"][0]["content"][0]["text"]
+    context_text = translation_text.split("<professional_context>\n", 1)[1].split("\n</professional_context>", 1)[0]
+    assert set(json.loads(context_text)) == {"summary", "experience"}
+    assert payload["max_output_tokens"] < 4096
+
+
+def test_profile_ai_action_cache_key_is_stable_across_instruction_changes(
+    tmp_path,
+    location_resolver,
+) -> None:
+    profile = CandidateProfile.model_validate(_profile_snapshot()["profile"])
+    first = _Transformer({"summary": "First rewrite"})
+    second = _Transformer({"summary": "Second rewrite"})
+    client = _client(tmp_path, location_resolver, _Extractor(), transformer=first)
+    assert client.post(
+        "/profile-builder/transform",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "sections": ["summary"],
+            "instruction": "Make it concise.",
+            "mode": "action",
+            "target_language": None,
+        },
+    ).status_code == 200
+    first_payload = first.requests[0].to_openai_payload()
+
+    client = _client(tmp_path, location_resolver, _Extractor(), transformer=second)
+    assert client.post(
+        "/profile-builder/transform",
+        json={
+            "profile": profile.model_dump(mode="json"),
+            "sections": ["summary"],
+            "instruction": "Focus on API ownership.",
+            "mode": "action",
+            "target_language": None,
+        },
+    ).status_code == 200
+    second_payload = second.requests[0].to_openai_payload()
+    assert first_payload["prompt_cache_key"] == second_payload["prompt_cache_key"]
+    first_prefix = first_payload["input"][0]["content"][0]["text"].split("<recruiter_instruction>", 1)[0]
+    second_prefix = second_payload["input"][0]["content"][0]["text"].split("<recruiter_instruction>", 1)[0]
+    assert first_prefix == second_prefix
 
 
 def test_profile_translation_rejects_changed_company_or_technology(

@@ -50,3 +50,9 @@
 - [x] 9.7 Add GPT-5.6 Luna translation passes with language selection, preview/diff review, and selective Accept.
 - [x] 9.8 Add an authenticated Profiles catalog/search screen while keeping Recent profiles on the upload page as a shortcut.
 - [x] 9.9 Verify all new workflows with focused tests, full regression, Node 22 production build, browser smoke, and whole-diff review.
+
+
+## 10. AI transform latency
+- [x] 10.1 Prune AI Action context by selected section and make Translation selected-section-only.
+- [x] 10.2 Use low verbosity, stable prompt caching, and dynamic output-token caps for profile transforms.
+- [x] 10.3 Run focused payload-contract tests, full regression, production build, and diff review.

@@ -138,3 +138,15 @@ The system SHALL translate selected professional profile sections to a supported
 
 ### Requirement: Profiles catalog
 The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository.
+
+
+### Requirement: Latency-bounded AI profile transforms
+AI Actions and Translation SHALL avoid unnecessary model work by using GPT-5.6 Luna without reasoning or tools, requesting low-verbosity structured output, pruning professional context to the selected action, and applying a dynamic output-token ceiling. Repeated actions over the same profile context SHALL use a stable prompt-cache key/prefix that does not change when only the recruiter instruction changes.
+
+#### Scenario: Recruiter rewrites only Summary
+- **WHEN** HR previews an AI Action whose only editable section is Summary
+- **THEN** the model request omits unrelated sections such as languages/certifications, sends only compact dependencies required to ground Summary, requests only the Summary structured output, and uses a substantially smaller output cap than the global AI maximum
+
+#### Scenario: Recruiter changes the prompt and regenerates
+- **WHEN** the same saved profile and selected sections are submitted again with a different recruiter instruction
+- **THEN** the stable prompt prefix/cache key remains unchanged while the instruction is appended after that cached context
