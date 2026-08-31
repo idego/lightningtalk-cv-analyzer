@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AUTO_RESEARCH_MAX_CONCURRENCY,
+  announcedAutoResearchKinds,
   createAutoResearchOrchestrator,
   effectiveAutoResearchKinds,
   eligibleAutoResearchKinds,
@@ -63,6 +64,31 @@ test("intersects automatic research with each server capability", async () => {
   const orchestrator = createAutoResearchOrchestrator({ storage: memoryStorage(), fetcher: async (url) => { urls.push(url); return { ok: true, json: async () => ({}) }; } });
   await orchestrator.schedule({ ...report("caps"), ai_capabilities: { company_research: false, education_research: true, linkedin_research: false } }, { ...settings, aiEnabled: true });
   assert.equal(urls.length, 1); assert.match(urls[0], /education/);
+});
+
+test("code-owned company and education subjects schedule after document AI failure", async () => {
+  const urls = [];
+  const failed = {
+    ...report("code-after-ai-failure", []),
+    ai_analysis: { status: "failed", research_candidates: [] },
+    document_understanding: { code_research_subjects: [
+      { category: "company", subject: "Code Company" },
+      { category: "education", subject: "Code University" },
+    ] },
+  };
+  const orchestrator = createAutoResearchOrchestrator({ storage: memoryStorage(), fetcher: async (url) => { urls.push(url); return { ok: true, json: async () => ({}) }; } });
+  await orchestrator.schedule(failed, { ...settings, aiEnabled: true });
+  assert.deepEqual(urls.map((url) => url.split("/").at(-1)).sort(), ["company", "education"]);
+});
+
+test("batch disclosure unions eligible research across every successful report", () => {
+  const companyOnly = report("company", ["company"]);
+  const educationOnly = report("education", ["education_or_certification"]);
+  const linkedinOnly = report("linkedin", ["linkedin"]);
+  assert.deepEqual(
+    announcedAutoResearchKinds([companyOnly, educationOnly, linkedinOnly], { ...settings, aiEnabled: true }),
+    ["company", "education", "linkedin"],
+  );
 });
 
 test("authorization matrix never schedules a disabled setting or capability", async () => {

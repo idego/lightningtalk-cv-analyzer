@@ -56,10 +56,7 @@ export function resolveStoredAppSettings(v2Raw: string | null, v1Raw: string | n
   const current = parseObject(v2Raw);
   if (current?.version === SETTINGS_SCHEMA_VERSION) return normalizeSettings(current, true);
   const legacy = parseObject(v1Raw);
-  if (legacy) {
-    const preserved = normalizeSettings(legacy, true);
-    return { ...preserved, autoResearchEnabled: true, autoCompanyResearch: true, autoEducationResearch: true, autoLinkedinDiscovery: true };
-  }
+  if (legacy) return normalizeSettings(legacy, true);
   return DEFAULT_SETTINGS;
 }
 
@@ -68,12 +65,19 @@ function serializeSettings(settings: AppSettings) {
 }
 
 type SettingsStorage = Pick<Storage, "getItem" | "setItem">;
+function safeGet(storage: SettingsStorage, key: string) {
+  try { return storage.getItem(key); } catch { return null; }
+}
+
 export function loadStoredAppSettings(storage: SettingsStorage): AppSettings {
-  const current = storage.getItem(SETTINGS_STORAGE_KEY);
-  const legacy = storage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
-  const settings = resolveStoredAppSettings(current, legacy);
-  if (current === null && legacy !== null) storage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(settings));
-  return settings;
+  return resolveStoredAppSettings(safeGet(storage, SETTINGS_STORAGE_KEY), safeGet(storage, LEGACY_SETTINGS_STORAGE_KEY));
+}
+
+export function persistMigratedAppSettings(storage: SettingsStorage): void {
+  const current = safeGet(storage, SETTINGS_STORAGE_KEY);
+  const legacy = safeGet(storage, LEGACY_SETTINGS_STORAGE_KEY);
+  if (current !== null || legacy === null) return;
+  try { storage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(resolveStoredAppSettings(null, legacy))); } catch { /* Persistence is optional; rendering must remain available. */ }
 }
 
 function readSettings(): AppSettings {
@@ -85,7 +89,7 @@ let cachedRaw = "";
 let cachedSettings = DEFAULT_SETTINGS;
 function snapshot() {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
-  const raw = `${window.localStorage.getItem(SETTINGS_STORAGE_KEY) ?? ""}\u0000${window.localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY) ?? ""}`;
+  const raw = `${safeGet(window.localStorage, SETTINGS_STORAGE_KEY) ?? ""}\u0000${safeGet(window.localStorage, LEGACY_SETTINGS_STORAGE_KEY) ?? ""}`;
   if (raw !== cachedRaw) {
     cachedRaw = raw;
     cachedSettings = readSettings();
@@ -104,13 +108,14 @@ function subscribe(callback: () => void) {
 
 export function updateAppSettings(patch: Partial<AppSettings>) {
   const next = { ...readSettings(), ...patch };
-  window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(next));
+  try { window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(next)); } catch { return; }
   window.dispatchEvent(new Event(EVENT_NAME));
 }
 
 export function useAppSettings() {
   const settings = useSyncExternalStore(subscribe, snapshot, () => DEFAULT_SETTINGS);
   useEffect(() => {
+    persistMigratedAppSettings(window.localStorage);
     document.documentElement.lang = settings.uiLanguage;
   }, [settings.uiLanguage]);
   return settings;

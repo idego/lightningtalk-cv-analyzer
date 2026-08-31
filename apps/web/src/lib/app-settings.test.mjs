@@ -7,6 +7,7 @@ import {
   SETTINGS_SCHEMA_VERSION,
   SETTINGS_STORAGE_KEY,
   loadStoredAppSettings,
+  persistMigratedAppSettings,
   resolveStoredAppSettings,
 } from "./app-settings.ts";
 
@@ -19,11 +20,11 @@ test("fresh users default AI and all automatic research kinds on", () => {
   assert.equal(DEFAULT_SETTINGS.autoLinkedinDiscovery, true);
 });
 
-test("v1 migration preserves preferences and adopts the v2 research defaults", () => {
+test("v1 migration preserves explicit research opt-outs and mixed preferences", () => {
   const legacy = JSON.stringify({
     uiLanguage: "pl", reportLanguage: "pl", aiEnabled: true,
     autoResearchEnabled: false, autoCompanyResearch: false,
-    autoEducationResearch: false, autoLinkedinDiscovery: false,
+    autoEducationResearch: true, autoLinkedinDiscovery: false,
     previewFindingsOnHover: true, expandSectionsByDefault: true,
   });
   const migrated = resolveStoredAppSettings(null, legacy);
@@ -33,16 +34,26 @@ test("v1 migration preserves preferences and adopts the v2 research defaults", (
   assert.equal(migrated.expandSectionsByDefault, true);
   assert.deepEqual(
     [migrated.autoResearchEnabled, migrated.autoCompanyResearch, migrated.autoEducationResearch, migrated.autoLinkedinDiscovery],
-    [true, true, true, true],
+    [false, false, true, false],
   );
   const values = new Map([[LEGACY_SETTINGS_STORAGE_KEY, legacy]]);
   const persisted = loadStoredAppSettings({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) });
   assert.deepEqual(persisted, migrated);
+  assert.equal(values.has(SETTINGS_STORAGE_KEY), false, "snapshot reads must not persist");
+  persistMigratedAppSettings({ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) });
   const v2 = JSON.parse(values.get(SETTINGS_STORAGE_KEY));
   assert.equal(v2.version, SETTINGS_SCHEMA_VERSION);
   assert.equal(v2.uiLanguage, "pl");
   assert.equal(v2.previewFindingsOnHover, true);
-  assert.equal(v2.autoCompanyResearch, true);
+  assert.equal(v2.autoCompanyResearch, false);
+});
+
+test("migration and reads survive unavailable or quota-limited storage", () => {
+  const legacy = JSON.stringify({ uiLanguage: "pl", autoCompanyResearch: false });
+  const storage = { getItem: (key) => key === LEGACY_SETTINGS_STORAGE_KEY ? legacy : null, setItem: () => { throw new Error("quota"); } };
+  assert.equal(loadStoredAppSettings(storage).uiLanguage, "pl");
+  assert.doesNotThrow(() => persistMigratedAppSettings(storage));
+  assert.deepEqual(loadStoredAppSettings({ getItem: () => { throw new Error("blocked"); }, setItem: () => {} }), DEFAULT_SETTINGS);
 });
 
 test("persisted v2 opt-outs remain explicit after reload", () => {

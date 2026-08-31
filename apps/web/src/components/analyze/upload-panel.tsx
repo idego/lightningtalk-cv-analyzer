@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { effectiveAutoResearchKinds, eligibleAutoResearchKinds, getAutoResearchOrchestrator, type AutoResearchKind } from "@/lib/auto-research";
+import { announcedAutoResearchKinds, getAutoResearchOrchestrator, type AutoResearchKind } from "@/lib/auto-research";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -51,10 +51,10 @@ export function UploadPanel() {
 
   useEffect(() => { if (!loading) return; const startedAt = Date.now(); const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000); return () => window.clearInterval(timer); }, [loading]);
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
-  const capabilityReport = entries.find((entry) => entry.result.status === "ok")?.result;
-  const researchKinds = capabilityReport?.status === "ok"
-    ? effectiveAutoResearchKinds(settings).filter((kind) => eligibleAutoResearchKinds(capabilityReport.report).has(kind))
-    : [];
+  const researchKinds = announcedAutoResearchKinds(
+    entries.flatMap((entry) => entry.result.status === "ok" ? [entry.result.report] : []),
+    settings,
+  );
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
@@ -103,9 +103,7 @@ export function UploadPanel() {
               ? { ...entry, result: enriched }
               : entry,
           ));
-          if (enriched.report.ai_analysis.status === "succeeded") {
-            void getAutoResearchOrchestrator()?.schedule(enriched.report, settings);
-          }
+          void getAutoResearchOrchestrator()?.schedule(enriched.report, settings);
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : t("analysisFailed");
           const failed: typeof result = {
