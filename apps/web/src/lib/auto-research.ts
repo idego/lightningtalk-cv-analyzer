@@ -4,7 +4,7 @@ import type { AppSettings } from "@/lib/app-settings";
 export const AUTO_RESEARCH_MAX_CONCURRENCY = 2;
 export type AutoResearchKind = "company" | "education" | "linkedin";
 export type AutoResearchStatus = "pending" | "running" | "succeeded" | "failed" | "manual-action";
-export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string };
+export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string; httpStatus?: number };
 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
@@ -44,6 +44,7 @@ export function createAutoResearchOrchestrator({
   maxConcurrency = AUTO_RESEARCH_MAX_CONCURRENCY,
 }: { fetcher: FetchLike; storage: StorageLike; maxConcurrency?: number }) {
   const states = new Map<string, AutoResearchState>();
+  const requests = new Map<string, Promise<void>>();
   const listeners = new Set<(analysisId: string, kind: AutoResearchKind, state: AutoResearchState) => void>();
   const queue: Array<() => Promise<void>> = [];
   let active = 0;
@@ -69,43 +70,64 @@ export function createAutoResearchOrchestrator({
   }
   function enqueue(job: () => Promise<void>) { queue.push(job); pump(); }
 
+  function request(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind, allowRetry: boolean) {
+    const requestKey = key(report.analysis_id, kind);
+    const reportResult = report[RESULT_KEYS[kind]];
+    if (reportResult) {
+      publish(report.analysis_id, kind, { status: "succeeded", result: reportResult });
+      return Promise.resolve();
+    }
+    const activeRequest = requests.get(requestKey);
+    if (activeRequest) return activeRequest;
+    const existing = states.get(requestKey);
+    if (existing && (existing.status === "pending" || existing.status === "running" || existing.status === "succeeded")) return Promise.resolve();
+    if (existing && !allowRetry) return Promise.resolve();
+    const persisted = readLedger(report.analysis_id, kind);
+    if (persisted && !allowRetry) {
+      publish(report.analysis_id, kind, { status: persisted === "succeeded" ? "succeeded" : "manual-action", message: persisted === "succeeded" ? undefined : "Automatic research was already attempted. Use the manual action to try again." });
+      return Promise.resolve();
+    }
+    writeLedger(report.analysis_id, kind, "pending");
+    publish(report.analysis_id, kind, { status: "pending" });
+    const completion = new Promise<void>((resolve) => enqueue(async () => {
+      writeLedger(report.analysis_id, kind, "running");
+      publish(report.analysis_id, kind, { status: "running" });
+      try {
+        const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
+        const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }),
+        });
+        const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+        if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status });
+        writeLedger(report.analysis_id, kind, "succeeded");
+        publish(report.analysis_id, kind, { status: "succeeded", result: payload[RESULT_KEYS[kind]] });
+      } catch (cause) {
+        writeLedger(report.analysis_id, kind, "failed");
+        publish(report.analysis_id, kind, { status: "failed", message: cause instanceof Error ? cause.message : `Automatic ${kind} research failed.`, httpStatus: (cause as { httpStatus?: number }).httpStatus });
+      } finally { requests.delete(requestKey); resolve(); }
+    }));
+    requests.set(requestKey, completion);
+    return completion;
+  }
+
   async function schedule(report: AnalysisReport, settings: AppSettings) {
     if (settings.aiEnabled === false || report.ai_features_enabled === false) return;
     const eligible = eligibleAutoResearchKinds(report);
-    const completions = effectiveAutoResearchKinds(settings).filter((kind) => eligible.has(kind)).map((kind) => {
-      const existing = states.get(key(report.analysis_id, kind));
-      if (existing) return Promise.resolve();
-      const persisted = readLedger(report.analysis_id, kind);
-      if (persisted) {
-        publish(report.analysis_id, kind, { status: persisted === "succeeded" ? "succeeded" : "manual-action", message: persisted === "succeeded" ? undefined : "Automatic research was already attempted. Use the manual action to try again." });
-        return Promise.resolve();
-      }
-      writeLedger(report.analysis_id, kind, "pending");
-      publish(report.analysis_id, kind, { status: "pending" });
-      return new Promise<void>((resolve) => enqueue(async () => {
-        writeLedger(report.analysis_id, kind, "running");
-        publish(report.analysis_id, kind, { status: "running" });
-        try {
-          const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
-          const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }),
-          });
-          const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-          if (!response.ok) throw new Error(`Automatic ${kind} research failed (${response.status}).`);
-          writeLedger(report.analysis_id, kind, "succeeded");
-          publish(report.analysis_id, kind, { status: "succeeded", result: payload[RESULT_KEYS[kind]] });
-        } catch (cause) {
-          writeLedger(report.analysis_id, kind, "failed");
-          publish(report.analysis_id, kind, { status: "failed", message: cause instanceof Error ? cause.message : `Automatic ${kind} research failed.` });
-        } finally { resolve(); }
-      }));
-    });
+    const completions = effectiveAutoResearchKinds(settings)
+      .filter((kind) => eligible.has(kind))
+      .map((kind) => request(report, settings, kind, false));
     await Promise.all(completions);
+  }
+
+  function runManual(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind) {
+    if (settings.aiEnabled === false || report.ai_features_enabled === false || !eligibleAutoResearchKinds(report).has(kind)) return Promise.resolve();
+    return request(report, settings, kind, true);
   }
 
   return {
     schedule,
+    runManual,
     getState: (analysisId: string, kind: AutoResearchKind) => states.get(key(analysisId, kind)),
     subscribe(listener: (analysisId: string, kind: AutoResearchKind, state: AutoResearchState) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };

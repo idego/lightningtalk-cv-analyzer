@@ -11,6 +11,7 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { announcedAutoResearchKinds, getAutoResearchOrchestrator, type AutoResearchKind } from "@/lib/auto-research";
+import { enrichThenScheduleResearch } from "@/lib/analysis-flow";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -94,39 +95,21 @@ export function UploadPanel() {
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       setEntries((previous) => [...previous, { file, result }]);
       if (result.status === "ok") {
-        try {
-          const enriched = await enrichWithAi(result);
-          result = enriched;
-          setEntries((previous) => previous.map((entry) =>
-            entry.result.status === "ok"
-              && entry.result.report.analysis_id === enriched.report.analysis_id
-              ? { ...entry, result: enriched }
-              : entry,
-          ));
-          void getAutoResearchOrchestrator()?.schedule(enriched.report, settings);
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : t("analysisFailed");
-          const failed: typeof result = {
-            ...result,
-            report: {
-              ...result.report,
-              ai_analysis: {
-                ...result.report.ai_analysis,
-                status: "failed",
-                failure_reason: "client_error",
-                manual_retry_available: true,
-              },
-            },
-          };
-          result = failed;
-          setEntries((previous) => previous.map((entry) =>
-            entry.result.status === "ok"
-              && entry.result.report.analysis_id === failed.report.analysis_id
-              ? { ...entry, result: failed }
-              : entry,
-          ));
-          setError(message);
-        }
+        const outcome = await enrichThenScheduleResearch(
+          result,
+          settings,
+          enrichWithAi,
+          (report, currentSettings) => { void getAutoResearchOrchestrator()?.schedule(report, currentSettings); },
+        );
+        const completedResult = outcome.result;
+        result = completedResult;
+        setEntries((previous) => previous.map((entry) =>
+          entry.result.status === "ok"
+            && entry.result.report.analysis_id === completedResult.report.analysis_id
+            ? { ...entry, result: completedResult }
+            : entry,
+        ));
+        if (outcome.error) setError(outcome.error instanceof Error ? outcome.error.message : t("analysisFailed"));
       }
     }
     setCompletionPhase("complete");

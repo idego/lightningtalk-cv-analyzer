@@ -1,18 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ExternalLink } from "lucide-react";
 import type { AnalysisReport, LinkedInDiscovery } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAutoResearchState } from "@/lib/use-auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
-
-type State = "idle" | "pending" | "error" | "timeout" | "completed";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -90,17 +89,14 @@ export function LinkedInResearchPanel({
   onDiscoveryChange?: (discovery: LinkedInDiscovery) => void;
 }) {
   const { settings, t } = useCopy();
-  const [discovery, setDiscovery] = useState<LinkedInDiscovery | undefined>(report.linkedin_discovery);
-  const [discoveryState, setDiscoveryState] = useState<State>(discovery ? "completed" : "idle");
-  const [error, setError] = useState<string | null>(null);
   const automatic = useAutoResearchState(report.analysis_id, "linkedin");
   const notifiedAutomatic = useRef<LinkedInDiscovery | null>(null);
   const onDiscoveryChangeRef = useRef(onDiscoveryChange);
   const enabled = report.ai_analysis.status === "succeeded" && report.ai_analysis.research_candidates.some((item) => item.category === "linkedin");
-  const visibleDiscovery = discovery ?? automatic?.result as LinkedInDiscovery | undefined;
-  const discoveryBusy = discoveryState === "pending" || automatic?.status === "pending" || automatic?.status === "running";
-  const discoveryCompleted = discoveryState === "completed" || automatic?.status === "succeeded";
-  const hasContent = Boolean(visibleDiscovery || error || automatic?.message);
+  const visibleDiscovery = report.linkedin_discovery ?? automatic?.result as LinkedInDiscovery | undefined;
+  const discoveryBusy = automatic?.status === "pending" || automatic?.status === "running";
+  const discoveryCompleted = Boolean(report.linkedin_discovery) || automatic?.status === "succeeded";
+  const hasContent = Boolean(visibleDiscovery || automatic?.message);
 
   useEffect(() => {
     onDiscoveryChangeRef.current = onDiscoveryChange;
@@ -114,14 +110,9 @@ export function LinkedInResearchPanel({
     notifiedAutomatic.current = result;
     onDiscoveryChangeRef.current?.(result);
   }, [automatic?.result, automatic?.status]);
-  async function postDiscovery() {
-    const response = await fetch(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/linkedin/discovery`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }) });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw Object.assign(new Error(payload.detail ?? payload.error ?? "linkedin_research_failed"), { timeout: response.status === 504 });
-    return payload;
+  async function discover() {
+    await getAutoResearchOrchestrator()?.runManual(report, settings, "linkedin");
   }
-
-  async function discover() { setDiscoveryState("pending"); setError(null); try { const payload=await postDiscovery(); setDiscovery(payload.linkedin_discovery); onDiscoveryChange?.(payload.linkedin_discovery); setDiscoveryState("completed"); } catch (cause) { const timed=(cause as {timeout?:boolean}).timeout; setDiscoveryState(timed ? "timeout" : "error"); setError(timed ? t("researchTimedOut") : t("researchFailed")); } }
 
   return <HoverDisclosure
     className="rounded-md border p-3"
@@ -138,7 +129,7 @@ export function LinkedInResearchPanel({
       disabledReason={!enabled ? t("noCandidateDetails") : undefined}
     />}
   >
-    {error ? <p className="text-sm text-destructive">{error}</p> : null}{automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t("automaticResearchFailed")}</p> : null}
+    {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}
     {visibleDiscovery?.linkedin_not_found ? <div className="rounded border border-amber-500/30 p-2 text-sm"><Badge variant="outline">{t("noProfileFound")}</Badge><p className="mt-2">{visibleDiscovery.not_found_caveat}</p></div> : null}
     {visibleDiscovery?.outcome === "ambiguous" ? <Badge variant="outline">{t("severalPossibleMatches")}</Badge> : null}
     <div className="space-y-2">

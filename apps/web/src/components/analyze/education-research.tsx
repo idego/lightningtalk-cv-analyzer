@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { AnalysisReport, EducationResearch } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { useAutoResearchState } from "@/lib/use-auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
@@ -33,21 +34,18 @@ export function EducationResearchPanel({
   onResearchChange?: (research: EducationResearch) => void;
 }) {
   const { settings, t } = useCopy();
-  const [research, setResearch] = useState<EducationResearch | undefined>(report.education_research);
-  const [state, setState] = useState<"idle" | "pending" | "error" | "timeout" | "completed">(report.education_research ? "completed" : "idle");
-  const [error, setError] = useState<string | null>(null);
   const automatic = useAutoResearchState(report.analysis_id, "education");
   const notifiedAutomatic = useRef<EducationResearch | null>(null);
   const onResearchChangeRef = useRef(onResearchChange);
   const enabled = settings.aiEnabled && researchEligibility(report).education;
-  const visibleResearch = research ?? automatic?.result as EducationResearch | undefined;
-  const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
-  const completed = state === "completed" || automatic?.status === "succeeded";
-  const hasContent = Boolean(visibleResearch || error || automatic?.message);
+  const visibleResearch = report.education_research ?? automatic?.result as EducationResearch | undefined;
+  const busy = automatic?.status === "pending" || automatic?.status === "running";
+  const completed = Boolean(report.education_research) || automatic?.status === "succeeded";
+  const hasContent = Boolean(visibleResearch || automatic?.message);
   const automaticMessage = automatic?.status === "manual-action"
     ? t("automaticResearchAlreadyAttempted")
-    : automatic?.message
-      ? t("automaticResearchFailed")
+    : automatic?.status === "failed"
+      ? t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")
       : null;
 
   useEffect(() => {
@@ -64,23 +62,7 @@ export function EducationResearchPanel({
   }, [automatic?.result, automatic?.status]);
 
   async function startResearch() {
-    setState("pending"); setError(null);
-    try {
-      const response = await fetch(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/education`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }) });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = payload.detail ?? payload.error ?? "education_research_failed";
-        if (response.status === 504 || detail === "education_research_timeout") {
-          setState("timeout"); setError(t("researchTimedOut")); return;
-        }
-        throw new Error(detail);
-      }
-      setResearch(payload.education_research);
-      onResearchChange?.(payload.education_research);
-      setState("completed");
-    } catch {
-      setState("error"); setError(t("researchFailed"));
-    }
+    await getAutoResearchOrchestrator()?.runManual(report, settings, "education");
   }
 
   return <HoverDisclosure
@@ -99,7 +81,6 @@ export function EducationResearchPanel({
       disabledReason={!enabled ? t("noEducationEntries") : undefined}
     />}
   >
-    {error ? <p className="text-sm text-destructive">{error}</p> : null}
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
     {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <HoverDisclosure
       key={`${credential.institution}:${credential.program ?? ""}`}

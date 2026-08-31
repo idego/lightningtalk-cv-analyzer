@@ -18,6 +18,14 @@ pnpm typecheck
 pnpm build
 ```
 
+## Document preview
+
+The interactive DOCX canvas starts at page width. Wheel gestures pan the canvas,
+and Ctrl/Meta-wheel or trackpad pinch zooms around the pointer without zooming
+the browser page. PDF files remain inside the browser's native PDF viewer; the
+frontend requests a page-width view, but exact fit and gesture handling depend
+on that viewer and are not controlled by the DOCX canvas.
+
 ## Auth setup
 
 Copy `.env.example` to `.env.local` and set:

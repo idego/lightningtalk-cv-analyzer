@@ -4,13 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText, LoaderCircle, Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/app-settings";
+import { consumePreviewWheel, fitWidthTransform, pdfPageWidthUrl, wheelTransform, type ViewTransform } from "@/lib/document-preview";
 
-type ViewTransform = { x: number; y: number; scale: number };
 type ContentBounds = { width: number; height: number };
-
-const MIN_SCALE = 0.12;
-const MAX_SCALE = 4;
-const FIT_PADDING = 24;
 
 export function DocumentPreview({ file, onHide }: { file: File; onHide: () => void }) {
   return <DocumentPreviewContent key={`${file.name}:${file.size}:${file.lastModified}`} file={file} onHide={onHide} />;
@@ -67,13 +63,12 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
     return true;
   }, []);
 
-  const fitToView = useCallback((programmatic = true) => {
+  const fitToWidth = useCallback((programmatic = true) => {
     const viewport = viewportRef.current;
     if (!viewport || !measureDocument()) return;
-    const { width, height } = boundsRef.current;
-    const scale = Math.max(MIN_SCALE, Math.min(1, (viewport.clientWidth - FIT_PADDING * 2) / width, (viewport.clientHeight - FIT_PADDING * 2) / height));
+    const { width } = boundsRef.current;
     userAdjustedRef.current = false;
-    applyTransform({ x: 0, y: 0, scale }, programmatic);
+    applyTransform(fitWidthTransform({ viewportWidth: viewport.clientWidth, contentWidth: width }), programmatic);
   }, [applyTransform, measureDocument]);
 
   useEffect(() => {
@@ -83,14 +78,14 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
         .then(({ renderAsync }) => renderAsync(file, documentRef.current!, undefined, {
           breakPages: true, ignoreWidth: false, ignoreHeight: true, renderHeaders: true, renderFooters: true, ignoreLastRenderedPageBreak: false,
         }))
-        .then(() => { setLoading(false); requestAnimationFrame(() => fitToView(false)); })
+        .then(() => { setLoading(false); requestAnimationFrame(() => fitToWidth(false)); })
         .catch(() => { setLoading(false); setError(t("docxPreviewFailed")); });
     }
     return () => {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
       URL.revokeObjectURL(url);
     };
-  }, [file, fitToView, isPdf, t, url]);
+  }, [file, fitToWidth, isPdf, t, url]);
 
   useEffect(() => {
     if (isPdf || !viewportRef.current) return;
@@ -103,31 +98,36 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
       previousHeight = height;
       requestAnimationFrame(() => userAdjustedRef.current
         ? (measureDocument() && applyTransform(transformRef.current))
-        : fitToView(false));
+        : fitToWidth(false));
     });
     observer.observe(viewportRef.current);
     return () => observer.disconnect();
-  }, [applyTransform, fitToView, isPdf, measureDocument]);
+  }, [applyTransform, fitToWidth, isPdf, measureDocument]);
 
-  function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
+  const handleWheel = useCallback((event: WheelEvent) => {
+    consumePreviewWheel(event);
     userAdjustedRef.current = true;
     const current = transformRef.current;
-    if (event.ctrlKey || event.metaKey) {
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      const rect = viewport.getBoundingClientRect();
-      const pointerX = event.clientX - rect.left;
-      const pointerY = event.clientY - rect.top;
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, current.scale * Math.exp(-event.deltaY * 0.008)));
-      const ratio = scale / current.scale;
-      applyTransform({ scale, x: pointerX - (pointerX - current.x) * ratio, y: pointerY - (pointerY - current.y) * ratio });
-      return;
-    }
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
     const deltaX = event.deltaX || (event.shiftKey ? event.deltaY : 0);
     const deltaY = event.shiftKey && !event.deltaX ? 0 : event.deltaY;
-    applyTransform({ ...current, x: current.x - deltaX, y: current.y - deltaY });
-  }
+    applyTransform(wheelTransform(current, {
+      deltaX,
+      deltaY,
+      zoom: event.ctrlKey || event.metaKey,
+      pointerX: event.clientX - rect.left,
+      pointerY: event.clientY - rect.top,
+    }));
+  }, [applyTransform]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (isPdf || !viewport) return;
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", handleWheel);
+  }, [handleWheel, isPdf]);
 
   function startPan(event: React.PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -156,14 +156,14 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
       <div className="flex min-w-0 items-center gap-2 border-b bg-background px-3 py-2">
         <FileText className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>
-        {!isPdf ? <Button variant="ghost" size="icon" className="size-8" onClick={() => fitToView()} aria-label={t("fitCvPreview")}><Maximize2 className="size-4" /></Button> : null}
+        {!isPdf ? <Button variant="ghost" size="icon" className="size-8" onClick={() => fitToWidth()} aria-label={t("fitCvPreview")}><Maximize2 className="size-4" /></Button> : null}
         <Button variant="ghost" size="icon" className="size-8" render={<a href={url} target="_blank" rel="noreferrer" aria-label={t("openOriginalFile")}><ExternalLink className="size-4" /></a>} />
         <Button variant="ghost" size="icon" className="size-8" onClick={onHide} aria-label={t("hideCvPreview")}><X className="size-4" /></Button>
       </div>
       {isPdf && url ? (
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={`${t("fileDetails")}: ${file.name}`} src={url} className="h-full w-full border-0 bg-white" /></div>
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={`${t("fileDetails")}: ${file.name}`} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
       ) : (
-        <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onWheel={handleWheel} onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
+        <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
           {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80"><LoaderCircle className="size-6 animate-spin" /></div> : null}
           {error ? <div className="absolute inset-x-4 top-4 z-10 rounded-lg border border-amber-500/30 bg-background p-3 text-sm">{error}</div> : null}
           <div ref={canvasRef} className="document-preview-canvas absolute left-0 top-0 origin-top-left will-change-transform" data-programmatic="false"><div ref={documentRef} className="docx-preview-host inline-block p-4" /></div>

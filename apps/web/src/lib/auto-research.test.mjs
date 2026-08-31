@@ -149,6 +149,84 @@ test("deduplicates rerenders and refreshes without retrying failed work", async 
   assert.equal(afterRefresh.getState("same", "company").status, "manual-action");
 });
 
+test("manual and automatic starts share one atomic request claim", async () => {
+  let calls = 0;
+  let release;
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: memoryStorage(),
+    fetcher: async () => {
+      calls += 1;
+      await new Promise((resolve) => { release = resolve; });
+      return { ok: true, status: 200, json: async () => ({ company_research: { status: "completed" } }) };
+    },
+  });
+  const candidate = report("manual-auto", ["company"]);
+
+  const manual = orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+  const automatic = orchestrator.schedule(candidate, { ...settings, aiEnabled: true });
+  const repeatedManual = orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(calls, 1);
+  assert.equal(orchestrator.getState(candidate.analysis_id, "company").status, "running");
+  release();
+  await Promise.all([manual, automatic, repeatedManual]);
+  assert.equal(calls, 1);
+  assert.equal(orchestrator.getState(candidate.analysis_id, "company").status, "succeeded");
+});
+
+test("automatic then manual starts also share one atomic request claim", async () => {
+  let calls = 0;
+  let release;
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: memoryStorage(),
+    fetcher: async () => {
+      calls += 1;
+      await new Promise((resolve) => { release = resolve; });
+      return { ok: true, status: 200, json: async () => ({ company_research: { status: "completed" } }) };
+    },
+  });
+  const candidate = report("auto-manual", ["company"]);
+  const automatic = orchestrator.schedule(candidate, { ...settings, aiEnabled: true });
+  const manual = orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  release();
+  await Promise.all([automatic, manual]);
+  assert.equal(calls, 1);
+});
+
+test("completed report research never starts another network request", async () => {
+  let calls = 0;
+  const orchestrator = createAutoResearchOrchestrator({ storage: memoryStorage(), fetcher: async () => { calls += 1; return { ok: true, status: 200, json: async () => ({}) }; } });
+  const candidate = { ...report("already-complete", ["company"]), company_research: { status: "completed" } };
+  await orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+  assert.equal(calls, 0);
+  assert.equal(orchestrator.getState(candidate.analysis_id, "company").status, "succeeded");
+});
+
+test("manual retry is allowed after failure but not while running or after success", async () => {
+  let calls = 0;
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: memoryStorage(),
+    fetcher: async () => {
+      calls += 1;
+      return calls === 1
+        ? { ok: false, status: 503, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => ({ company_research: { status: "completed" } }) };
+    },
+  });
+  const candidate = report("manual-retry", ["company"]);
+
+  await orchestrator.schedule(candidate, { ...settings, aiEnabled: true });
+  assert.equal(orchestrator.getState(candidate.analysis_id, "company").status, "failed");
+  await orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+  await orchestrator.runManual(candidate, { ...settings, aiEnabled: true }, "company");
+
+  assert.equal(calls, 2);
+  assert.equal(orchestrator.getState(candidate.analysis_id, "company").status, "succeeded");
+});
+
 test("isolates one failed kind and never starts LinkedIn comparison", async () => {
   const urls = [];
   const orchestrator = createAutoResearchOrchestrator({

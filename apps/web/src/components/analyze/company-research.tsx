@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
@@ -24,23 +25,18 @@ export function CompanyResearchPanel({
   onResearchChange?: (research: CompanyResearch) => void;
 }) {
   const { settings, t } = useCopy();
-  const [research, setResearch] = useState<CompanyResearch | undefined>(report.company_research);
-  const [state, setState] = useState<"idle" | "pending" | "error" | "timeout" | "completed">(
-    report.company_research ? "completed" : "idle",
-  );
-  const [error, setError] = useState<string | null>(null);
   const automatic = useAutoResearchState(report.analysis_id, "company");
   const notifiedAutomatic = useRef<CompanyResearch | null>(null);
   const onResearchChangeRef = useRef(onResearchChange);
   const enabled = settings.aiEnabled && researchEligibility(report).company;
-  const visibleResearch = research ?? automatic?.result as CompanyResearch | undefined;
-  const busy = state === "pending" || automatic?.status === "pending" || automatic?.status === "running";
-  const completed = state === "completed" || automatic?.status === "succeeded";
-  const hasContent = Boolean(visibleResearch || error || automatic?.message);
+  const visibleResearch = report.company_research ?? automatic?.result as CompanyResearch | undefined;
+  const busy = automatic?.status === "pending" || automatic?.status === "running";
+  const completed = Boolean(report.company_research) || automatic?.status === "succeeded";
+  const hasContent = Boolean(visibleResearch || automatic?.message);
   const automaticMessage = automatic?.status === "manual-action"
     ? t("automaticResearchAlreadyAttempted")
     : automatic?.status === "failed"
-      ? t("automaticResearchFailed")
+      ? t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")
       : null;
 
   useEffect(() => {
@@ -57,30 +53,7 @@ export function CompanyResearchPanel({
   }, [automatic?.result, automatic?.status]);
 
   async function startResearch() {
-    setState("pending");
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/analyses/${encodeURIComponent(report.analysis_id)}/research/company`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled }) },
-      );
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const detail = payload.detail ?? payload.error ?? "company_research_failed";
-        if (response.status === 504 || detail === "company_research_timeout") {
-          setState("timeout");
-          setError(t("researchTimedOut"));
-          return;
-        }
-        throw new Error(detail);
-      }
-      setResearch(payload.company_research);
-      onResearchChange?.(payload.company_research);
-      setState("completed");
-    } catch {
-      setState("error");
-      setError(t("researchFailed"));
-    }
+    await getAutoResearchOrchestrator()?.runManual(report, settings, "company");
   }
 
   return (
@@ -102,7 +75,6 @@ export function CompanyResearchPanel({
         />
       )}
     >
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
 
       {visibleResearch ? (
