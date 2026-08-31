@@ -28,6 +28,41 @@ company research, education research, and LinkedIn discovery. Turning it off
 blocks both automatic and manual execution; it does not change deterministic
 analysis or the deployment environment.
 
+## Contextual feedback rollout
+
+Feedback is decision-neutral and never edits a report, score, AI output,
+research result, retry state, or hiring action. Targets and responses live with
+the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
+`web_auth_data`. Comments are limited to 180 characters, contact details and
+URLs are rejected, and inbox entries contain no CV text, prompt/model output,
+research content, filenames, raw exceptions, request bodies, or logs.
+
+Use this one-time production sequence:
+
+1. Back up both named volumes and deploy with all three feedback flags `false`.
+2. Set independent high-entropy `CV_VALIDATOR_FEEDBACK_HMAC_SECRET` and
+   `CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN` values in the VPS secret `.env`.
+3. Let the first owner sign in and verify their email, then run
+   `docker compose --env-file .env exec web pnpm feedback:bootstrap-owner exact@idego.io`.
+4. Enable `CV_VALIDATOR_FEEDBACK_ENABLED`, deploy and verify capture.
+5. Enable `CV_VALIDATOR_FEEDBACK_INBOX_ENABLED`, then
+   `CV_VALIDATOR_FEEDBACK_FAILURES_ENABLED`, verifying health after each step.
+
+Owners grant or revoke `owner`/`reviewer` access by exact verified email in the
+Feedback access page. The last active owner cannot be removed there; recover
+ownership with the same server-side command. The API bounds a pseudonymous
+actor to 30 writes per minute. Reviewers may use a correlation ID only to find
+separately protected operational logs; it is not an invitation to copy logs
+into feedback.
+
+To disable the feature, set the three flags to `false` and redeploy. For an
+application rollback, check out the previous reviewed SHA and run `make deploy`.
+Both paths preserve additive tables and both existing named volumes. Never use
+`docker compose down -v`, rename the Compose project, or delete/recreate either
+volume. Rotate both feedback secrets by disabling writes/inbox, replacing the
+values together in the VPS secret configuration, redeploying, and re-enabling;
+rotation changes future pseudonyms and invalidates the old server token.
+
 ## Canonical commands
 
 Local development uses an ignored `.env.local` and the approved GeoNames pair:

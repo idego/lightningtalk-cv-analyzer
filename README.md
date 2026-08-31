@@ -171,6 +171,15 @@ uvicorn cv_validator.api.app:app --reload
 - `POST /analyze/batch` — multiple CVs; per-file errors isolated
 - `POST /analyses/{analysis_id}/research/company` — bounded, synchronous company research for a stored analysis
 - `GET /health` — health check
+- `GET /analyses/{analysis_id}/feedback` — owner-scoped safe feedback manifest
+- `PUT/DELETE /analyses/{analysis_id}/feedback/{target_id}` — idempotent current feedback / withdrawal
+
+Contextual feedback is disabled by default. It stores only opaque target
+identity, closed classifications, short sanitized comments, technical versions
+and safe failure diagnostics. It never stores CV/report content or raw logs and
+is deleted by the same manual/retention lifecycle as its analysis. Reviewer
+setup, staged enablement, rollback, rate limits, correlation-ID handling and
+secret rotation are documented in [`docs/operations.md`](docs/operations.md).
 
 The web app keeps detailed `GET /api/health` output behind authentication. The
 deployment probe uses `GET /api/health/readiness`, which returns only ready or
