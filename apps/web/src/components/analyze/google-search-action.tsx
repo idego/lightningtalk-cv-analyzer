@@ -32,13 +32,13 @@ export function GoogleSearchAction({
   );
 
   if (variant === "labeled") {
-    return <Button variant="outline" size="sm" render={anchor} />;
+    return <Button variant="outline" size="sm" nativeButton={false} render={anchor} />;
   }
 
   return (
     <Tooltip>
       <TooltipTrigger
-        render={<Button variant="outline" size="icon-sm" render={anchor} />}
+        render={<Button variant="outline" size="icon-sm" nativeButton={false} render={anchor} />}
       />
       <TooltipContent>{accessibleName}</TooltipContent>
     </Tooltip>
