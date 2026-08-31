@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import hmac
 import threading
 import secrets
 from concurrent.futures import Future
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 
@@ -23,6 +24,7 @@ from cv_validator.ai.application import run_document_analysis
 from cv_validator.ai.config import AISettings, load_ai_settings
 from cv_validator.ai.openai_client import OpenAIResponsesDocumentAnalyzer
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import (
     load_ingestion_config,
     load_link_check_config,
@@ -227,6 +229,16 @@ def create_app(
             research_cache_ttl_days=research_cache_ttl_days if research_cache_ttl_days is not None else _positive_int_env("CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS", 30),
         )
     )
+    feedback_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_ENABLED", "false").lower() in {"1", "true", "yes"}
+    feedback_inbox_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_INBOX_ENABLED", "false").lower() in {"1", "true", "yes"}
+    feedback_failures_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_FAILURES_ENABLED", "false").lower() in {"1", "true", "yes"}
+    feedback_secret = os.environ.get("CV_VALIDATOR_FEEDBACK_HMAC_SECRET") or os.environ.get("BETTER_AUTH_SECRET") or "local-feedback-secret-change-me"
+    feedback_internal_token = os.environ.get("CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN", "")
+    if feedback_enabled and feedback_secret == "local-feedback-secret-change-me":
+        raise ValueError("CV_VALIDATOR_FEEDBACK_HMAC_SECRET is required when feedback is enabled")
+    if feedback_inbox_enabled and not feedback_internal_token:
+        raise ValueError("CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN is required when feedback inbox is enabled")
+    feedback_store = FeedbackStore(store.config.db_path, feedback_secret)
     selected_batch_max_files = (
         batch_max_files
         if batch_max_files is not None
@@ -339,6 +351,8 @@ def create_app(
                 "enabled": selected_link_check_config.enabled,
                 "version": selected_link_check_config.configuration_version,
             },
+            "feedback": {"ready": True, "enabled": feedback_enabled, "failure_targets_enabled": feedback_failures_enabled},
+            "feedback_inbox": {"ready": not feedback_inbox_enabled or bool(feedback_internal_token), "enabled": feedback_inbox_enabled},
         }
         ready = all(item["ready"] for item in capabilities.values())
         return {
@@ -426,6 +440,8 @@ def create_app(
                 access_token=access_token,
                 source_filename=filename,
             )
+            if feedback_enabled:
+                feedback_store.materialize(analysis_id, payload, include_failures=feedback_failures_enabled)
             if result.redacted_document is not None and result.ai_outcome.status in {
                 AIAnalysisStatus.PENDING,
                 AIAnalysisStatus.FAILED,
@@ -502,6 +518,8 @@ def create_app(
                     access_token=access_token,
                     source_filename=filename,
                 )
+                if feedback_enabled:
+                    feedback_store.materialize(analysis_id, payload, include_failures=feedback_failures_enabled)
                 if result.redacted_document is not None and result.ai_outcome.status in {
                     AIAnalysisStatus.PENDING,
                     AIAnalysisStatus.FAILED,
@@ -559,6 +577,79 @@ def create_app(
                 and selected_document_analyzer is not None
             )
         return JSONResponse(payload)
+
+    @app.get("/analyses/{analysis_id}/feedback")
+    def get_feedback_manifest(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not feedback_enabled:
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        payload = _owned_payload(store, analysis_id, x_analysis_access_token)
+        feedback_store.materialize(analysis_id, payload, include_failures=feedback_failures_enabled)
+        return JSONResponse(feedback_store.manifest(analysis_id, x_analysis_access_token))
+
+    @app.put("/analyses/{analysis_id}/feedback/{target_id}")
+    def put_feedback(
+        analysis_id: str,
+        target_id: str,
+        update: FeedbackInput,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        started = perf_counter()
+        if not feedback_enabled:
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        _owned_payload(store, analysis_id, x_analysis_access_token)
+        try:
+            result = feedback_store.put(analysis_id, target_id, x_analysis_access_token or "", update)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        safe_log("feedback_operation", operation="put", outcome="ok", target_kind=result["target_kind"], classification=update.reason or update.rating or "comment_only", duration_ms=round((perf_counter()-started)*1000, 2))
+        return JSONResponse(result)
+
+    @app.delete("/analyses/{analysis_id}/feedback/{target_id}")
+    def withdraw_feedback(
+        analysis_id: str,
+        target_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not feedback_enabled:
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        _owned_payload(store, analysis_id, x_analysis_access_token)
+        result = feedback_store.withdraw(analysis_id, target_id, x_analysis_access_token or "")
+        if result is None:
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        return JSONResponse({"withdrawn": result})
+
+    def require_internal(token: str | None) -> None:
+        if not feedback_inbox_enabled or not feedback_internal_token or not token or not hmac.compare_digest(token, feedback_internal_token):
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+
+    @app.get("/internal/feedback")
+    def feedback_inbox(
+        x_feedback_internal_token: str | None = Header(default=None),
+        limit: int = Query(default=50, ge=1, le=100), cursor: int = Query(default=0, ge=0),
+        rating: str | None = None, reason: str | None = None, kind: str | None = None, status: str | None = None,
+        source: str | None = None, version: str | None = None, operation: str | None = None,
+        error_code: str | None = None, date_from: str | None = None, date_to: str | None = None,
+    ) -> JSONResponse:
+        require_internal(x_feedback_internal_token)
+        return JSONResponse(feedback_store.inbox(limit=limit, cursor=cursor, filters={"rating": rating, "reason": reason, "kind": kind, "status": status, "source":source,"version":version,"operation":operation,"error_code":error_code,"date_from":date_from,"date_to":date_to}))
+
+    @app.put("/internal/feedback/{target_id}/{actor_hash}/triage")
+    def update_feedback_triage(
+        target_id: str, actor_hash: str, update: TriageInput,
+        x_feedback_internal_token: str | None = Header(default=None),
+        x_feedback_maintainer: str | None = Header(default=None),
+    ) -> JSONResponse:
+        require_internal(x_feedback_internal_token)
+        if not x_feedback_maintainer:
+            raise HTTPException(status_code=400, detail="maintainer_required")
+        if not feedback_store.triage(target_id, actor_hash, x_feedback_maintainer, update):
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        return JSONResponse({"updated": True})
 
     @app.post("/analyses/{analysis_id}/ai/retry")
     def retry_ai_analysis(

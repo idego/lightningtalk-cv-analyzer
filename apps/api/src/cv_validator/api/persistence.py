@@ -24,6 +24,7 @@ from cv_validator.file_links.normalization import URLNormalizationError, normali
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
 from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
+from cv_validator.api.feedback import init_feedback_schema
 
 
 _SAFE_NATIONAL_ID_TYPES = frozenset(
@@ -180,6 +181,7 @@ class PersistenceStore:
                 );
                 """
             )
+            init_feedback_schema(conn)
             _ensure_column(conn, "reports", "analysis_id", "TEXT")
             _ensure_column(conn, "reports", "access_token_hash", "TEXT")
             _ensure_column(conn, "reports", "source_filename", "TEXT")
