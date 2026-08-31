@@ -12,7 +12,7 @@ The prototype brief defines the key product invariant as one canonical candidate
 - Regression tests for stale state and anonymization.
 
 **Non-goals:**
-- Team-shared permissions, PDF conversion, arbitrary absolute-position canvas features, OCR, translation, rewriting assistant, batch generation, ATS integrations.
+- Image/OCR ingestion, public API/Zapier, ATS/job-fit scoring, talent ranking, and arbitrary floating text-box layout that would turn editable DOCX into a poster-like document.
 
 ## Decisions
 
@@ -32,9 +32,9 @@ One cohesive React workspace stores one `profile` object and one `anonymization`
 
 `python-docx` is already a project dependency and produces semantically editable Word documents. The prototype uses one constrained IDEGO-style flow template rather than introducing a new template engine before the workflow itself is validated.
 
-### D5: Keep persistence and PDF outside the first slice
+### D5: Stage persistence and PDF after the first slice
 
-The profile exists only in browser memory. PDF can later be generated from the same DOCX through LibreOffice, and a constrained visual template system can be added after DOCX correctness is proven.
+The initial slice intentionally proved browser-state editing and DOCX correctness first. The later parity iteration adds snapshot persistence and PDF only after those invariants are covered by regression tests; PDF is derived from the exact DOCX through LibreOffice rather than introducing a second renderer.
 
 
 ### D6: Persist exact Profile Builder snapshots for Recent
@@ -49,7 +49,7 @@ The same exact template snapshot is sent with DOCX export, avoiding a save/expor
 
 ### D8: Keep template management inside the Profile Builder flow
 
-The upload state shows the current template beside Recent profiles. A template manager dialog can select a template, create a new one, or navigate to editing an existing one. `/profile-builder/templates/new` and `/profile-builder/templates/<id>` render the same Template Creator screen. The built-in `idego-default` can be owner-customized without changing other users; deleting that override falls back to the built-in default.
+The upload state shows the current template beside Recent profiles. A template manager dialog can select a template, create a new one, or navigate to editing an existing one. `/profile-builder/templates/new` and `/profile-builder/templates/<id>` render the same Template Creator screen. Custom templates are explicitly Private or Shared and default to Private. The built-in `idego-default` is Shared and any customization remains an internal-team template rather than becoming a silent per-user fork.
 
 
 ### D9: Keep AI Summary cheap and source-faithful
@@ -63,3 +63,24 @@ The document flow remains constrained to semantic profile blocks. The only V1 fr
 ### D11: Template Creator is a single-viewport tool
 
 Template Creator intentionally disables page/footer scrolling. Blocks are reordered with native drag-and-drop and their eye icons directly toggle visibility. Properties are split into Template/Header/Block/Logo tabs so all editing controls remain reachable within one viewport. Back/refresh warns before discarding dirty template changes.
+
+
+### D12: Direct-manipulation A4 canvas uses editable-document lanes
+
+Template sections are draggable both in the Blocks list and directly on the rendered A4 page. Horizontal pointer position snaps a body section to `left`, `full`, or `right`, while vertical drop position updates section order. Browser preview renders those same lanes. DOCX renders `full` sections as ordinary flowing content and consecutive side-lane sections inside a normal two-column table, preserving meaningful Word editing. Only the logo uses absolute page coordinates.
+
+### D13: Separate organization schema from per-user conversion defaults
+
+Custom-field definitions are organization-wide internal configuration because fields such as availability/rate should mean the same thing across recruiters. Their current definitions/defaults are copied into newly extracted canonical profile snapshots; changing or deleting a definition never rewrites historical snapshots. Conversion preferences are owner-scoped: default anonymization, auto-summary/prompt, technology aggregation, date formatting, default template, and filename convention. Upload is disabled until these defaults are loaded to avoid a first-click race.
+
+### D14: Keep AI rewrites reviewable and away from internal metadata
+
+AI Actions and Translation share one `ProfessionalProfile` transformation path using pinned `gpt-5.6-luna`, `reasoning.effort = none`, no tools, and response storage disabled. Personal/contact fields and organization custom fields are not sent. The backend rejects changes to unselected sections, preserves stable repeated-entry IDs, and applies additional protected-fact checks during translation. The browser presents Before/Proposed values per section; canonical state changes only after selective Accept.
+
+### D15: Explicit template sharing
+
+New custom templates are Private by default. A recruiter may explicitly change Access to Shared, making the same normalized template visible/editable to the authenticated internal team. The built-in IDEGO template is always Shared. Profile snapshots remain owner-scoped; sharing template design does not implicitly share candidate PII.
+
+### D16: Derive PDF from DOCX and keep batch orchestration in the web workflow
+
+PDF export renders the exact current DOCX bytes and converts them through isolated headless LibreOffice with a temporary HOME/UserInstallation and timeout. The API runtime image includes LibreOffice Writer. Batch Convert accepts at most 10 PDF/DOCX files and deliberately processes them through the same single-file extraction and snapshot-persistence path with explicit queued/processing/completed/failed UI state. Source file bytes remain browser/request-local and are never persisted by Profile Builder.

@@ -38,3 +38,15 @@
 - [x] 8.3 Add sanitized PNG/JPG/WebP/SVG logo upload, direct page dragging/resizing, persistence, preview, and floating DOCX rendering.
 - [x] 8.4 Add promptable/regeneratable GPT-5.6 Luna Summary generation with reasoning disabled and a small token budget.
 - [x] 8.5 Run full regression, production build, browser smoke, and whole-diff review after these changes.
+
+
+## 9. CVtoBlind parity workflow
+- [x] 9.1 Add authoritative PDF export by converting the exact rendered DOCX snapshot through isolated headless LibreOffice.
+- [x] 9.2 Add organization custom-field definitions, snapshot values, editor controls, and a template-renderable Custom Fields block.
+- [x] 9.3 Add GPT-5.6 Luna AI Actions with selected-section rewriting, preview/diff review, and selective Accept into canonical state.
+- [x] 9.4 Add owner-scoped conversion settings for auto-summary/default prompt, default anonymization, technology aggregation, date formatting, default template, and output filename convention.
+- [x] 9.5 Allow templates to be explicitly Private or Shared; shared templates are visible/editable to the internal team while private templates remain owner-scoped.
+- [x] 9.6 Add a dedicated batch conversion flow for up to 10 PDF/DOCX files with queued/processing/completed/failed states and no image/OCR input.
+- [x] 9.7 Add GPT-5.6 Luna translation passes with language selection, preview/diff review, and selective Accept.
+- [x] 9.8 Add an authenticated Profiles catalog/search screen while keeping Recent profiles on the upload page as a shortcut.
+- [x] 9.9 Verify all new workflows with focused tests, full regression, Node 22 production build, browser smoke, and whole-diff review.

@@ -46,6 +46,7 @@ const SECTION_DEFAULTS: Record<TemplateSectionKind, Pick<ProfileTemplateSection,
   languages: { title: "Languages", layout: "inline" },
   certifications: { title: "Certifications", layout: "bullets" },
   additional_sections: { title: "Additional", layout: "bullets" },
+  custom_fields: { title: "Details", layout: "default" },
 };
 
 const SECTION_ORDER = Object.keys(SECTION_DEFAULTS) as TemplateSectionKind[];
@@ -64,6 +65,7 @@ function initialNewTemplate(): ProfileTemplate {
   const next = structuredClone(DEFAULT_PROFILE_TEMPLATE);
   next.id = "new";
   next.name = "Untitled template";
+  next.visibility = "private";
   next.description = "Custom candidate profile template.";
   next.logo = null;
   return next;
@@ -282,6 +284,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
       title: defaults.title,
       visible: true,
       layout: defaults.layout,
+      placement: "full",
     };
     mutate((draft) => {
       draft.sections.push(section);
@@ -396,7 +399,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         <Button variant="ghost" size="sm" onClick={leaveCreator}><ArrowLeft />Back</Button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{isNew ? "Create template" : `Edit ${template.name}`}{dirty ? " · Unsaved" : ""}</p>
-          <p className="truncate text-[11px] text-muted-foreground">Drag blocks to reorder. Drag the uploaded logo directly on the page.</p>
+          <p className="truncate text-[11px] text-muted-foreground">Drag sections directly on the A4 page; horizontal position snaps to left, full, or right editable-DOCX lanes. Logo stays freely positioned.</p>
         </div>
         {error ? <p className="max-w-[34%] truncate text-xs text-destructive" title={error}>{error}</p> : null}
         <Button size="sm" onClick={() => void saveTemplate()} disabled={saving}>
@@ -409,7 +412,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         <Card className="min-h-0 overflow-hidden">
           <CardHeader className="shrink-0 py-3">
             <CardTitle className="flex items-center gap-2 text-sm"><LayoutTemplate className="size-4" />Blocks</CardTitle>
-            <CardDescription className="text-[11px]">Drag to reorder. Click the eye to hide or show.</CardDescription>
+            <CardDescription className="text-[11px]">Drag here or directly on the A4 canvas. Eye toggles visibility.</CardDescription>
           </CardHeader>
           <CardContent className="flex h-[calc(100%-4.75rem)] min-h-0 flex-col gap-1.5 pb-3">
             <div className="min-h-0 flex-1 space-y-1.5">
@@ -444,7 +447,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-medium">{index + 1}</span>
-                      <span className="min-w-0 flex-1 truncate text-xs font-medium">{section.title}</span>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{section.title}</span><span className="block text-[9px] uppercase tracking-wide text-muted-foreground">{section.placement}</span></span>
                     </button>
                     <Button
                       type="button"
@@ -484,6 +487,9 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
             template={template}
             label="Template preview"
             fillHeight
+            sectionsEditable
+            onSectionsChange={(sections) => mutate((draft) => { draft.sections = sections; })}
+            onSectionSelect={(sectionId) => { setSelectedSectionId(sectionId); setInspectorTab("block"); }}
             logoEditable
             onLogoSelect={() => setInspectorTab("logo")}
             onLogoChange={updateLogo}
@@ -509,12 +515,11 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
           <CardContent className="h-[calc(100%-5.75rem)] min-h-0 pb-3">
             {inspectorTab === "template" ? (
               <div className="space-y-2">
-                <div className="space-y-1"><Label htmlFor="template-name" className="text-xs">Name</Label><Input id="template-name" maxLength={120} value={template.name} onChange={(event) => mutate((draft) => { draft.name = event.target.value; })} /></div>
+                <div className="grid grid-cols-[1.15fr_.85fr] gap-2"><div className="min-w-0 space-y-1"><Label htmlFor="template-name" className="text-xs">Name</Label><Input id="template-name" maxLength={120} value={template.name} onChange={(event) => mutate((draft) => { draft.name = event.target.value; })} /></div><div className="min-w-0 space-y-1"><Label htmlFor="template-visibility" className="text-xs">Access</Label><select id="template-visibility" disabled={template.id === "idego-default"} value={template.id === "idego-default" ? "shared" : template.visibility} onChange={(event) => mutate((draft) => { draft.visibility = event.target.value as ProfileTemplate["visibility"]; })} className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-xs disabled:opacity-60"><option value="private">Private</option><option value="shared">Shared</option></select></div></div>
                 <div className="space-y-1"><Label htmlFor="template-description" className="text-xs">Description</Label><textarea id="template-description" rows={1} maxLength={300} value={template.description ?? ""} onChange={(event) => mutate((draft) => { draft.description = event.target.value || null; })} className="h-8 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring" /></div>
-                <div className="space-y-1"><Label htmlFor="template-brand-name" className="text-xs">Brand label</Label><Input id="template-brand-name" maxLength={80} value={template.branding.brand_name} onChange={(event) => mutate((draft) => { draft.branding.brand_name = event.target.value; })} /></div>
+                <div className="grid grid-cols-2 gap-2"><div className="min-w-0 space-y-1"><Label htmlFor="template-brand-name" className="text-xs">Brand</Label><Input id="template-brand-name" maxLength={80} value={template.branding.brand_name} onChange={(event) => mutate((draft) => { draft.branding.brand_name = event.target.value; })} /></div><div className="min-w-0 space-y-1"><Label htmlFor="template-font" className="text-xs">Font</Label><select id="template-font" value={template.typography.font_family} onChange={(event) => mutate((draft) => { draft.typography.font_family = event.target.value as ProfileTemplate["typography"]["font_family"]; })} className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="Aptos">Aptos</option><option value="Arial">Arial</option><option value="Calibri">Calibri</option></select></div></div>
                 <div className="grid grid-cols-[58px_1fr] gap-2"><input aria-label="Accent color" type="color" value={template.branding.accent_hex} onChange={(event) => mutate((draft) => { draft.branding.accent_hex = event.target.value.toUpperCase(); })} className="h-8 w-full cursor-pointer rounded-lg border bg-transparent p-1" /><Input aria-label="Accent hex color" value={template.branding.accent_hex} onChange={(event) => { const value = event.target.value.toUpperCase(); if (/^#[0-9A-F]{0,6}$/.test(value)) mutate((draft) => { draft.branding.accent_hex = value; }); }} /></div>
                 <ToggleRow label="Show brand label" checked={template.branding.show_brand} onChange={(checked) => mutate((draft) => { draft.branding.show_brand = checked; })} />
-                <div className="space-y-1"><Label htmlFor="template-font" className="text-xs">Font family</Label><select id="template-font" value={template.typography.font_family} onChange={(event) => mutate((draft) => { draft.typography.font_family = event.target.value as ProfileTemplate["typography"]["font_family"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="Aptos">Aptos</option><option value="Arial">Arial</option><option value="Calibri">Calibri</option></select></div>
                 <div className="grid grid-cols-2 gap-2"><div className="space-y-1"><Label htmlFor="template-body-size" className="text-xs">Body pt</Label><Input id="template-body-size" type="number" min={8} max={14} step={0.5} value={template.typography.body_size} onChange={(event) => mutate((draft) => { draft.typography.body_size = Number(event.target.value); })} /></div><div className="space-y-1"><Label htmlFor="template-heading-size" className="text-xs">Heading pt</Label><Input id="template-heading-size" type="number" min={10} max={22} step={0.5} value={template.typography.heading_size} onChange={(event) => mutate((draft) => { draft.typography.heading_size = Number(event.target.value); })} /></div></div>
               </div>
             ) : null}
@@ -531,6 +536,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
               selectedSection ? <div className="space-y-3">
                 <div><p className="text-xs font-medium">{selectedSection.kind.replaceAll("_", " ")}</p><p className="text-[11px] text-muted-foreground">Visibility is controlled by the eye in the Blocks panel.</p></div>
                 <div className="space-y-1"><Label htmlFor="section-title" className="text-xs">Heading</Label><Input id="section-title" maxLength={80} value={selectedSection.title} onChange={(event) => updateSelectedSection((section) => { section.title = event.target.value; })} /></div>
+                <div className="space-y-1"><Label htmlFor="section-placement" className="text-xs">Canvas lane</Label><select id="section-placement" value={selectedSection.placement} onChange={(event) => updateSelectedSection((section) => { section.placement = event.target.value as ProfileTemplateSection["placement"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"><option value="full">Full width</option><option value="left">Left column</option><option value="right">Right column</option></select><p className="text-[10px] text-muted-foreground">You can also drag the block directly on the A4 page.</p></div>
                 {SIMPLE_LIST_KINDS.has(selectedSection.kind) ? <div className="space-y-1"><Label htmlFor="section-layout" className="text-xs">List layout</Label><select id="section-layout" value={selectedSection.layout} onChange={(event) => updateSelectedSection((section) => { section.layout = event.target.value as ProfileTemplateSection["layout"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="inline">Inline</option><option value="bullets">Bullets</option></select></div> : null}
                 <Button variant="destructive" size="sm" className="w-full" disabled={template.sections.length <= 1} onClick={removeSection}><Trash2 />Remove block</Button>
               </div> : <p className="text-xs text-muted-foreground">Select a block on the left.</p>

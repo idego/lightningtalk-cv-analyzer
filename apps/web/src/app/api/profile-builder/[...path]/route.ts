@@ -11,7 +11,7 @@ function internalUrl(path: string[]) {
 }
 
 function isOwnedJsonPath(path: string[]) {
-  return path[0] === "profiles" || path[0] === "templates";
+  return path[0] === "profiles" || path[0] === "templates" || path[0] === "preferences" || path[0] === "custom-fields";
 }
 
 async function authenticatedContext(context: Context) {
@@ -79,6 +79,7 @@ export async function POST(req: Request, context: Context) {
       body: form,
       headers: {
         "X-AI-Enabled": req.headers.get("X-AI-Enabled") === "false" ? "false" : "true",
+        "X-Profile-Builder-Access-Token": auth.accessToken,
       },
     });
     const data = await upstream.json().catch(() => ({}));
@@ -96,6 +97,38 @@ export async function POST(req: Request, context: Context) {
     });
     const data = await upstream.json().catch(() => ({}));
     return NextResponse.json(data, { status: upstream.status });
+  }
+
+  if (action === "transform") {
+    const upstream = await fetch(`${INTERNAL_API_URL}/profile-builder/transform`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AI-Enabled": req.headers.get("X-AI-Enabled") === "false" ? "false" : "true",
+      },
+      body: await req.text(),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    return NextResponse.json(data, { status: upstream.status });
+  }
+
+  if (action === "export/pdf") {
+    const upstream = await fetch(`${INTERNAL_API_URL}/profile-builder/export/pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: await req.text(),
+    });
+    if (!upstream.ok) {
+      const data = await upstream.json().catch(() => ({}));
+      return NextResponse.json(data, { status: upstream.status });
+    }
+    return new Response(await upstream.arrayBuffer(), {
+      status: upstream.status,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": upstream.headers.get("Content-Disposition") ?? 'attachment; filename="candidate-profile.pdf"',
+      },
+    });
   }
 
   if (action === "export/docx") {

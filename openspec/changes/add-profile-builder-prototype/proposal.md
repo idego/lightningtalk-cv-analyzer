@@ -13,7 +13,8 @@ IDEGO currently relies on an external CV-to-profile workflow whose editor, previ
 - Add persistent constrained templates, a template picker/manager, and a visual Template Creator screen.
 - Add a promptable GPT-5.6 Luna AI Summary action that writes into the canonical Summary field.
 - Make Template Creator a fixed no-scroll workspace with drag-reordered blocks, direct eye visibility toggles, unsaved-change protection, and one freely positioned uploaded logo.
-- Keep PDF conversion and unconstrained canvas editing outside this slice.
+- Add PDF export from the exact DOCX snapshot, organization custom fields, reviewable AI Actions/Translation, per-user conversion defaults, controlled template sharing, batch conversion, and a searchable Profiles catalog.
+- Let Template Creator blocks be dragged directly on the A4 canvas; body blocks snap to editable-DOCX `left/full/right` lanes while the logo remains freely positioned.
 
 ## Capabilities
 
@@ -24,9 +25,9 @@ IDEGO currently relies on an external CV-to-profile workflow whose editor, previ
 ## Impact
 
 - Extend the consolidated backend `cv_validator.profile_builder` profile/rendering module with the normalized template contract and template-aware DOCX rendering.
-- Extend the existing SQLite `PersistenceStore` with owner-scoped candidate-profile snapshots and templates; original CV bytes are not persisted.
-- Extend the existing Profile Builder API/proxy surface with recent-profile and template CRUD.
-- Extend the authenticated Profile Builder route with Recent profiles, template selection/management, autosave, and a dedicated Template Creator screen.
-- Sidebar gains Profile Builder.
+- Extend the existing SQLite `PersistenceStore` with owner-scoped candidate-profile snapshots/preferences, organization custom-field definitions, and private/shared templates; original CV bytes are not persisted.
+- Extend the existing Profile Builder API/proxy surface with profile/template/custom-field/preferences CRUD, PDF export, and reviewable AI transforms.
+- Extend the authenticated workflow with Recent profiles, a searchable Profiles catalog, batch conversion, template selection/management, autosave, AI review flows, and a dedicated Template Creator screen.
+- Sidebar gains Profile Builder and Profiles.
 - No location score, band, Analyze behavior, persistence schema, or research behavior changes.
-- No new runtime dependency is required for DOCX generation because `python-docx` is already installed.
+- DOCX continues to use `python-docx`; PDF adds LibreOffice Writer to the API runtime image and converts the exact rendered DOCX in an isolated headless process.

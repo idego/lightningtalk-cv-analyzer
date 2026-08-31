@@ -60,7 +60,7 @@ The system SHALL persist authenticated owner-scoped Profile Builder snapshots co
 - **THEN** the editor restores its canonical profile, anonymization, selected template snapshot, and filename
 
 ### Requirement: Template management
-The upload workflow SHALL expose the current template and a template manager that can select an existing template, create a new template, or navigate to editing one. Templates SHALL be owner-scoped except for the built-in IDEGO Default fallback.
+The upload workflow SHALL expose the current template and a template manager that can select an existing template, create a new template, or navigate to editing one. Custom templates SHALL support explicit Private or Shared visibility; new custom templates default to Private and the built-in IDEGO Default is Shared.
 
 #### Scenario: Recruiter changes the current template
 - **WHEN** another template is selected in the manager
@@ -90,11 +90,11 @@ The Profile Builder SHALL allow HR to generate or regenerate the one canonical p
 - **THEN** the generated source-faithful summary replaces `profile.summary` and the same value is immediately used by preview, autosave, and export
 
 ### Requirement: Direct-manipulation Template Creator
-The Template Creator SHALL fit inside one application viewport without vertical scrolling. HR SHALL reorder blocks by drag-and-drop and SHALL toggle block visibility directly from the block eye icon rather than a separate visibility switch.
+The Template Creator SHALL fit inside one application viewport without vertical scrolling. HR SHALL reorder blocks by drag-and-drop from either the Blocks list or directly on the A4 canvas, SHALL place body blocks into editable-document `left/full/right` lanes by horizontal drop position, and SHALL toggle block visibility directly from the block eye icon rather than a separate visibility switch.
 
 #### Scenario: Recruiter rearranges profile sections
-- **WHEN** a block is dragged to another position
-- **THEN** the normalized template section order changes and preview/export use that new order
+- **WHEN** a block is dragged directly on the A4 canvas to another vertical position and horizontal lane
+- **THEN** the normalized template section order/placement changes and browser preview plus DOCX/PDF export use that same editable-document layout
 
 #### Scenario: Recruiter hides a section
 - **WHEN** the eye icon on a block is activated
@@ -113,3 +113,28 @@ The Template Creator SHALL warn before its explicit Back action or browser unloa
 #### Scenario: Recruiter presses Back after editing a new template
 - **WHEN** unsaved template changes exist
 - **THEN** the recruiter must confirm discarding them before leaving the creator
+
+
+### Requirement: PDF parity export
+The system SHALL export PDF from the exact same profile/anonymization/template snapshot as DOCX, using DOCX-to-PDF conversion rather than an independent renderer.
+
+### Requirement: Organization custom fields
+The system SHALL let internal users manage an organization-level custom-field schema. New extracted profiles SHALL materialize current definitions and defaults into their canonical profile snapshot; existing snapshots retain their values even if the organization schema later changes.
+
+### Requirement: Reviewable AI profile actions
+The system SHALL let HR run a prompt against selected professional profile sections, preview original versus proposed section values, and selectively accept proposed sections. AI actions MUST NOT modify contact/personal data or silently mutate canonical state before acceptance.
+
+### Requirement: Conversion preferences
+Each authenticated user SHALL have persisted Profile Builder conversion preferences covering default anonymization, optional automatic Summary generation and prompt, safe technology aggregation, date-format normalization, default template, and output filename convention.
+
+### Requirement: Controlled template sharing
+Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible and editable inside the internal organization. Saving a new template MUST NOT share it by default.
+
+### Requirement: Batch conversion flow
+Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot.
+
+### Requirement: Reviewable AI translation
+The system SHALL translate selected professional profile sections to a supported target language with GPT-5.6 Luna, preserve names/URLs/technology identifiers, and require preview plus selective acceptance before changing canonical state.
+
+### Requirement: Profiles catalog
+The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository.

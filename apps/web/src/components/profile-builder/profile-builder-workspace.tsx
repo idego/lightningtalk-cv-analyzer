@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import {
   ChevronDown,
   ChevronLeft,
@@ -20,6 +21,8 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Languages,
+  WandSparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -48,6 +51,14 @@ const ACCEPT = ".pdf,.docx";
 export const SELECTED_TEMPLATE_STORAGE_KEY = "cv-profile-builder-selected-template-v1";
 
 export type ProfileLink = { label: string; url: string };
+export type ProfileCustomFieldValue = {
+  id: string;
+  label: string;
+  kind: "text" | "number" | "boolean" | "date" | "select";
+  value: string | number | boolean | null;
+  options: string[];
+};
+
 export type CandidateProfile = {
   schema_version: "candidate-profile-v1";
   personal: {
@@ -100,6 +111,7 @@ export type CandidateProfile = {
     url: string | null;
   }>;
   additional_sections: Array<{ id: string; title: string; items: string[] }>;
+  custom_fields: ProfileCustomFieldValue[];
 };
 
 export type AnonymizationPolicy = {
@@ -123,7 +135,8 @@ export type TemplateSectionKind =
   | "education"
   | "languages"
   | "certifications"
-  | "additional_sections";
+  | "additional_sections"
+  | "custom_fields";
 
 export type ProfileTemplateSection = {
   id: string;
@@ -131,6 +144,7 @@ export type ProfileTemplateSection = {
   title: string;
   visible: boolean;
   layout: "default" | "inline" | "bullets";
+  placement: "full" | "left" | "right";
 };
 
 export type ProfileTemplateLogo = {
@@ -146,6 +160,7 @@ export type ProfileTemplate = {
   schema_version: "profile-template-v1";
   id: string;
   name: string;
+  visibility: "private" | "shared";
   description: string | null;
   branding: {
     brand_name: string;
@@ -166,6 +181,50 @@ export type ProfileTemplate = {
   sections: ProfileTemplateSection[];
 };
 
+export type ProfileBuilderPreferences = {
+  auto_summary: boolean;
+  summary_instruction: string;
+  anonymization: AnonymizationPolicy;
+  aggregate_technologies: boolean;
+  date_format: "preserve" | "yyyy-mm" | "mm/yyyy" | "yyyy";
+  default_template_id: string;
+  filename_pattern: string;
+};
+
+export const DEFAULT_PROFILE_BUILDER_PREFERENCES: ProfileBuilderPreferences = {
+  auto_summary: false,
+  summary_instruction: "",
+  anonymization: {
+    hide_first_name: true, hide_last_name: true, hide_email: true, hide_phone: true,
+    hide_location: true, hide_linkedin: true, hide_github: true, hide_portfolio: true,
+    employer_mode: "hide", institution_mode: "hide",
+  },
+  aggregate_technologies: true,
+  date_format: "preserve",
+  default_template_id: "idego-default",
+  filename_pattern: "{name}-profile",
+};
+
+export type ProfessionalSectionName =
+  | "headline" | "summary" | "skills" | "technologies" | "experience"
+  | "education" | "languages" | "certifications" | "additional_sections";
+
+const PROFESSIONAL_SECTION_LABELS: Record<ProfessionalSectionName, string> = {
+  headline: "Headline",
+  summary: "Summary",
+  skills: "Skills",
+  technologies: "Technologies",
+  experience: "Experience",
+  education: "Education",
+  languages: "Languages",
+  certifications: "Certifications",
+  additional_sections: "Additional sections",
+};
+
+const PROFESSIONAL_SECTIONS = Object.keys(PROFESSIONAL_SECTION_LABELS) as ProfessionalSectionName[];
+
+type ProfessionalProposal = Omit<CandidateProfile, "schema_version" | "personal" | "custom_fields">;
+
 type ExtractResponse = {
   filename: string;
   profile: CandidateProfile;
@@ -178,6 +237,7 @@ type TemplateListItem = {
   customized: boolean;
   created_at: string | null;
   updated_at: string | null;
+  shared?: boolean;
 };
 
 type RecentProfileItem = {
@@ -198,6 +258,15 @@ type StoredProfile = {
   template: ProfileTemplate;
   created_at: string;
   updated_at: string;
+};
+
+type BatchConversionItem = {
+  id: string;
+  file: File;
+  status: "queued" | "processing" | "completed" | "failed";
+  profile_id: string | null;
+  candidate_name: string | null;
+  error: string | null;
 };
 
 export const DEFAULT_ANONYMIZATION: AnonymizationPolicy = {
@@ -230,6 +299,7 @@ export const DEFAULT_PROFILE_TEMPLATE: ProfileTemplate = {
   schema_version: "profile-template-v1",
   id: "idego-default",
   name: "IDEGO Default",
+  visibility: "shared",
   description: "Default IDEGO candidate profile layout.",
   branding: {
     brand_name: "IDEGO",
@@ -248,14 +318,15 @@ export const DEFAULT_PROFILE_TEMPLATE: ProfileTemplate = {
   },
   logo: null,
   sections: [
-    { id: "summary", kind: "summary", title: "Summary", visible: true, layout: "default" },
-    { id: "skills", kind: "skills", title: "Skills", visible: true, layout: "inline" },
-    { id: "technologies", kind: "technologies", title: "Technologies", visible: true, layout: "inline" },
-    { id: "experience", kind: "experience", title: "Experience", visible: true, layout: "default" },
-    { id: "education", kind: "education", title: "Education", visible: true, layout: "default" },
-    { id: "languages", kind: "languages", title: "Languages", visible: true, layout: "inline" },
-    { id: "certifications", kind: "certifications", title: "Certifications", visible: true, layout: "bullets" },
-    { id: "additional-sections", kind: "additional_sections", title: "Additional", visible: true, layout: "bullets" },
+    { id: "summary", kind: "summary", title: "Summary", visible: true, layout: "default", placement: "full" },
+    { id: "skills", kind: "skills", title: "Skills", visible: true, layout: "inline", placement: "full" },
+    { id: "technologies", kind: "technologies", title: "Technologies", visible: true, layout: "inline", placement: "full" },
+    { id: "experience", kind: "experience", title: "Experience", visible: true, layout: "default", placement: "full" },
+    { id: "education", kind: "education", title: "Education", visible: true, layout: "default", placement: "full" },
+    { id: "languages", kind: "languages", title: "Languages", visible: true, layout: "inline", placement: "full" },
+    { id: "certifications", kind: "certifications", title: "Certifications", visible: true, layout: "bullets", placement: "full" },
+    { id: "additional-sections", kind: "additional_sections", title: "Additional", visible: true, layout: "bullets", placement: "full" },
+    { id: "custom-fields", kind: "custom_fields", title: "Details", visible: true, layout: "default", placement: "full" },
   ],
 };
 
@@ -330,6 +401,10 @@ export const PROFILE_TEMPLATE_SAMPLE_PROFILE: CandidateProfile = {
   additional_sections: [
     { id: "sample-additional-1", title: "Community", items: ["Mentors junior engineers and contributes to internal guilds."] },
   ],
+  custom_fields: [
+    { id: "availability", label: "Availability", kind: "text", value: "2 weeks", options: [] },
+    { id: "rate", label: "Rate", kind: "text", value: "Negotiable", options: [] },
+  ],
 };
 
 const EDITOR_SECTIONS = [
@@ -341,6 +416,7 @@ const EDITOR_SECTIONS = [
   "languages",
   "certifications",
   "additional",
+  "custom_fields",
 ] as const;
 type EditorSectionId = (typeof EDITOR_SECTIONS)[number];
 
@@ -576,7 +652,46 @@ function TemplateSectionPreview({
       </PreviewSection>
     ) : null;
   }
+  if (section.kind === "custom_fields") {
+    const fields = profile.custom_fields.filter((field) => field.value !== null && field.value !== "");
+    return fields.length ? (
+      <PreviewSection title={section.title} {...shared}>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          {fields.map((field) => (
+            <div key={field.id} className="contents">
+              <dt className="font-semibold text-slate-900">{field.label}</dt>
+              <dd>{typeof field.value === "boolean" ? (field.value ? "Yes" : "No") : String(field.value)}</dd>
+            </div>
+          ))}
+        </dl>
+      </PreviewSection>
+    ) : null;
+  }
   return null;
+}
+
+function groupTemplateSections(sections: ProfileTemplateSection[]) {
+  const visible = sections.filter((section) => section.visible);
+  const groups: Array<
+    | { type: "full"; section: ProfileTemplateSection }
+    | { type: "columns"; sections: ProfileTemplateSection[] }
+  > = [];
+  let index = 0;
+  while (index < visible.length) {
+    const section = visible[index];
+    if (section.placement === "full") {
+      groups.push({ type: "full", section });
+      index += 1;
+      continue;
+    }
+    const sideSections: ProfileTemplateSection[] = [];
+    while (index < visible.length && visible[index].placement !== "full") {
+      sideSections.push(visible[index]);
+      index += 1;
+    }
+    groups.push({ type: "columns", sections: sideSections });
+  }
+  return groups;
 }
 
 export function ProfileDocumentPreview({
@@ -587,6 +702,9 @@ export function ProfileDocumentPreview({
   onLogoChange,
   onLogoSelect,
   fillHeight = false,
+  sectionsEditable = false,
+  onSectionsChange,
+  onSectionSelect,
 }: {
   profile: CandidateProfile;
   template: ProfileTemplate;
@@ -595,6 +713,9 @@ export function ProfileDocumentPreview({
   onLogoChange?: (logo: ProfileTemplateLogo) => void;
   onLogoSelect?: () => void;
   fillHeight?: boolean;
+  sectionsEditable?: boolean;
+  onSectionsChange?: (sections: ProfileTemplateSection[]) => void;
+  onSectionSelect?: (sectionId: string) => void;
 }) {
   const [previewPage, setPreviewPage] = useState(1);
   const [previewPageCount, setPreviewPageCount] = useState(1);
@@ -608,6 +729,8 @@ export function ProfileDocumentPreview({
     xPct: number;
     yPct: number;
   } | null>(null);
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+  const [dragLane, setDragLane] = useState<ProfileTemplateSection["placement"]>("full");
 
   useEffect(() => {
     const viewport = previewViewportRef.current;
@@ -677,6 +800,70 @@ export function ProfileDocumentPreview({
     }
   }
 
+  function laneFromPointer(clientX: number): ProfileTemplateSection["placement"] {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return "full";
+    const rect = viewport.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / Math.max(1, rect.width);
+    if (ratio < 0.34) return "left";
+    if (ratio > 0.66) return "right";
+    return "full";
+  }
+
+  function moveCanvasSection(activeId: string, targetId: string, after: boolean, placement: ProfileTemplateSection["placement"]) {
+    if (!onSectionsChange) return;
+    const next = structuredClone(template.sections);
+    const from = next.findIndex((section) => section.id === activeId);
+    const target = next.findIndex((section) => section.id === targetId);
+    if (from < 0 || target < 0) return;
+    const [section] = next.splice(from, 1);
+    section.placement = placement;
+    const targetAfterRemoval = next.findIndex((item) => item.id === targetId);
+    const insertAt = Math.max(0, targetAfterRemoval + (after ? 1 : 0));
+    next.splice(insertAt, 0, section);
+    onSectionsChange(next);
+    onSectionSelect?.(section.id);
+  }
+
+  function draggableSection(section: ProfileTemplateSection) {
+    return (
+      <div
+        key={section.id}
+        draggable={sectionsEditable}
+        onClick={() => sectionsEditable && onSectionSelect?.(section.id)}
+        onDragStart={(event) => {
+          if (!sectionsEditable) return;
+          setDraggedSectionId(section.id);
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", section.id);
+        }}
+        onDragEnd={() => { setDraggedSectionId(null); setDragLane("full"); }}
+        onDragOver={(event) => {
+          if (!sectionsEditable) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDragLane(laneFromPointer(event.clientX));
+        }}
+        onDrop={(event) => {
+          if (!sectionsEditable) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const activeId = draggedSectionId || event.dataTransfer.getData("text/plain");
+          if (!activeId) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          moveCanvasSection(activeId, section.id, event.clientY > rect.top + rect.height / 2, laneFromPointer(event.clientX));
+          setDraggedSectionId(null);
+        }}
+        className={sectionsEditable ? `group relative cursor-grab rounded-md transition-[outline,background-color] hover:bg-slate-50/60 hover:outline hover:outline-1 hover:outline-cyan-400/60 active:cursor-grabbing ${draggedSectionId === section.id ? "opacity-40" : ""}` : undefined}
+      >
+        {sectionsEditable ? <span className="pointer-events-none absolute -right-1 -top-2 z-10 rounded bg-slate-900 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-wide text-white opacity-0 transition-opacity group-hover:opacity-100">{section.placement}</span> : null}
+        <TemplateSectionPreview section={section} profile={profile} template={template} />
+      </div>
+    );
+  }
+
+  const sectionGroups = groupTemplateSections(template.sections);
+
   return (
     <div className={fillHeight ? "flex h-full min-h-0 min-w-0 flex-col" : "min-w-0"}>
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
@@ -713,12 +900,38 @@ export function ProfileDocumentPreview({
                 <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">Candidate Profile</p>
               </div> : null}
             </div>
-            <div className="space-y-6">
+            <div
+              className="space-y-6"
+              onDragOver={(event) => {
+                if (!sectionsEditable) return;
+                event.preventDefault();
+                setDragLane(laneFromPointer(event.clientX));
+              }}
+              onDrop={(event) => {
+                if (!sectionsEditable || !draggedSectionId || !onSectionsChange) return;
+                if (event.target !== event.currentTarget) return;
+                event.preventDefault();
+                const next = structuredClone(template.sections);
+                const from = next.findIndex((section) => section.id === draggedSectionId);
+                if (from < 0) return;
+                const [section] = next.splice(from, 1);
+                section.placement = laneFromPointer(event.clientX);
+                next.push(section);
+                onSectionsChange(next);
+                setDraggedSectionId(null);
+              }}
+            >
               {template.header.show_contact && contacts.length ? <p className="text-xs text-slate-500">{contacts.join(" · ")}</p> : null}
-              {template.sections.map((section) => <TemplateSectionPreview key={section.id} section={section} profile={profile} template={template} />)}
+              {sectionGroups.map((group, groupIndex) => group.type === "full"
+                ? draggableSection(group.section)
+                : <div key={`columns-${groupIndex}`} className="grid grid-cols-2 items-start gap-5">
+                    <div className="space-y-5">{group.sections.filter((section) => section.placement === "left").map(draggableSection)}</div>
+                    <div className="space-y-5">{group.sections.filter((section) => section.placement === "right").map(draggableSection)}</div>
+                  </div>)}
             </div>
           </div>
         </div>
+        {sectionsEditable && draggedSectionId ? <div className="pointer-events-none absolute inset-x-[7.5%] bottom-[7%] top-[6.5%] z-30 grid grid-cols-3 gap-1">{(["left", "full", "right"] as const).map((lane) => <div key={lane} className={`flex items-center justify-center rounded border border-dashed text-[10px] font-semibold uppercase tracking-wider ${dragLane === lane ? "border-cyan-500 bg-cyan-400/15 text-cyan-800" : "border-slate-300/60 bg-white/20 text-slate-400"}`}>{lane}</div>)}</div> : null}
         {template.logo ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -785,7 +998,7 @@ function TemplateManagerDialog({
             return <div key={item.template.id} className={`flex items-center gap-3 rounded-xl border p-3 ${selected ? "border-primary/40 bg-primary/5" : ""}`}>
               <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(item.template)}>
                 <span className="flex items-center gap-2"><span className="truncate font-medium">{item.template.name}</span>{selected ? <Check className="size-4 text-primary" /> : null}</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{item.template.description || "Custom profile template"}{item.built_in ? item.customized ? " · customized default" : " · built-in" : ""}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{item.template.description || "Custom profile template"}{item.built_in ? item.customized ? " · customized default" : " · built-in" : item.template.visibility === "shared" ? " · shared" : " · private"}</span>
               </button>
               <Button variant="ghost" size="icon-sm" aria-label={`Edit ${item.template.name}`} onClick={() => onEdit(item.template.id)}><Pencil /></Button>
               {(!item.built_in || item.customized) ? <Button variant="ghost" size="icon-sm" aria-label={item.built_in ? "Reset built-in template" : `Delete ${item.template.name}`} onClick={() => onDelete(item)}><Trash2 /></Button> : null}
@@ -819,10 +1032,23 @@ export function ProfileBuilderWorkspace() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [openingProfileId, setOpeningProfileId] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [batchItems, setBatchItems] = useState<BatchConversionItem[]>([]);
+  const [batchRunning, setBatchRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [summaryInstruction, setSummaryInstruction] = useState("");
   const [summaryGenerating, setSummaryGenerating] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [profileBuilderPreferences, setProfileBuilderPreferences] = useState<ProfileBuilderPreferences>(DEFAULT_PROFILE_BUILDER_PREFERENCES);
+  const [profileBuilderReady, setProfileBuilderReady] = useState(false);
+  const [transformDialogOpen, setTransformDialogOpen] = useState(false);
+  const [transformMode, setTransformMode] = useState<"action" | "translation">("action");
+  const [transformInstruction, setTransformInstruction] = useState("");
+  const [transformLanguage, setTransformLanguage] = useState<"en" | "pl" | "de" | "fr" | "es">("en");
+  const [transformSections, setTransformSections] = useState<Set<ProfessionalSectionName>>(() => new Set(["summary"]));
+  const [transformProposal, setTransformProposal] = useState<ProfessionalProposal | null>(null);
+  const [acceptedTransformSections, setAcceptedTransformSections] = useState<Set<ProfessionalSectionName>>(() => new Set());
+  const [transformRunning, setTransformRunning] = useState(false);
+  const [transformError, setTransformError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<EditorSectionId>>(
@@ -857,6 +1083,22 @@ export function ProfileBuilderWorkspace() {
       setRecentProfiles([]);
     } finally {
       setHistoryLoading(false);
+    }
+  }, []);
+
+  const refreshProfileBuilderPreferences = useCallback(async () => {
+    try {
+      const response = await fetch("/api/profile-builder/preferences", { cache: "no-store" });
+      if (!response.ok) throw new Error("preferences_unavailable");
+      const preferences = await response.json() as ProfileBuilderPreferences;
+      setProfileBuilderPreferences(preferences);
+      if (!window.localStorage.getItem(SELECTED_TEMPLATE_STORAGE_KEY)) {
+        window.localStorage.setItem(SELECTED_TEMPLATE_STORAGE_KEY, preferences.default_template_id);
+      }
+      return preferences;
+    } catch {
+      setProfileBuilderPreferences(DEFAULT_PROFILE_BUILDER_PREFERENCES);
+      return DEFAULT_PROFILE_BUILDER_PREFERENCES;
     }
   }, []);
 
@@ -917,11 +1159,17 @@ export function ProfileBuilderWorkspace() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void refreshRecentProfiles();
-      void refreshTemplates();
+      void (async () => {
+        try {
+          await refreshProfileBuilderPreferences();
+          await Promise.all([refreshRecentProfiles(), refreshTemplates()]);
+        } finally {
+          setProfileBuilderReady(true);
+        }
+      })();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [refreshRecentProfiles, refreshTemplates]);
+  }, [refreshProfileBuilderPreferences, refreshRecentProfiles, refreshTemplates]);
 
   useEffect(() => {
     if (!reopenProfileId || profile || profileId === reopenProfileId) return;
@@ -1037,77 +1285,98 @@ export function ProfileBuilderWorkspace() {
     });
   }
 
+  async function requestProfileExtraction(file: File): Promise<{ filename: string; profile: CandidateProfile }> {
+    if (!settings.aiEnabled) throw new Error("Enable AI features in Settings before extracting a profile.");
+    if (!/\.(pdf|docx)$/i.test(file.name)) throw new Error("Choose PDF or DOCX files only.");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch("/api/profile-builder/extract", {
+      method: "POST",
+      body: form,
+      headers: { "X-AI-Enabled": String(settings.aiEnabled) },
+    });
+    const payload = (await response.json().catch(() => ({}))) as Partial<ExtractResponse> & { detail?: string };
+    if (!response.ok || !payload.profile) {
+      if (payload.detail === "profile_builder_ai_disabled_for_request") throw new Error("Enable AI features in Settings before extracting a profile.");
+      if (payload.detail === "profile_builder_ai_disabled") throw new Error("Profile Builder needs AI enabled on this deployment.");
+      throw new Error(payload.detail === "document_text_too_sparse" ? "The CV does not contain enough extractable text." : "Profile extraction failed. Check the file and try again.");
+    }
+    return { filename: payload.filename ?? file.name, profile: payload.profile };
+  }
+
+  async function persistExtractedProfile(filename: string, extractedProfile: CandidateProfile): Promise<string> {
+    const response = await fetch("/api/profile-builder/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_filename: filename,
+        profile: extractedProfile,
+        anonymization: profileBuilderPreferences.anonymization,
+        template: selectedTemplate,
+      }),
+    });
+    const payload = await response.json().catch(() => ({})) as { profile_id?: string };
+    if (!response.ok || !payload.profile_id) throw new Error("Profile was extracted, but it could not be saved.");
+    return payload.profile_id;
+  }
+
+  function queueFiles(files: File[]) {
+    if (!profileBuilderReady) { setError("Conversion defaults are still loading. Try again in a moment."); return; }
+    if (files.length > 10) { setError("Batch conversion supports up to 10 CVs at once."); return; }
+    if (files.some((file) => !/\.(pdf|docx)$/i.test(file.name))) { setError("Batch conversion accepts PDF or DOCX files only."); return; }
+    const supported = files;
+    if (!supported.length) { setError("Choose PDF or DOCX files."); return; }
+    if (supported.length === 1) { setBatchItems([]); void extract(supported[0]); return; }
+    setError(null);
+    setBatchItems(supported.map((file) => ({
+      id: globalThis.crypto.randomUUID(), file, status: "queued", profile_id: null, candidate_name: null, error: null,
+    })));
+  }
+
+  async function runBatchConversion() {
+    if (batchRunning || !batchItems.length) return;
+    setBatchRunning(true);
+    setError(null);
+    for (const item of batchItems) {
+      if (item.status === "completed") continue;
+      setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "processing", error: null } : entry));
+      try {
+        const extracted = await requestProfileExtraction(item.file);
+        const profileId = await persistExtractedProfile(extracted.filename, extracted.profile);
+        const candidateName = [extracted.profile.personal.first_name, extracted.profile.personal.last_name].filter(Boolean).join(" ") || null;
+        setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "completed", profile_id: profileId, candidate_name: candidateName } : entry));
+      } catch (cause) {
+        setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "failed", error: cause instanceof Error ? cause.message : "Conversion failed." } : entry));
+      }
+    }
+    setBatchRunning(false);
+    void refreshRecentProfiles();
+  }
+
   async function extract(file: File) {
     if (extracting) return;
-    if (!settings.aiEnabled) {
-      setError("Enable AI features in Settings before extracting a profile.");
-      return;
-    }
-    if (!/\.(pdf|docx)$/i.test(file.name)) {
-      setError("Choose a PDF or DOCX file.");
-      return;
-    }
     setError(null);
     setSourceFile(file);
     setSourceFilename(file.name);
     setProfileId(null);
     setExtracting(true);
     try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      const response = await fetch("/api/profile-builder/extract", {
-        method: "POST",
-        body: form,
-        headers: { "X-AI-Enabled": String(settings.aiEnabled) },
-      });
-      const payload = (await response.json().catch(() => ({}))) as Partial<ExtractResponse> & {
-        detail?: string;
-        error?: string;
-      };
-      if (!response.ok || !payload.profile) {
-        if (payload.detail === "profile_builder_ai_disabled_for_request") {
-          throw new Error("Enable AI features in Settings before extracting a profile.");
-        }
-        if (payload.detail === "profile_builder_ai_disabled") {
-          throw new Error("Profile Builder needs AI enabled on this deployment.");
-        }
-        throw new Error("Profile extraction failed. Check the file and try again.");
-      }
-
-      const extractedFilename = payload.filename ?? file.name;
-      const extractedProfile = payload.profile;
+      const extracted = await requestProfileExtraction(file);
+      const profileId = await persistExtractedProfile(extracted.filename, extracted.profile);
       templateSelectionLockedRef.current = true;
-      setProfile(extractedProfile);
-      setSourceFilename(extractedFilename);
-      setAnonymization(DEFAULT_ANONYMIZATION);
-      setSaveStatus("saving");
-
-      const persist = await fetch("/api/profile-builder/profiles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_filename: extractedFilename,
-          profile: extractedProfile,
-          anonymization: DEFAULT_ANONYMIZATION,
-          template: selectedTemplate,
-        }),
+      setProfile(extracted.profile);
+      setProfileId(profileId);
+      setSourceFilename(extracted.filename);
+      setAnonymization(profileBuilderPreferences.anonymization);
+      lastSavedSnapshotRef.current = JSON.stringify({
+        source_filename: extracted.filename,
+        profile: extracted.profile,
+        anonymization: profileBuilderPreferences.anonymization,
+        template: selectedTemplate,
       });
-      const persisted = await persist.json().catch(() => ({})) as { profile_id?: string };
-      if (persist.ok && persisted.profile_id) {
-        setProfileId(persisted.profile_id);
-        lastSavedSnapshotRef.current = JSON.stringify({
-          source_filename: extractedFilename,
-          profile: extractedProfile,
-          anonymization: DEFAULT_ANONYMIZATION,
-          template: selectedTemplate,
-        });
-        lastSaveOkRef.current = true;
-        setSaveStatus("saved");
-        void refreshRecentProfiles();
-      } else {
-        setSaveStatus("error");
-        setError("Profile was extracted, but it could not be added to Recent profiles.");
-      }
+      lastSaveOkRef.current = true;
+      setSaveStatus("saved");
+      void refreshRecentProfiles();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Profile extraction failed.");
     } finally {
@@ -1134,7 +1403,11 @@ export function ProfileBuilderWorkspace() {
   }
 
   async function deleteTemplate(item: TemplateListItem) {
-    const action = item.built_in ? "Reset the customized IDEGO Default template?" : `Delete ${item.template.name}?`;
+    const action = item.built_in
+      ? "Reset the customized IDEGO Default template for the internal team?"
+      : item.template.visibility === "shared"
+        ? `Delete shared template ${item.template.name} for the entire internal team?`
+        : `Delete private template ${item.template.name}?`;
     if (!window.confirm(action)) return;
     const response = await fetch(`/api/profile-builder/templates/${encodeURIComponent(item.template.id)}`, { method: "DELETE" });
     if (!response.ok) {
@@ -1177,6 +1450,87 @@ export function ProfileBuilderWorkspace() {
     router.push(`/profile-builder/templates/${encodeURIComponent(templateId ?? "new")}${returnQuery}`);
   }
 
+  function openTransform(mode: "action" | "translation") {
+    setTransformMode(mode);
+    setTransformProposal(null);
+    setTransformError(null);
+    setTransformInstruction("");
+    setTransformSections(new Set(mode === "translation"
+      ? ["headline", "summary", "skills", "technologies", "experience", "education", "languages", "certifications", "additional_sections"]
+      : ["summary"]));
+    setAcceptedTransformSections(new Set());
+    setTransformDialogOpen(true);
+  }
+
+  async function runProfileTransform() {
+    if (!profile || transformRunning || !transformSections.size) return;
+    if (transformMode === "action" && !transformInstruction.trim()) {
+      setTransformError("Describe what the AI should change.");
+      return;
+    }
+    if (!settings.aiEnabled) {
+      setTransformError("Enable AI features in Settings first.");
+      return;
+    }
+    setTransformRunning(true);
+    setTransformError(null);
+    try {
+      const sections = [...transformSections];
+      const response = await fetch("/api/profile-builder/transform", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AI-Enabled": String(settings.aiEnabled),
+        },
+        body: JSON.stringify({
+          profile,
+          sections,
+          instruction: transformInstruction,
+          mode: transformMode,
+          target_language: transformMode === "translation" ? transformLanguage : null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        proposal?: ProfessionalProposal;
+        detail?: string;
+      };
+      if (!response.ok || !payload.proposal) throw new Error(
+        transformMode === "translation" ? "Translation failed. Try again." : "AI Action failed. Try again.",
+      );
+      setTransformProposal(payload.proposal);
+      setAcceptedTransformSections(new Set(sections.filter((section) => {
+        const currentValue = profile[section];
+        const proposedValue = payload.proposal?.[section];
+        return JSON.stringify(currentValue) !== JSON.stringify(proposedValue);
+      })));
+    } catch (cause) {
+      setTransformError(cause instanceof Error ? cause.message : "AI transform failed.");
+    } finally {
+      setTransformRunning(false);
+    }
+  }
+
+  function acceptProfileTransform() {
+    if (!transformProposal || !acceptedTransformSections.size) return;
+    mutate((draft) => {
+      for (const section of acceptedTransformSections) {
+        switch (section) {
+          case "headline": draft.headline = transformProposal.headline; break;
+          case "summary": draft.summary = transformProposal.summary; break;
+          case "skills": draft.skills = structuredClone(transformProposal.skills); break;
+          case "technologies": draft.technologies = structuredClone(transformProposal.technologies); break;
+          case "experience": draft.experience = structuredClone(transformProposal.experience); break;
+          case "education": draft.education = structuredClone(transformProposal.education); break;
+          case "languages": draft.languages = structuredClone(transformProposal.languages); break;
+          case "certifications": draft.certifications = structuredClone(transformProposal.certifications); break;
+          case "additional_sections": draft.additional_sections = structuredClone(transformProposal.additional_sections); break;
+        }
+      }
+    });
+    setTransformDialogOpen(false);
+    setTransformProposal(null);
+  }
+
   async function generateSummary() {
     if (!profile || summaryGenerating) return;
     if (!settings.aiEnabled) {
@@ -1217,12 +1571,33 @@ export function ProfileBuilderWorkspace() {
     }
   }
 
-  async function exportDocx() {
+  function outputFilename(extension: "docx" | "pdf") {
+    if (!profile) return `candidate-profile.${extension}`;
+    const exported = derivedPresentation(profile, anonymization);
+    const first = exported.personal.first_name?.trim() ?? "";
+    const last = exported.personal.last_name?.trim() ?? "";
+    const name = [first, last].filter(Boolean).join(" ") || "candidate";
+    const today = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const rendered = profileBuilderPreferences.filename_pattern
+      .replaceAll("{name}", name)
+      .replaceAll("{first_name}", first)
+      .replaceAll("{last_name}", last)
+      .replaceAll("{template}", selectedTemplate.name)
+      .replaceAll("{date}", today)
+      .replace(/[^\p{L}\p{N}._ -]+/gu, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[._-]+|[._-]+$/g, "")
+      .toLowerCase();
+    return `${rendered || "candidate-profile"}.${extension}`;
+  }
+
+  async function exportProfile(format: "docx" | "pdf") {
     if (!profile) return;
     setError(null);
     setExporting(true);
     try {
-      const response = await fetch("/api/profile-builder/export/docx", {
+      const response = await fetch(`/api/profile-builder/export/${format}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1232,36 +1607,32 @@ export function ProfileBuilderWorkspace() {
           template: selectedTemplate,
         }),
       });
-      if (!response.ok) throw new Error("DOCX export failed.");
+      if (!response.ok) throw new Error(`${format.toUpperCase()} export failed.`);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
-      const exportedProfile = derivedPresentation(profile, anonymization);
-      const name = [exportedProfile.personal.first_name, exportedProfile.personal.last_name]
-        .filter(Boolean)
-        .join("-")
-        .replace(/[^\p{L}\p{N}-]+/gu, "-")
-        .replace(/^-+|-+$/g, "")
-        .toLowerCase();
       anchor.href = url;
-      anchor.download = `${name || "candidate"}-profile.docx`;
+      anchor.download = outputFilename(format);
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "DOCX export failed.");
+      setError(cause instanceof Error ? cause.message : `${format.toUpperCase()} export failed.`);
     } finally {
       setExporting(false);
     }
   }
+
+  async function exportDocx() { await exportProfile("docx"); }
+  async function exportPdf() { await exportProfile("pdf"); }
 
   function reset() {
     setProfileId(null);
     setProfile(null);
     setSourceFilename(null);
     setSourceFile(null);
-    setAnonymization(DEFAULT_ANONYMIZATION);
+    setAnonymization(profileBuilderPreferences.anonymization);
     setSummaryInstruction("");
     setSummaryError(null);
     setExpandedSections(new Set(EDITOR_SECTIONS));
@@ -1279,13 +1650,13 @@ export function ProfileBuilderWorkspace() {
         <div className="space-y-2">
           <h2 className="text-2xl font-semibold tracking-tight">Profile Builder</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Drop in a CV, correct the extracted profile, choose a template, and export the exact current version to DOCX.
+            Convert one CV or a batch of up to 10, edit the structured profile, and export the exact current snapshot to DOCX or PDF.
           </p>
         </div>
         <Card>
           <CardHeader>
             <CardTitle>Upload candidate CV</CardTitle>
-            <CardDescription>PDF or DOCX. National identifiers are redacted before AI extraction.</CardDescription>
+            <CardDescription>PDF or DOCX, up to 10 at once. National identifiers are redacted before AI extraction.</CardDescription>
           </CardHeader>
           <CardContent>
             <label
@@ -1293,19 +1664,20 @@ export function ProfileBuilderWorkspace() {
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 event.preventDefault();
-                if (extracting) return;
-                const file = event.dataTransfer.files[0];
-                if (file) void extract(file);
+                if (extracting || batchRunning || !profileBuilderReady) return;
+                queueFiles(Array.from(event.dataTransfer.files));
               }}
             >
               <input
                 type="file"
                 accept={ACCEPT}
+                multiple
                 className="hidden"
-                disabled={extracting || !settings.aiEnabled}
+                disabled={extracting || batchRunning || !settings.aiEnabled || !profileBuilderReady}
                 onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void extract(file);
+                  const files = Array.from(event.target.files ?? []);
+                  if (files.length) queueFiles(files);
+                  event.target.value = "";
                 }}
               />
               {extracting ? (
@@ -1313,14 +1685,25 @@ export function ProfileBuilderWorkspace() {
               ) : (
                 <Upload className="mb-4 size-9 text-primary" />
               )}
-              <p className="font-medium">{extracting ? "Extracting candidate profile…" : "Drop a CV here or click to select"}</p>
-              <p className="mt-1 text-xs text-muted-foreground">Accepted: PDF, DOCX</p>
+              <p className="font-medium">{!profileBuilderReady ? "Loading conversion defaults…" : extracting ? "Extracting candidate profile…" : batchRunning ? "Batch conversion in progress…" : "Drop CVs here or click to select"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Accepted: PDF, DOCX · maximum 10 files</p>
               {!settings.aiEnabled ? (
                 <p className="mt-3 text-xs font-medium text-amber-700 dark:text-amber-400">
                   AI features are disabled in Settings. Profile extraction is paused.
                 </p>
               ) : null}
             </label>
+            {batchItems.length ? <div className="mt-4 overflow-hidden rounded-xl border">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
+                <div><p className="text-sm font-medium">Batch conversion · {batchItems.length} CVs</p><p className="text-xs text-muted-foreground">Each successful CV becomes its own saved profile.</p></div>
+                <div className="flex gap-2"><Button variant="ghost" size="sm" disabled={batchRunning} onClick={() => setBatchItems([])}>Clear</Button><Button size="sm" disabled={batchRunning || batchItems.every((item) => item.status === "completed")} onClick={() => void runBatchConversion()}>{batchRunning ? <LoaderCircle className="animate-spin" /> : null}{batchRunning ? "Converting…" : batchItems.some((item) => item.status === "failed") ? "Retry failed" : "Convert batch"}</Button></div>
+              </div>
+              <ul className="divide-y">{batchItems.map((item) => <li key={item.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="min-w-0 flex-1"><span className="block truncate font-medium">{item.candidate_name ?? item.file.name}</span>{item.error ? <span className="block truncate text-xs text-destructive">{item.error}</span> : null}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{item.status === "processing" ? "Processing…" : item.status === "completed" ? "Completed" : item.status === "failed" ? "Failed" : "Queued"}</span>
+                {item.status === "processing" ? <LoaderCircle className="size-4 animate-spin" /> : item.profile_id ? <Button variant="ghost" size="sm" render={<Link href={`/profile-builder?profile=${encodeURIComponent(item.profile_id)}`} />}>Open</Button> : null}
+              </li>)}</ul>
+            </div> : null}
             {error ? (
               <div className="mt-4 flex flex-wrap items-center gap-3" aria-live="polite">
                 <p className="min-w-0 flex-1 text-sm text-destructive">
@@ -1344,6 +1727,7 @@ export function ProfileBuilderWorkspace() {
                 <h2 className="font-medium">Recent profiles</h2>
                 <p className="text-xs text-muted-foreground">Reopen an extracted profile with its exact saved template and visibility settings.</p>
               </div>
+              <Button variant="ghost" size="sm" render={<Link href="/profiles" />}>View all</Button>
             </div>
             {historyLoading ? <div className="flex items-center justify-center py-9"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
             {!historyLoading && !recentProfiles.length ? <p className="px-5 py-8 text-sm text-muted-foreground">No recent profiles yet.</p> : null}
@@ -1409,12 +1793,21 @@ export function ProfileBuilderWorkspace() {
         <Button variant="outline" onClick={() => setTemplateDialogOpen(true)}>
           <LayoutTemplate />Manage template
         </Button>
+        <Button variant="outline" onClick={() => openTransform("action")} disabled={!settings.aiEnabled}>
+          <WandSparkles />AI Actions
+        </Button>
+        <Button variant="outline" onClick={() => openTransform("translation")} disabled={!settings.aiEnabled}>
+          <Languages />Translate
+        </Button>
         <Button variant="outline" onClick={reset}>
           <RotateCcw data-icon="inline-start" />New CV
         </Button>
+        <Button variant="outline" onClick={() => void exportPdf()} disabled={exporting}>
+          <Download />PDF
+        </Button>
         <Button onClick={() => void exportDocx()} disabled={exporting}>
           {exporting ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
-          {exporting ? "Exporting…" : "Export DOCX"}
+          {exporting ? "Exporting…" : "DOCX"}
         </Button>
       </div>
       {error ? <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
@@ -1428,6 +1821,73 @@ export function ProfileBuilderWorkspace() {
         onEdit={(templateId) => { void openTemplateCreator(templateId); }}
         onCreate={() => { void openTemplateCreator(null); }}
       />
+      <Dialog open={transformDialogOpen} onOpenChange={(open) => {
+        setTransformDialogOpen(open);
+        if (!open) { setTransformProposal(null); setTransformError(null); }
+      }}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{transformMode === "translation" ? "Translate profile" : "AI Actions"}</DialogTitle>
+            <DialogDescription>
+              {transformProposal
+                ? "Review every proposed section and accept only the changes you want."
+                : transformMode === "translation"
+                  ? "Translate selected professional sections. Personal/contact data is never sent."
+                  : "Describe the rewrite and choose which professional sections AI may change."}
+            </DialogDescription>
+          </DialogHeader>
+          {!transformProposal ? <div className="space-y-4">
+            {transformMode === "translation" ? <div className="space-y-1.5">
+              <Label htmlFor="profile-transform-language">Target language</Label>
+              <select id="profile-transform-language" value={transformLanguage} onChange={(event) => setTransformLanguage(event.target.value as typeof transformLanguage)} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm">
+                <option value="en">English</option><option value="pl">Polish</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option>
+              </select>
+            </div> : <div className="space-y-1.5">
+              <Label htmlFor="profile-transform-instruction">Instruction</Label>
+              <textarea id="profile-transform-instruction" rows={4} maxLength={12000} value={transformInstruction} onChange={(event) => setTransformInstruction(event.target.value)} placeholder="Example: Make the profile more concise and emphasize backend ownership for the pasted job description…" className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm" />
+            </div>}
+            <div>
+              <p className="mb-2 text-sm font-medium">Sections AI may change</p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {PROFESSIONAL_SECTIONS.map((section) => <label key={section} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+                  <input type="checkbox" checked={transformSections.has(section)} onChange={(event) => setTransformSections((current) => {
+                    const next = new Set(current); if (event.target.checked) next.add(section); else next.delete(section); return next;
+                  })} />
+                  {PROFESSIONAL_SECTION_LABELS[section]}
+                </label>)}
+              </div>
+            </div>
+            {transformError ? <p className="text-sm text-destructive">{transformError}</p> : null}
+          </div> : <div className="max-h-[62vh] space-y-3 overflow-y-auto pr-1">
+            {[...transformSections].map((section) => {
+              const before = profile[section];
+              const after = transformProposal[section];
+              const changed = JSON.stringify(before) !== JSON.stringify(after);
+              return <div key={section} className={`rounded-xl border p-3 ${changed ? "" : "opacity-60"}`}>
+                <label className="mb-3 flex items-center gap-2 font-medium">
+                  <input type="checkbox" disabled={!changed} checked={acceptedTransformSections.has(section)} onChange={(event) => setAcceptedTransformSections((current) => {
+                    const next = new Set(current); if (event.target.checked) next.add(section); else next.delete(section); return next;
+                  })} />
+                  {PROFESSIONAL_SECTION_LABELS[section]}{changed ? "" : " · unchanged"}
+                </label>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="min-w-0"><p className="mb-1 text-xs font-medium text-muted-foreground">Before</p><pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/40 p-2 text-xs">{typeof before === "string" || before == null ? String(before ?? "") : JSON.stringify(before, null, 2)}</pre></div>
+                  <div className="min-w-0"><p className="mb-1 text-xs font-medium text-muted-foreground">Proposed</p><pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/40 p-2 text-xs">{typeof after === "string" || after == null ? String(after ?? "") : JSON.stringify(after, null, 2)}</pre></div>
+                </div>
+              </div>;
+            })}
+          </div>}
+          <DialogFooter>
+            {transformProposal ? <>
+              <Button variant="outline" onClick={() => { setTransformProposal(null); setAcceptedTransformSections(new Set()); }}>Back</Button>
+              <Button disabled={!acceptedTransformSections.size} onClick={acceptProfileTransform}>Accept selected ({acceptedTransformSections.size})</Button>
+            </> : <Button disabled={transformRunning || !transformSections.size} onClick={() => void runProfileTransform()}>
+              {transformRunning ? <LoaderCircle className="animate-spin" /> : transformMode === "translation" ? <Languages /> : <WandSparkles />}
+              {transformRunning ? "Generating preview…" : "Preview changes"}
+            </Button>}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]">
         <div className="min-w-0 space-y-4">
@@ -1676,6 +2136,37 @@ export function ProfileBuilderWorkspace() {
                   <TextareaField label="Items" value={section.items.join("\n")} rows={4} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.additional_sections[index].items = nonEmptyLines(value); })} />
                 </div>
               ))}
+            </CardContent> : null}
+          </Card>
+
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Custom fields</CardTitle>
+              <CardDescription>Organization-defined profile metadata. Definitions and defaults are managed in Settings.</CardDescription>
+              <CardAction>{sectionToggle("custom_fields", "Custom fields")}</CardAction>
+            </CardHeader>
+            {sectionIsOpen("custom_fields") ? <CardContent className="grid gap-3 sm:grid-cols-2">
+              {profile.custom_fields.length ? profile.custom_fields.map((field, index) => (
+                <div key={field.id} className="space-y-1.5">
+                  <Label htmlFor={`profile-custom-${field.id}`}>{field.label}</Label>
+                  {field.kind === "boolean" ? <label className="flex h-9 items-center gap-2 rounded-lg border px-3 text-sm">
+                    <input id={`profile-custom-${field.id}`} type="checkbox" checked={field.value === true} onChange={(event) => mutate((draft) => { draft.custom_fields[index].value = event.target.checked; })} />
+                    {field.value === true ? "Yes" : "No"}
+                  </label> : field.kind === "select" ? <select id={`profile-custom-${field.id}`} value={typeof field.value === "string" ? field.value : ""} onChange={(event) => mutate((draft) => { draft.custom_fields[index].value = event.target.value || null; })} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm">
+                    <option value="">—</option>{field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                  </select> : <Input
+                    id={`profile-custom-${field.id}`}
+                    type={field.kind === "number" ? "number" : field.kind === "date" ? "date" : "text"}
+                    value={field.value == null ? "" : String(field.value)}
+                    onChange={(event) => mutate((draft) => {
+                      draft.custom_fields[index].value = field.kind === "number"
+                        ? (event.target.value === "" ? null : Number(event.target.value))
+                        : (event.target.value || null);
+                    })}
+                  />}
+                </div>
+              )) : <p className="text-sm text-muted-foreground sm:col-span-2">No organization custom fields are configured.</p>}
             </CardContent> : null}
           </Card>
         </div>
