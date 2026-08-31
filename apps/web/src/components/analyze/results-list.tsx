@@ -33,14 +33,17 @@ import { RecordAuthorityDetails, type RecordAuthorityDetailLabels } from "@/comp
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
-function FeedbackTargetGroup({analysisId,manifest,kinds}:{analysisId:string;manifest?:FeedbackManifest;kinds:string[]}){const targets=manifest?.targets.filter(target=>kinds.includes(target.kind))??[];if(!targets.length)return null;return <div className="flex flex-wrap justify-end gap-2" aria-label="Feedback controls">{targets.map(target=><FeedbackControl key={target.target_id} analysisId={analysisId} target={target}/>)}</div>}
-
-function FlagList({ flags, reportLanguage, analysisId, manifest }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl";analysisId:string;manifest?:FeedbackManifest }) {
+function FlagList({ flags, reportLanguage, analysisId, manifest, report }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl";analysisId:string;manifest?:FeedbackManifest;report:AnalysisReport }) {
   const { t } = useCopy();
   return (
     <div className="space-y-2">
       {flags.map((flag) => {
         const copy = presentReviewFlag(flag, reportLanguage);
+        const observation = report.deterministic.observations.find((item) => item.kind === flag.category);
+        const fact = report.deterministic.facts.find((item) => item.kind === flag.category);
+        const target = feedbackTarget(manifest, "review_finding", "finding", flag.id)
+          ?? (observation ? feedbackTarget(manifest, "structural_observation", "deterministic", observation.id) : null)
+          ?? (fact ? feedbackTarget(manifest, "structured_fact", "facts", fact.id) : null);
         return (
         <div key={flag.id} className="relative"><HoverDisclosure
           className="rounded-md border bg-muted/15 p-3 text-sm"
@@ -59,7 +62,7 @@ function FlagList({ flags, reportLanguage, analysisId, manifest }: { flags: Revi
               {t("evidence")}: „{flag.evidence[0].excerpt}”
             </p>
           ) : null}
-        </HoverDisclosure>{feedbackTarget(manifest,"review_finding","finding",flag.id)?<div className="absolute right-2 top-2"><FeedbackControl analysisId={analysisId} target={feedbackTarget(manifest,"review_finding","finding",flag.id)!}/></div>:null}</div>
+        </HoverDisclosure>{target?<div className="absolute right-2 top-2"><FeedbackControl analysisId={analysisId} target={target}/></div>:null}</div>
       );})}
     </div>
   );
@@ -152,9 +155,11 @@ function StructuredFacts({ report,manifest }: { report: Extract<AnalyzeItemResul
   const { settings, t } = useCopy();
   const aiContact = report.ai_analysis.facts.contact;
   const candidateName = aiContact.find((fact) => fact.kind === "candidate_name")?.value;
-  const phone = report.deterministic.candidates.find((candidate) => candidate.subject === "person" && candidate.kind === "phone")?.value
+  const phoneCandidate = report.deterministic.candidates.find((candidate) => candidate.subject === "person" && candidate.kind === "phone");
+  const phone = phoneCandidate?.value
     ?? aiContact.find((fact) => fact.kind === "phone")?.value;
-  const statedLocation = report.deterministic.candidates.find((candidate) => candidate.subject === "person" && candidate.kind === "explicit_location")?.value
+  const statedLocationCandidate = report.deterministic.candidates.find((candidate) => candidate.subject === "person" && candidate.kind === "explicit_location");
+  const statedLocation = statedLocationCandidate?.value
     ?? aiContact.find((fact) => fact.kind === "stated_location")?.value;
   const phoneCountry = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "phone_country")?.value;
   const claimedLocation = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "claimed_location");
@@ -163,10 +168,12 @@ function StructuredFacts({ report,manifest }: { report: Extract<AnalyzeItemResul
     : null;
   const postalCountryFact = report.deterministic.facts.find((fact) => fact.subject === "person" && fact.kind === "postal_country");
   const postalCandidateIds = new Set(postalCountryFact?.source_candidate_ids ?? []);
-  const postalCode = report.deterministic.candidates.find((candidate) => candidate.kind === "postal" && postalCandidateIds.has(candidate.id))?.value;
-  const euStatus = report.deterministic.observations.some((observation) => observation.kind === "combined_location_outside_eu")
+  const postalCandidate = report.deterministic.candidates.find((candidate) => candidate.kind === "postal" && postalCandidateIds.has(candidate.id));
+  const postalCode = postalCandidate?.value;
+  const euObservation = report.deterministic.observations.find((observation) => observation.kind === "combined_location_outside_eu" || observation.kind === "combined_location_inside_eu");
+  const euStatus = euObservation?.kind === "combined_location_outside_eu"
       ? t("outsideEu")
-    : report.deterministic.observations.some((observation) => observation.kind === "combined_location_inside_eu")
+    : euObservation?.kind === "combined_location_inside_eu"
       ? t("insideEu")
       : null;
   const selectedRecords = selectStructuredRecords(report);
@@ -205,6 +212,7 @@ function StructuredFacts({ report,manifest }: { report: Extract<AnalyzeItemResul
                   value={phone}
                   detail={phoneCountry ? displayCountry(phoneCountry, settings.uiLanguage) : null}
                   tone={contactTone}
+                  action={phoneCandidate && feedbackTarget(manifest,"structured_fact","candidates",phoneCandidate.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","candidates",phoneCandidate.id)!}/>:undefined}
                 /> : null}
               </div>
             </section> : null}
@@ -212,9 +220,9 @@ function StructuredFacts({ report,manifest }: { report: Extract<AnalyzeItemResul
             {hasLocation ? <section aria-labelledby="overview-location">
               <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
               <div className="space-y-1">
-                {statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={statedLocation} tone={locationTone} /> : null}
-                {resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={resolvedLocation} tone={locationTone} /> : null}
-                {postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={postalCode} tone={locationTone} /> : null}
+                {statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={statedLocation} tone={locationTone} action={statedLocationCandidate&&feedbackTarget(manifest,"structured_fact","candidates",statedLocationCandidate.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","candidates",statedLocationCandidate.id)!}/>:undefined} /> : null}
+                {resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={resolvedLocation} tone={locationTone} action={claimedLocation&&feedbackTarget(manifest,"structured_fact","facts",claimedLocation.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","facts",claimedLocation.id)!}/>:undefined} /> : null}
+                {postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={postalCode} tone={locationTone} action={postalCandidate&&feedbackTarget(manifest,"structured_fact","candidates",postalCandidate.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","candidates",postalCandidate.id)!}/>:undefined} /> : null}
                 {postalCountryFact ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(postalCountryFact.value, settings.uiLanguage)} tone={locationTone} /> : null}
                 {euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={euStatus} tone={locationTone} /> : null}
               </div>
@@ -403,7 +411,6 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   education={report.ai_analysis.facts.education}
                   understanding={report.document_understanding}
                 />
-                <FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["structural_observation"]}/>
 
                 {grouped.attention.length ? <HoverDisclosure
                   className="rounded-md border border-rose-500/30 p-3"
@@ -411,7 +418,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   title={`${t("needsAttention")} (${grouped.attention.length})`}
                   contentClassName="pt-3"
                 >
-                  <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
+                  <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} report={report} />
                 </HoverDisclosure> : null}
 
                 {grouped.worthKnowing.length ? <HoverDisclosure
@@ -420,7 +427,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   title={`${t("worthKnowing")} (${grouped.worthKnowing.length})`}
                   contentClassName="pt-3"
                 >
-                  <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
+                  <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} report={report} />
                 </HoverDisclosure> : null}
 
                 <StructuredFacts report={report} manifest={feedback[report.analysis_id]} />
@@ -430,17 +437,20 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel
                 report={report}
+                feedbackManifest={feedback[report.analysis_id]}
                 onResearchChange={(research) => updateCompletedResearch(report, { company_research: research })}
-              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["company_research_result"]}/>
+              /> : null}
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel
                 report={report}
+                feedbackManifest={feedback[report.analysis_id]}
                 onResearchChange={(research) => updateCompletedResearch(report, { education_research: research })}
-              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["education_research_result"]}/>
+              /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel
                 report={report}
+                feedbackManifest={feedback[report.analysis_id]}
                 onDiscoveryChange={(discovery) => updateCompletedResearch(report, { linkedin_discovery: discovery })}
-              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["linkedin_research_result"]}/>
+              /> : null}
 
               {grouped.remaining.length ? <HoverDisclosure
                 className="rounded-md border p-3"
@@ -448,7 +458,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 title={`${t("remaining")} (${grouped.remaining.length})`}
                 contentClassName="pt-3"
               >
-                <FlagList flags={grouped.remaining} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
+                <FlagList flags={grouped.remaining} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} report={report} />
               </HoverDisclosure> : null}
 
               <HoverDisclosure

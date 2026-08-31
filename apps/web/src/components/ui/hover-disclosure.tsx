@@ -118,7 +118,7 @@ export function HoverDisclosure({
       <Collapsible.Panel
         data-disclosure-panel
         className={cn(
-          "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none",
+          "h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-open:overflow-visible data-ending-style:h-0 data-ending-style:overflow-hidden data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:overflow-hidden data-starting-style:opacity-0 motion-reduce:transition-none",
           panelClassName,
         )}
       >
