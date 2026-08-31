@@ -1,13 +1,13 @@
 ## 1. Search URL policy
 
-- [ ] 1.1 Add a pure frontend Google Search query/URL builder with explicit company and education input helpers; verify the fixed HTTPS origin, field ordering, empty-value handling, and decoded `q` value in focused unit tests.
-- [ ] 1.2 Add regression cases for whitespace, Polish diacritics, ampersands, missing optional context, program-to-certificate fallback, and ineligible company values; verify the focused frontend test file passes.
+- [x] 1.1 Add a pure frontend Google Search query/URL builder with explicit company and education input helpers; verify the fixed HTTPS origin, field ordering, empty-value handling, and decoded `q` value in focused unit tests.
+- [x] 1.2 Add regression cases for whitespace, Polish diacritics, ampersands, missing optional context, program-to-certificate fallback, and ineligible company values; verify the focused frontend test file passes.
 
 ## 2. Shared search action
 
-- [ ] 2.1 Make the existing monochrome Google SVG reusable from a neutral shared component without duplicating the mark; verify the authentication component still type-checks with the shared export.
-- [ ] 2.2 Add localized English and Polish visible, tooltip, and subject-specific accessible copy; verify the translation key type accepts both locale dictionaries.
-- [ ] 2.3 Build compact icon-only and labeled outline variants using real new-tab anchors, keyboard-visible focus, `rel="noreferrer"`, tooltip support, and the shared Google SVG; verify component markup exposes the expected href, target, relationship, label, and accessible name.
+- [x] 2.1 Make the existing monochrome Google SVG reusable from a neutral shared component without duplicating the mark; verify the authentication component still type-checks with the shared export.
+- [x] 2.2 Add localized English and Polish visible, tooltip, and subject-specific accessible copy; verify the translation key type accepts both locale dictionaries.
+- [x] 2.3 Build compact icon-only and labeled outline variants using real new-tab anchors, keyboard-visible focus, `rel="noreferrer"`, tooltip support, and the shared Google SVG; verify component markup exposes the expected href, target, relationship, label, and accessible name.
 
 ## 3. Contextual placement
 
