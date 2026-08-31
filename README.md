@@ -31,7 +31,8 @@ make dev
 
 `make dev` is the canonical full-stack development command. It validates the
 environment and pinned GeoNames checksums, builds the services, waits for every
-required capability, and then verifies the public health endpoint.
+required capability, and then verifies the unauthenticated, non-sensitive
+readiness endpoint.
 
 ```bash
 make dev
@@ -59,6 +60,7 @@ docker compose --profile test run --rm test
 
 Optional environment variables (via shell or `.env`):
 
+- `WEB_HOST` — host interface for the web app (default `127.0.0.1`; production preflight requires loopback behind the TLS reverse proxy)
 - `WEB_PORT` — host port for the web app (default `3000`; set to `3001` in `.env` when needed)
 - `BASE_URL` / `BETTER_AUTH_URL` — external URL used by web auth callbacks
 - `BETTER_AUTH_SECRET` — random 32+ char secret for Better Auth
@@ -169,6 +171,10 @@ uvicorn cv_validator.api.app:app --reload
 - `POST /analyze/batch` — multiple CVs; per-file errors isolated
 - `POST /analyses/{analysis_id}/research/company` — bounded, synchronous company research for a stored analysis
 - `GET /health` — health check
+
+The web app keeps detailed `GET /api/health` output behind authentication. The
+deployment probe uses `GET /api/health/readiness`, which returns only ready or
+degraded status and is safe for the reverse proxy to expose.
 
 Completed reports may contain two optional sections:
 

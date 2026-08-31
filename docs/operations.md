@@ -47,8 +47,9 @@ make deploy
 ```
 
 The host reverse proxy terminates TLS and forwards only to the web port bound
-on `127.0.0.1`. The API remains private to Compose. Both commands fail without
-healthy database, GeoNames, Document AI, and research capabilities.
+on `127.0.0.1`. The API remains private to Compose. Both commands verify the
+non-sensitive `/api/health/readiness` endpoint and fail without healthy
+database, GeoNames, Document AI, and research capabilities.
 
 ## Backups and restore
 

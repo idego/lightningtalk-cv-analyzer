@@ -24,11 +24,12 @@ import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { FileDetailsDisclosure, LinkInspectionPanel } from "@/components/analyze/file-inspection";
-import { useCopy } from "@/lib/app-settings";
+import { type CopyKey, useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
 import { StructuralAuditPanel } from "@/components/analyze/structural-audit-panel";
-import { selectStructuredRecords } from "@/lib/understanding-selectors";
+import { selectStructuredRecords, type DisplayRecord } from "@/lib/understanding-selectors";
 import { educationOverviewDetail, employmentOverviewDetail } from "@/lib/overview-record-details";
+import { RecordAuthorityDetails, type RecordAuthorityDetailLabels } from "@/components/analyze/record-authority-details";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
   const { t } = useCopy();
@@ -121,6 +122,26 @@ function displayCountry(countryCode: string, language: "en" | "pl") {
   return name && name !== code ? `${name} (${code})` : code;
 }
 
+function recordDetailsLabels(
+  record: Pick<DisplayRecord, "authority" | "confidence">,
+  t: (key: CopyKey, values?: Record<string, string | number>) => string,
+): RecordAuthorityDetailLabels {
+  const confidenceKey: CopyKey = record.confidence === "high"
+    ? "confidenceHigh"
+    : record.confidence === "low"
+      ? "confidenceLow"
+      : "confidenceMedium";
+  return {
+    authority: t(record.authority === "code" ? "recordSourceCode" : "recordSourceAi"),
+    confidence: t("confidenceWithValue", { value: t(confidenceKey) }),
+    aiEnrichment: t("recordAiEnrichment"),
+    conflict: t("recordConflict"),
+    unknownFields: t("recordUnknownFields"),
+    codeValue: t("recordCodeValue"),
+    aiValue: t("recordAiValue"),
+  };
+}
+
 function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"] }) {
   const { settings, t } = useCopy();
   const aiContact = report.ai_analysis.facts.contact;
@@ -205,7 +226,11 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<GraduationCap className="size-4" />}
                 label={t("educationEntry")}
                 value={fact.institution ?? t("educationEntry")}
-                detail={educationOverviewDetail(fact)}
+                detail={<RecordAuthorityDetails
+                  record={fact}
+                  labels={recordDetailsLabels(fact, t)}
+                  leading={[educationOverviewDetail(fact)]}
+                />}
                 tone={educationTone}
               />)}
             </div>
@@ -222,7 +247,11 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
                 value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
-                detail={employmentOverviewDetail(fact)}
+                detail={<RecordAuthorityDetails
+                  record={fact}
+                  labels={recordDetailsLabels(fact, t)}
+                  leading={[employmentOverviewDetail(fact)]}
+                />}
                 tone={employmentTone}
               />)}
             </div>

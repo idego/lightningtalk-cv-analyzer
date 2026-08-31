@@ -36,6 +36,8 @@ if [ "$mode" = dev ]; then
 elif [ "$mode" = production ]; then
   [ -z "$(git status --porcelain)" ] || fail "production deploy requires a clean worktree"
   grep -Eq '^[[:space:]]*LOCAL_DEV_AUTH_BYPASS=false[[:space:]]*$' "$env_file" || fail "LOCAL_DEV_AUTH_BYPASS must be false"
+  grep -Eq '^[[:space:]]*WEB_HOST=127\.0\.0\.1[[:space:]]*$' "$env_file" || fail "WEB_HOST must be 127.0.0.1 behind the TLS reverse proxy"
+  [ "${WEB_HOST:-127.0.0.1}" = "127.0.0.1" ] || fail "exported WEB_HOST must not override the production loopback binding"
   has_key BASE_URL || fail "BASE_URL is required"
   has_key BETTER_AUTH_URL || fail "BETTER_AUTH_URL is required"
   has_key BETTER_AUTH_SECRET || fail "BETTER_AUTH_SECRET is required"
