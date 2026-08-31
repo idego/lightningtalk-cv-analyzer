@@ -87,26 +87,6 @@ The system SHALL use a page model as the canonical ingestion source and SHALL ke
 - **WHEN** the system prepares text for AI analysis
 - **THEN** it adds stable page separators without guessing headings, tables, columns, regions, or relationships
 
-### Requirement: Redact national IDs before downstream output
-The ingestion and deterministic boundaries SHALL distinguish a raw document from a redacted document. The system SHALL replace every detected national-ID span with a same-length mask before producing Markdown, an AI request, a report, a persistence input, or loggable data. The mask SHALL preserve page boundaries and source offsets. The system MUST NOT retain or emit the raw national-ID value, a hash of that value, or a partially revealed value.
-
-#### Scenario: National ID detected
-- **WHEN** deterministic redaction detects a national-ID span in a raw canonical page
-- **THEN** it creates a redacted document whose corresponding span has the same length and contains no source characters from the identifier
-- **AND** records only allowed presence, type, authority, evidence, and extractor-version metadata
-
-#### Scenario: Markdown prepared
-- **WHEN** the formatter receives a document after national-ID detection
-- **THEN** it accepts the redacted document type and cannot serialize the raw document type
-
-#### Scenario: Downstream output created
-- **WHEN** the system creates an AI input, report, persistence value, audit record, or log event
-- **THEN** no raw national-ID value is present
-
-#### Scenario: Persistent input fingerprint created
-- **WHEN** the system fingerprints an analyzed document for persistence
-- **THEN** it hashes the redacted canonical text rather than the raw file bytes or raw national-ID value
-
 ### Requirement: Preserve bounded file metadata
 PDF and DOCX ingestion SHALL extract only a versioned allowlist of standard document metadata needed by file-detail reporting. Raw custom properties, comments, revision content, and unrelated package metadata MUST NOT enter AI input, application logs, or unbounded report fields.
 
@@ -135,7 +115,7 @@ PDF and DOCX ingestion SHALL preserve actual embedded hyperlink targets and thei
 
 ### Requirement: Expose reusable source-mapped document blocks
 
-The canonical ingestion result SHALL expose a bounded, ordered block surface derived by the configured PDF or DOCX adapter for reuse by deterministic understanding. Each block SHALL identify its page, canonical line and offset associations where available, source order, block kind, table/list membership where available, and supported presentation metadata. The block surface SHALL extend the existing page model and MUST NOT change canonical redacted text, stable page and line identifiers, or national-ID masking behavior.
+The canonical ingestion result SHALL expose a bounded, ordered block surface derived by the configured PDF or DOCX adapter for reuse by deterministic understanding. Each block SHALL identify its page, canonical line and offset associations where available, source order, block kind, table/list membership where available, and supported presentation metadata. The block surface SHALL extend the existing page model and MUST NOT change canonical text or stable page and line identifiers.
 
 Ingestion SHALL parse the source file through its configured adapter once per analysis request. Downstream structural, link, and semantic projections MUST consume canonical pages, blocks, spans, and annotations rather than reopen or independently traverse the source package. Adapter extraction failure for optional presentation or block metadata SHALL produce partial coverage without discarding otherwise sufficient canonical text.
 

@@ -29,15 +29,11 @@ The system SHALL keep the existing synchronous batch endpoint. It SHALL enforce 
 - **THEN** the API rejects it with a clear limit message before starting analysis
 
 ### Requirement: Minimal-retention persistence with ruleset versioning
-The system SHALL persist the report findings, score, and the ruleset/weights version that produced them, and MUST store national IDs as presence/type only, never the raw value. Retention SHALL be governed by a configurable window.
+The system SHALL persist the report findings, score, and the ruleset/weights version that produced them. Retention SHALL be governed by a configurable window.
 
 #### Scenario: Report persisted with version
 - **WHEN** a report is produced
 - **THEN** the system stores the findings, score, and ruleset/weights version
-
-#### Scenario: National ID not retained
-- **WHEN** a report involving a detected national ID is persisted
-- **THEN** only presence/type is stored, never the raw value
 
 ### Requirement: Immutable audit trail
 The system SHALL record an immutable audit entry for every analysis containing the input hash, ruleset/weights version, and the output, sufficient to reproduce and defend the result.
@@ -62,13 +58,12 @@ The API SHALL preserve the existing deterministic JSON fields and SHALL add one 
 - **WHEN** the API reads a compatible report created before the additive deterministic section existed
 - **THEN** it does not require a breaking rewrite of the legacy top-level fields
 
-### Requirement: Redacted deterministic persistence identity
-The API persistence boundary SHALL identify a deterministic analysis with a hash of redacted canonical text. It MUST NOT pass raw file bytes or raw national-ID values into deterministic report persistence for fingerprinting.
+### Requirement: Deterministic persistence identity
+The API persistence boundary SHALL identify a deterministic analysis with a hash of canonical prepared text. It MUST NOT pass raw file bytes into deterministic report persistence for fingerprinting.
 
 #### Scenario: Deterministic report persisted
 - **WHEN** the API stores a completed deterministic report
-- **THEN** it stores the redacted canonical-text hash with the report and audit data
-- **AND** no raw national-ID value enters persistence
+- **THEN** it stores the canonical prepared-text hash with the report and audit data
 
 ### Requirement: Synchronous research actions
 The API SHALL let an authenticated user request company, education/certification, or LinkedIn research for a stored analysis. Each endpoint SHALL return the completed category result or a bounded error in the same request.

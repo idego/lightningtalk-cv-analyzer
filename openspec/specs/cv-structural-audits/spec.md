@@ -228,12 +228,6 @@ For PDF and DOCX inputs, the system SHALL inspect available format-level text pr
 - **WHEN** white text is rendered over a deterministically identified dark background
 - **THEN** the system does not report it as hidden or low visibility
 
-#### Scenario: Redacted national-ID span is the only hidden content
-
-- **WHEN** a hidden or low-visibility presentation span overlaps a mandatory national-ID redaction and contains no remaining alphanumeric characters
-- **THEN** the audit retains only safe presence/type, source-location, trigger, and bounded-count metadata for that span
-- **AND** the meaningful-content filter does not erase the fact that the redacted sensitive span was inspected
-
 #### Scenario: Inherited presentation value is unknown
 
 - **WHEN** a DOCX run inherits a color, size, or shading value that cannot be resolved safely from the supported styles
@@ -326,19 +320,13 @@ Structural audit observations SHALL be deterministic, evidence-first, and indepe
 
 ### Requirement: Bound structural audit evidence and protect sensitive content
 
-The system SHALL cap the number and size of structural observations per file, deduplicate repeated source spans and symmetric timeline pairs, and attach extractor/threshold versions to deterministic output. It MUST NOT persist or log raw text in the structural-audit result when that text was identified only as hidden or low-visibility. Structural-audit metadata MUST NOT be sent to AI or research as facts, instructions, or query subjects; the existing redacted CV-input contract remains unchanged. The audit MAY retain a bounded redacted marker, source location, trigger metadata, and counts needed for verification. National-ID redaction rules SHALL continue to apply before any structural audit data enters downstream output or persistence.
+The system SHALL cap the number and size of structural observations per file, deduplicate repeated source spans and symmetric timeline pairs, and attach extractor/threshold versions to deterministic output. It MUST NOT persist or log raw text in the structural-audit result when that text was identified only as hidden or low-visibility. Structural-audit metadata MUST NOT be sent to AI or research as facts, instructions, or query subjects; the existing redacted CV-input contract remains unchanged. The audit MAY retain a bounded redacted marker, source location, trigger metadata, and counts needed for verification.
 
 #### Scenario: Many repeated hidden spans exist
 
 - **WHEN** a file contains more hidden or low-visibility spans than the configured report limit
 - **THEN** the report returns a bounded aggregate with the number of additional spans
 - **AND** does not serialize every hidden span or its raw content
-
-#### Scenario: A hidden span contains a national ID
-
-- **WHEN** a hidden or low-visibility span includes a detected national-ID pattern
-- **THEN** the structural result contains only allowed presence/type metadata and safe location information
-- **AND** no raw identifier or partial identifier is emitted or persisted
 
 #### Scenario: Persistence sanitizes initial save and AI retry
 

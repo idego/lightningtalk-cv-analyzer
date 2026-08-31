@@ -31,7 +31,7 @@ Before code materializes candidates, structured fields, research subjects, or sc
 
 For a multi-field or multi-span record, every required identity/ownership field SHALL independently satisfy the admissible-evidence rule. A hidden label paired with a visible value MUST NOT establish the labelled ownership; the visible literal may remain an unowned candidate. When the same normalized literal appears once hidden and once visibly, only the visible evidence may support and be retained on the positive value. Deduplication and grouping MUST NOT merge excluded evidence back into an admitted value.
 
-Unknown, partial, or unmapped presentation associations MUST NOT cause visible canonical text to be removed. Mandatory national-ID redaction remains prior to visibility disclosure. The quarantine policy and thresholds SHALL be versioned and SHALL apply consistently to document understanding and existing deterministic candidate materialization.
+Unknown, partial, or unmapped presentation associations MUST NOT cause visible canonical text to be removed. The quarantine policy and thresholds SHALL be versioned and SHALL apply consistently to document understanding and existing deterministic candidate materialization.
 
 #### Scenario: Hidden phone is the only conflicting signal
 - **WHEN** a phone value exists only in an exact-mapped hidden or strongly low-visibility span
@@ -289,7 +289,7 @@ evidence excerpts <= 256 chars
 
 Truncation SHALL be dependency-aware. Sections and date ranges are retained first in stable source order. A record is retained only when its `section_id` and every listed `date_range_id` are retained; otherwise it is omitted and counted in `records.additional_count`. A timeline link is retained only when its record and referenced Structural Audit timeline entry are retained; a code research subject is retained only when its record and identity field are retained. Omitted dependent children increment their own collection's `additional_count`, set `truncated: true`, add the matching `OmittedPart`, and make overall and coverage status `partial`. Skills and ambiguous spans are independently retained by stable source order. All retained cross-references MUST resolve after truncation.
 
-Arrays SHALL use stable source order, then stable ID. Invalid enum, shape, nullability, uniqueness, bound, evidence, cross-reference, or national-ID defense-in-depth validation SHALL reject the understanding object without logging its contents and preserve the otherwise usable legacy report surfaces.
+Arrays SHALL use stable source order, then stable ID. Invalid enum, shape, nullability, uniqueness, bound, evidence, or cross-reference validation SHALL reject the understanding object without logging its contents and preserve the otherwise usable legacy report surfaces.
 
 #### Scenario: New report serializes understanding
 - **WHEN** document understanding completes for a supported CV
@@ -311,7 +311,7 @@ The document-understanding migration SHALL preserve existing readable reports an
 
 The frontend and research projections SHALL prefer code-owned structured records for new reports and SHALL fall back to retained validated AI facts for legacy reports; the first migration version MUST NOT delete legacy AI facts. The system SHALL disclose per-surface coverage as completed, partial, unavailable, or not applicable and MUST NOT interpret no result as proof that a section or entry is absent.
 
-The migration MUST preserve national-ID masking before understanding, AI, persistence, or logging. Committed evaluation fixtures MUST be synthetic or anonymous; private CVs and extracted HR text MUST remain ignored and untracked.
+Committed evaluation fixtures MUST be synthetic or anonymous; private CVs and extracted HR text MUST remain ignored and untracked.
 
 #### Scenario: Legacy report is reopened
 - **WHEN** a report predating document understanding is loaded

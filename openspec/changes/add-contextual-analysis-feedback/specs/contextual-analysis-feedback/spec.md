@@ -77,12 +77,12 @@ labels, prompts, model responses, research content, raw logs, exception text,
 stack traces, request/response bodies, browser state, secrets, or complete report
 payloads. It MAY store target references, closed classifications, sanitized
 comment, technical versions, timestamps, pseudonymous actors, and the closed
-failure envelope. Comments SHALL be normalized and detected national IDs,
-emails, phone numbers, and URLs SHALL be redacted or rejected without logging
+failure envelope. Comments SHALL be normalized and detected emails, phone
+numbers, and URLs SHALL be redacted or rejected without logging
 the rejected raw text.
 
-#### Scenario: Comment contains contact or ID data
-- **WHEN** a comment contains detected contact data, URL, or national ID
+#### Scenario: Comment contains contact data
+- **WHEN** a comment contains detected contact data or URL
 - **THEN** the system does not persist that value verbatim
 
 ### Requirement: Safe operation-failure feedback

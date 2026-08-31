@@ -126,13 +126,6 @@ The system SHALL extract versioned deterministic candidates, facts, and observat
 - **WHEN** the CV contains a right-to-work or visa statement
 - **THEN** the system may surface the exact statement for human review without treating it as location or eligibility proof and without scoring it
 
-### Requirement: Detect national ID without retaining its value
-The system SHALL detect the presence and type of a national-ID/tax number but MUST NOT capture or emit the raw value.
-
-#### Scenario: National ID present
-- **WHEN** a national-ID/tax-number pattern is detected
-- **THEN** the system records only `present: true` and the detected type, never the raw digits
-
 ### Requirement: Version and update the offline GeoNames index
 Each V1 GeoNames index SHALL have a manifest containing the source file names and URLs, snapshot date, SHA-256 of every input file and the built index, index schema version, filtering rules, and record counts. The project SHALL refresh the snapshot quarterly through a manually started, reviewed, and approved process. CV analysis MUST NOT download or update GeoNames data.
 
@@ -166,7 +159,7 @@ configuration flag and exposed as degraded by health status.
 The deterministic core SHALL represent mechanically detected source values as `Candidate`, validated code-owned values as `Fact`, unresolved or non-scoring outcomes as `Observation`, and weighted rule outputs as `ScoringSignal`. It SHALL return these values through one `DeterministicAnalysisResult`.
 
 #### Scenario: Candidate is detected but not validated
-- **WHEN** code recognizes a phone, email, URL, date, national-ID, postal, or location-shaped source value without enough evidence to validate the required interpretation
+- **WHEN** code recognizes a phone, email, URL, date, postal, or location-shaped source value without enough evidence to validate the required interpretation
 - **THEN** the value remains a candidate or observation and cannot enter scoring
 
 #### Scenario: Scoring input is created
@@ -177,7 +170,7 @@ The deterministic core SHALL represent mechanically detected source values as `C
 
 Deterministic candidate extraction SHALL consume the shared versioned visibility-exclusion index. Any evidence span intersecting an exact quarantined interval SHALL be inadmissible for candidate ownership, facts, observations that expose the source value, and scoring signals. A normalized literal with both hidden and independently visible evidence MAY remain supported only by its visible evidence. Partial or unmapped presentation evidence SHALL not remove canonical text but SHALL produce honest partial coverage.
 
-The exclusion policy SHALL apply to phone, location, postal, date, email, URL, right-to-work, national-ID presence disclosure, and any new structured candidate category before aggregation or deduplication. Mandatory national-ID redaction remains authoritative and excluded national-ID characters MUST NOT be exposed through quarantine diagnostics.
+The exclusion policy SHALL apply to phone, location, postal, date, email, URL, right-to-work, and any new structured candidate category before aggregation or deduplication.
 
 #### Scenario: Hidden phone and visible phone disagree
 - **WHEN** one valid person phone occurs only in an exact quarantined span and another occurs visibly

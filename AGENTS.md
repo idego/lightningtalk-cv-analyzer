@@ -53,13 +53,11 @@ These are product/legal boundaries, not implementation preferences:
    review is required.
 2. **No verification claims** — frame output as consistency analysis,
    not proof of location.
-3. **National ID redaction** — detect presence/type only; never store or
-   emit raw national-ID values.
-4. **Offline enrichment only** — no third-party API calls that expose
+3. **Offline enrichment only** — no third-party API calls that expose
    candidate PII (phone→country via libphonenumber, static TLD table).
-5. **Four bands:** green / amber / red / gray (insufficient evidence).
+4. **Four bands:** green / amber / red / gray (insufficient evidence).
    Sparse CVs must be gray, never silently green.
-6. **Deterministic scoring** — pure rules + config weights; no LLM in the
+5. **Deterministic scoring** — pure rules + config weights; no LLM in the
    verdict path.
 
 Weights and band thresholds: `apps/api/weights.yaml`. Tune via config, not
