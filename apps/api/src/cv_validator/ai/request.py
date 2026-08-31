@@ -11,10 +11,10 @@ from cv_validator.domain import DeterministicAnalysisResult
 from cv_validator.ingestion import RedactedDocument, SourcePage
 
 
-PROMPT_VERSION = "2709"
+PROMPT_VERSION = "2710"
 SCHEMA_VERSION = "document-analysis-schema-v9"
 LEGACY_SCHEMA_VERSION = "document-analysis-schema-v7"
-INPUT_CONTRACT_VERSION = "document-analysis-input-v3"
+INPUT_CONTRACT_VERSION = "document-analysis-input-v4"
 DETERMINISTIC_OBSERVATIONS_VERSION = "deterministic-observations-v1"
 
 
@@ -152,12 +152,27 @@ def _bounded_understanding_context(value: dict[str, Any] | None) -> dict[str, An
         return {"status": "unavailable"}
     sections = [{key: item.get(key) for key in ("id", "kind", "confidence")} for item in value.get("sections", [])[:32] if isinstance(item, dict)]
     records = []
+    missing_fields = []
     for item in value.get("records", [])[:100]:
         if not isinstance(item, dict): continue
         fields = [{key: field.get(key) for key in ("name", "status", "value", "authority", "confidence")} for field in item.get("fields", [])[:8] if isinstance(field, dict)]
         records.append({"id": item.get("id"), "kind": item.get("kind"), "section_id": item.get("section_id"), "fields": fields})
+        missing_fields.extend(
+            {"record_id": item.get("id"), "kind": item.get("kind"), "field": field.get("name"), "status": field.get("status")}
+            for field in fields
+            if field.get("status") != "supported" or field.get("value") is None
+        )
     ambiguous = [{"id": item.get("id"), "category": item.get("category"), "reason_code": item.get("reason_code")} for item in value.get("ambiguous_spans", [])[:100] if isinstance(item, dict)]
-    return {"status": value.get("status"), "sections": sections, "records": records, "ambiguous_spans": ambiguous}
+    return {
+        "status": value.get("status"),
+        "review_mode": "independent_full_document_second_pass",
+        "authority": "code_owned_fields_are_immutable",
+        "priorities": ["unknown_fields", "ambiguous_spans", "missing_records", "code_ai_conflicts"],
+        "sections": sections,
+        "records": records,
+        "missing_fields": missing_fields[:200],
+        "ambiguous_spans": ambiguous,
+    }
 
 
 def load_document_analysis_schema() -> dict[str, Any]:

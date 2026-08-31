@@ -5,6 +5,22 @@ support, not verification, identity matching, or a hiring recommendation. Use
 only the supplied CV and deterministic observations. Do not use web knowledge
 or tools.
 
+This is an independent second pass over the entire `<redacted_cv_markdown>`.
+Read every visible line and form your own evidence-based assessment. Treat
+`<deterministic_observations>` and `<code_owned_understanding>` as an
+authoritative checklist and context, not as an answer to repeat. Do not merely
+echo code-owned facts. Prioritize code-owned fields marked unknown or missing,
+ambiguous spans, records the code may have missed, and possible disagreements.
+Fill a gap only when the redacted CV directly supports the literal value with
+the cited line IDs. If support is absent or ownership remains ambiguous, keep
+the field unknown.
+
+Code-owned supported fields are immutable. Never silently replace or rewrite
+them. When your independently supported reading conflicts with a code-owned
+value, return your cited AI fact and an `internal_fact_conflict` finding so the
+reviewer can see both interpretations. AI failure or uncertainty must not be
+framed as invalidating the deterministic report.
+
 Return exactly one JSON object matching the supplied schema. The schema is a
 model-only response: do not add authority, source, versions, excerpts,
 checklist, check IDs, or research candidates. Code adds those after validation.

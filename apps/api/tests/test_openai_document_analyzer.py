@@ -111,6 +111,44 @@ def test_responses_analyzer_sends_the_exact_independent_production_payload() -> 
     assert result.refused is False
 
 
+def test_request_frames_luna_as_an_independent_gap_first_second_pass() -> None:
+    document = redact_national_ids(
+        RawDocument(
+            pages=(SourcePage("page-0001", 1, "Experience\nExample Labs\nEngineer"),),
+            source_format="text",
+        )
+    )
+    request = build_document_analysis_request(
+        AISettings(enabled=True, api_key="test-key"),
+        document,
+        analyze_deterministically(document, "1.0.0"),
+        understanding_context={
+            "status": "completed",
+            "sections": [{"id": "section-1", "kind": "employment", "confidence": "high"}],
+            "records": [{
+                "id": "record-1", "kind": "employment", "section_id": "section-1",
+                "fields": [
+                    {"name": "organization", "status": "supported", "value": "Example Labs", "authority": "code", "confidence": "high"},
+                    {"name": "role", "status": "unknown", "value": None, "authority": "code", "confidence": "low"},
+                ],
+            }],
+            "ambiguous_spans": [{"id": "ambiguous-1", "category": "entry", "reason_code": "unsupported_employment_identity"}],
+        },
+    )
+    payload = request.to_openai_payload()
+    instructions = payload["instructions"]
+    input_text = payload["input"][0]["content"][0]["text"]
+    assert "independent second pass" in instructions
+    assert "Do not merely\necho code-owned facts" in instructions
+    assert "Code-owned supported fields are immutable" in instructions
+    assert "internal_fact_conflict" in instructions
+    assert '"review_mode": "independent_full_document_second_pass"' in input_text
+    assert '"field": "role"' in input_text
+    assert '"status": "unknown"' in input_text
+    assert '"reason_code": "unsupported_employment_identity"' in input_text
+    assert "<redacted_cv_markdown>" in input_text
+
+
 def test_responses_analyzer_maps_timeout_and_refusal_without_payload_text() -> None:
     settings, request = _request()
     timeout = OpenAIResponsesDocumentAnalyzer(
