@@ -124,6 +124,8 @@ function CompanyResult({ organization }: { organization: Organization }) {
     <HoverDisclosure
       className="rounded-md border bg-muted/20 p-3 text-sm"
       allowHover
+      headerClassName="flex-wrap sm:flex-nowrap"
+      actionClassName="w-full sm:w-auto"
       title={
         <div className="min-w-0">
           <strong className="block truncate">{organization.query_subject}</strong>
@@ -131,7 +133,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
         </div>
       }
       action={
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
           {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} variant="labeled" /> : null}
         </div>

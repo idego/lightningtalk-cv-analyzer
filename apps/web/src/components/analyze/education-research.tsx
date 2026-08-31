@@ -41,8 +41,10 @@ function EducationResult({ credential }: { credential: Credential }) {
   return <HoverDisclosure
     className="rounded-md border bg-muted/20 p-3 text-sm"
     allowHover
+    headerClassName="flex-wrap sm:flex-nowrap"
+    actionClassName="w-full sm:w-auto"
     title={<div className="flex min-w-0 flex-wrap items-center gap-2"><strong>{credential.institution}</strong><Badge variant="outline">{t(institutionStatusKey(credential.institution_exists))}</Badge><Badge variant="outline">{t(accreditationStatusKey(credential.accreditation_status))}</Badge></div>}
-    action={<div className="flex flex-wrap items-center justify-end gap-2"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref && credential.institution ? <GoogleSearchAction href={searchHref} subject={credential.institution} variant="labeled" /> : null}</div>}
+    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref && credential.institution ? <GoogleSearchAction href={searchHref} subject={credential.institution} variant="labeled" /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
     <p className="text-muted-foreground">{[credential.program, credential.degree, credential.certificate, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ") || t("notEnoughPublicInformation")}</p>

@@ -17,7 +17,7 @@
 
 ## 4. Integrated verification
 
-- [ ] 4.1 Run the frontend unit-test suite and TypeScript check; verify all existing and new tests pass without backend changes.
-- [ ] 4.2 Run the production frontend build and verify the sign-in UI, CV overview, Company Research, and Education Research compile with the shared SVG and action component.
-- [ ] 4.3 Verify the completed UI at desktop and narrow viewport widths: compact actions remain unobtrusive, labeled actions wrap without overlap, keyboard focus is visible, tooltips/accessibility names identify the subject, and activation opens the correctly decoded Google query in a new tab while preserving the analysis.
-- [ ] 4.4 Run `openspec validate add-contextual-google-search-actions --strict` and `git diff --check`; verify the change remains frontend-only and unrelated working-tree edits are preserved.
+- [x] 4.1 Run the frontend unit-test suite and TypeScript check; verify all existing and new tests pass without backend changes.
+- [x] 4.2 Run the production frontend build and verify the sign-in UI, CV overview, Company Research, and Education Research compile with the shared SVG and action component.
+- [x] 4.3 Verify the completed UI at desktop and narrow viewport widths: compact actions remain unobtrusive, labeled actions wrap without overlap, keyboard focus is visible, tooltips/accessibility names identify the subject, and activation opens the correctly decoded Google query in a new tab while preserving the analysis.
+- [x] 4.4 Run `openspec validate add-contextual-google-search-actions --strict` and `git diff --check`; verify the change remains frontend-only and unrelated working-tree edits are preserved.

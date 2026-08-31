@@ -12,6 +12,8 @@ type HoverDisclosureProps = {
   action?: ReactNode;
   className?: string;
   triggerClassName?: string;
+  headerClassName?: string;
+  actionClassName?: string;
   panelClassName?: string;
   contentClassName?: string;
   defaultOpen?: boolean;
@@ -25,6 +27,8 @@ export function HoverDisclosure({
   action,
   className,
   triggerClassName,
+  headerClassName,
+  actionClassName,
   panelClassName,
   contentClassName,
   defaultOpen = false,
@@ -68,11 +72,11 @@ export function HoverDisclosure({
   if (!collapsible) {
     return (
       <div className={className}>
-        <div className="flex items-center gap-3">
+        <div className={cn("flex items-center gap-3", headerClassName)}>
           <div className={cn("flex min-w-0 flex-1 items-center gap-3 text-left", triggerClassName)}>
             <span className="min-w-0 flex-1">{title}</span>
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {action ? <div className={cn("shrink-0", actionClassName)}>{action}</div> : null}
         </div>
       </div>
     );
@@ -87,7 +91,7 @@ export function HoverDisclosure({
       onPointerLeave={() => setHoverOpen(false)}
       className={cn("group/disclosure", !open && "cursor-pointer", className)}
     >
-      <div className="flex items-center gap-3">
+      <div className={cn("flex items-center gap-3", headerClassName)}>
         <Collapsible.Trigger
           data-disclosure-trigger
           onClick={(event) => {
@@ -113,7 +117,7 @@ export function HoverDisclosure({
             )}
           />
         </Collapsible.Trigger>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {action ? <div className={cn("shrink-0", actionClassName)}>{action}</div> : null}
       </div>
       <Collapsible.Panel
         data-disclosure-panel
