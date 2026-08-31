@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { announcedAutoResearchKinds, getAutoResearchOrchestrator, type AutoResearchKind } from "@/lib/auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { enrichThenScheduleResearch } from "@/lib/analysis-flow";
 
 const ACCEPT = ".pdf,.docx";
@@ -22,20 +22,12 @@ function formatElapsed(seconds: number) {
   return `${minutes}:${remainder}`;
 }
 
-const researchLabelKeys = { company: "companyResearch", education: "educationResearch", linkedin: "linkedinDiscovery" } as const;
-function ResearchNotice({ kinds }: { kinds: AutoResearchKind[] }) {
-  const { t } = useCopy();
-  if (!kinds.length) return null;
-  return <p className="text-xs text-muted-foreground">{t("autoResearch", { kinds: kinds.map((kind) => t(researchLabelKeys[kind])).join(", ") })}</p>;
-}
-
-function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, researchKinds, complete }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; researchKinds: AutoResearchKind[]; complete: boolean }) {
+function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, complete }: { files: File[]; completed: AnalyzedFile[]; currentIndex: number; elapsedSeconds: number; complete: boolean }) {
   const { t } = useCopy();
   const completedByName = new Map(completed.map((entry) => [entry.file?.name ?? entry.result.filename, entry.result]));
   const estimatedRemaining = files.length * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="analysis-flow-enter mx-auto max-w-3xl"><CardContent className="py-8">
     <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total: files.length })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current: currentIndex + 1, total: files.length })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("reportReady") : files[currentIndex]?.name}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div> : null}</div>
-    {researchKinds.length ? <div className="mt-5 rounded-md bg-muted/30 p-3"><ResearchNotice kinds={researchKinds} /></div> : null}
     <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? t("completed") : t("failed")) : active ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
   </CardContent></Card>;
 }
@@ -52,10 +44,6 @@ export function UploadPanel() {
 
   useEffect(() => { if (!loading) return; const startedAt = Date.now(); const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000); return () => window.clearInterval(timer); }, [loading]);
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
-  const researchKinds = announcedAutoResearchKinds(
-    entries.flatMap((entry) => entry.result.status === "ok" ? [entry.result.report] : []),
-    settings,
-  );
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
@@ -128,11 +116,10 @@ export function UploadPanel() {
     <Collapsible.Root open={completionPhase !== "collapsing"}>
       <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
         <div className="p-px">
-          <AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} researchKinds={researchKinds} complete={completionPhase === "complete"} />
+          <AnalysisProgress files={acceptedFiles} completed={entries} currentIndex={currentIndex} elapsedSeconds={elapsedSeconds} complete={completionPhase === "complete"} />
         </div>
       </Collapsible.Panel>
     </Collapsible.Root>
-    {entries.length ? <div className="analysis-results-enter"><AnalysisWorkspace entries={entries} compact /></div> : null}
   </div>;
   if (entries.length) return <AnalysisWorkspace
     entries={entries}
@@ -144,7 +131,6 @@ export function UploadPanel() {
     <Card>
       <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <ResearchNotice kinds={researchKinds} />
         <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-6 text-center" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}>
           <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
