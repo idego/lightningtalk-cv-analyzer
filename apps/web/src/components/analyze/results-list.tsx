@@ -30,16 +30,19 @@ import { StructuralAuditPanel } from "@/components/analyze/structural-audit-pane
 import { selectStructuredRecords, type DisplayRecord } from "@/lib/understanding-selectors";
 import { educationOverviewDetail, employmentOverviewDetail } from "@/lib/overview-record-details";
 import { RecordAuthorityDetails, type RecordAuthorityDetailLabels } from "@/components/analyze/record-authority-details";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
-function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
+function FeedbackTargetGroup({analysisId,manifest,kinds}:{analysisId:string;manifest?:FeedbackManifest;kinds:string[]}){const targets=manifest?.targets.filter(target=>kinds.includes(target.kind))??[];if(!targets.length)return null;return <div className="flex flex-wrap justify-end gap-2" aria-label="Feedback controls">{targets.map(target=><FeedbackControl key={target.target_id} analysisId={analysisId} target={target}/>)}</div>}
+
+function FlagList({ flags, reportLanguage, analysisId, manifest }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl";analysisId:string;manifest?:FeedbackManifest }) {
   const { t } = useCopy();
   return (
     <div className="space-y-2">
       {flags.map((flag) => {
         const copy = presentReviewFlag(flag, reportLanguage);
         return (
-        <HoverDisclosure
-          key={flag.id}
+        <div key={flag.id} className="relative"><HoverDisclosure
           className="rounded-md border bg-muted/15 p-3 text-sm"
           allowHover
           title={
@@ -56,7 +59,7 @@ function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLangua
               {t("evidence")}: „{flag.evidence[0].excerpt}”
             </p>
           ) : null}
-        </HoverDisclosure>
+        </HoverDisclosure>{feedbackTarget(manifest,"review_finding","finding",flag.id)?<div className="absolute right-2 top-2"><FeedbackControl analysisId={analysisId} target={feedbackTarget(manifest,"review_finding","finding",flag.id)!}/></div>:null}</div>
       );})}
     </div>
   );
@@ -98,20 +101,23 @@ function OverviewRow({
   value,
   detail,
   tone,
+  action,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   detail?: ReactNode;
   tone: string;
+  action?:ReactNode;
 }) {
   return (
     <div className="flex min-w-0 items-start gap-3 py-1.5">
       <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
-      <div className="min-w-0 pt-0.5">
+      <div className="min-w-0 flex-1 pt-0.5">
         <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>
         {detail ? <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{detail}</p> : null}
       </div>
+      {action}
     </div>
   );
 }
@@ -142,7 +148,7 @@ function recordDetailsLabels(
   };
 }
 
-function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"] }) {
+function StructuredFacts({ report,manifest }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"];manifest?:FeedbackManifest }) {
   const { settings, t } = useCopy();
   const aiContact = report.ai_analysis.facts.contact;
   const candidateName = aiContact.find((fact) => fact.kind === "candidate_name")?.value;
@@ -232,6 +238,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                   leading={[educationOverviewDetail(fact)]}
                 />}
                 tone={educationTone}
+                action={feedbackTarget(manifest,"structured_fact","records",fact.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","records",fact.id)!}/>:undefined}
               />)}
             </div>
           </section> : null}
@@ -253,6 +260,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                   leading={[employmentOverviewDetail(fact)]}
                 />}
                 tone={employmentTone}
+                action={feedbackTarget(manifest,"structured_fact","records",fact.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","records",fact.id)!}/>:undefined}
               />)}
             </div>
           </section> : null}
@@ -266,6 +274,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 label={t("explicitSkill")}
                 value={skill.display_label}
                 tone={skillsTone}
+                action={feedbackTarget(manifest,"structured_fact","skills",skill.id)?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(manifest,"structured_fact","skills",skill.id)!}/>:undefined}
               />)}
             </div>
           </section> : null}
@@ -285,6 +294,11 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
   const [reportOverrides, setReportOverrides] = useState<Record<string, Extract<AnalyzeItemResult, { status: "ok" }>["report"]>>({});
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<Record<string, string>>({});
+  const [feedback, setFeedback] = useState<Record<string, FeedbackManifest>>({});
+  const feedbackLoads=useRef(new Set<string>());
+  const reportIds = items.filter((item): item is Extract<AnalyzeItemResult,{status:"ok"}>=>item.status==="ok").map(item=>item.report.analysis_id).join(",");
+
+  useEffect(()=>{let cancelled=false;for(const analysisId of reportIds.split(",").filter(Boolean)){if(feedbackLoads.current.has(analysisId))continue;feedbackLoads.current.add(analysisId);fetch(`/api/analyses/${encodeURIComponent(analysisId)}/feedback`,{cache:"no-store"}).then(async response=>response.ok?response.json():null).then(manifest=>{if(!cancelled&&manifest)setFeedback(previous=>({...previous,[analysisId]:manifest}))}).catch(()=>feedbackLoads.current.delete(analysisId))}return()=>{cancelled=true}},[reportIds]);
 
   function updateCompletedResearch(
     report: AnalysisReport,
@@ -377,7 +391,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
               >
                 {statusMessage ? (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2">{report.ai_analysis.status === "pending" ? <ThinkingOrb state="working" size={20} theme="auto" aria-label={t("aiAnalysisInProgress")} /> : null}{statusMessage}</span>{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? t("retryingAi") : t("retryAi")}</Button> : null}</div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2">{report.ai_analysis.status === "pending" ? <ThinkingOrb state="working" size={20} theme="auto" aria-label={t("aiAnalysisInProgress")} /> : null}{statusMessage}</span><span className="flex items-center gap-2">{report.ai_analysis.status === "failed"&&feedbackTarget(feedback[report.analysis_id],"operation_failure","ai_analysis","failure")?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id],"operation_failure","ai_analysis","failure")!} failure/>:null}{report.ai_analysis.status === "failed" && report.ai_analysis.manual_retry_available ? <Button variant="outline" size="sm" disabled={retryingId === report.analysis_id} onClick={() => retryAi(report)}>{retryingId === report.analysis_id ? t("retryingAi") : t("retryAi")}</Button> : null}</span></div>
                     {retryError[report.analysis_id] ? <p className="mt-2 text-xs text-destructive">{retryError[report.analysis_id]}</p> : null}
                   </div>
                 ) : null}
@@ -389,6 +403,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   education={report.ai_analysis.facts.education}
                   understanding={report.document_understanding}
                 />
+                <FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["structural_observation"]}/>
 
                 {grouped.attention.length ? <HoverDisclosure
                   className="rounded-md border border-rose-500/30 p-3"
@@ -396,7 +411,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   title={`${t("needsAttention")} (${grouped.attention.length})`}
                   contentClassName="pt-3"
                 >
-                  <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} />
+                  <FlagList flags={grouped.attention} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
                 </HoverDisclosure> : null}
 
                 {grouped.worthKnowing.length ? <HoverDisclosure
@@ -405,27 +420,27 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                   title={`${t("worthKnowing")} (${grouped.worthKnowing.length})`}
                   contentClassName="pt-3"
                 >
-                  <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} />
+                  <FlagList flags={grouped.worthKnowing} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
                 </HoverDisclosure> : null}
 
-                <StructuredFacts report={report} />
-                <FileDetailsDisclosure details={report.file_details} />
-                <LinkInspectionPanel inspection={report.link_inspection} />
+                <StructuredFacts report={report} manifest={feedback[report.analysis_id]} />
+                <FileDetailsDisclosure details={report.file_details} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
+                <LinkInspectionPanel inspection={report.link_inspection} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
               </div>
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel
                 report={report}
                 onResearchChange={(research) => updateCompletedResearch(report, { company_research: research })}
-              /> : null}
+              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["company_research_result"]}/>
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel
                 report={report}
                 onResearchChange={(research) => updateCompletedResearch(report, { education_research: research })}
-              /> : null}
+              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["education_research_result"]}/>
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel
                 report={report}
                 onDiscoveryChange={(discovery) => updateCompletedResearch(report, { linkedin_discovery: discovery })}
-              /> : null}
+              /> : null}<FeedbackTargetGroup analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} kinds={["linkedin_research_result"]}/>
 
               {grouped.remaining.length ? <HoverDisclosure
                 className="rounded-md border p-3"
@@ -433,7 +448,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 title={`${t("remaining")} (${grouped.remaining.length})`}
                 contentClassName="pt-3"
               >
-                <FlagList flags={grouped.remaining} reportLanguage={report.ai_analysis.report_language} />
+                <FlagList flags={grouped.remaining} reportLanguage={report.ai_analysis.report_language} analysisId={report.analysis_id} manifest={feedback[report.analysis_id]} />
               </HoverDisclosure> : null}
 
               <HoverDisclosure
@@ -452,7 +467,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 </ul>
               </HoverDisclosure>
 
-              <p className="text-xs text-muted-foreground">{report.disclaimer}</p>
+              <div className="flex items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{report.disclaimer}</p>{feedbackTarget(feedback[report.analysis_id],"report_overall","report","overall")?<FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id],"report_overall","report","overall")!}/>:null}</div>
             </CardContent>
           </Card>
         );

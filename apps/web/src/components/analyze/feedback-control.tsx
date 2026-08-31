@@ -1,0 +1,28 @@
+"use client";
+import { useEffect,useId,useRef,useState } from "react";
+import { Check,MessageCircle,Send,ThumbsDown,ThumbsUp,X } from "lucide-react";
+import type { FeedbackReason,FeedbackResponse,FeedbackTarget } from "@/lib/feedback-types";
+
+const reasons:FeedbackReason[]=["inaccurate","missing_context","misleading_importance","duplicate","unclear","stale_research","wrong_source","other"];
+export function FeedbackControl({analysisId,target,failure=false}:{analysisId:string;target:FeedbackTarget;failure?:boolean}){
+ const [open,setOpen]=useState(false),[rating,setRating]=useState<"helpful"|"not_helpful"|null>(target.response?.rating??null),[reason,setReason]=useState<FeedbackReason|null>(failure?"operation_failed":target.response?.reason??null),[comment,setComment]=useState(target.response?.comment??""),[confirmed,setConfirmed]=useState<FeedbackResponse|null>(target.response),[state,setState]=useState<"idle"|"sending"|"sent"|"error">("idle");
+ const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),textarea=useRef<HTMLTextAreaElement>(null);const hint=useId();
+ const draftKey=`cv-feedback-draft:${analysisId}:${target.target_id}`;
+ useEffect(()=>{const draft=sessionStorage.getItem(draftKey);if(!draft||target.response?.comment)return;const timer=window.setTimeout(()=>setComment(draft),0);return()=>window.clearTimeout(timer)},[draftKey,target.response?.comment]);
+ useEffect(()=>{if(comment)sessionStorage.setItem(draftKey,comment);else sessionStorage.removeItem(draftKey)},[comment,draftKey]);
+ useEffect(()=>{if(!open)return;const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))close()};const key=(event:KeyboardEvent)=>{if(event.key==="Escape")close()};document.addEventListener("pointerdown",outside);document.addEventListener("keydown",key);return()=>{document.removeEventListener("pointerdown",outside);document.removeEventListener("keydown",key)}},[open]);
+ function close(){setOpen(false);requestAnimationFrame(()=>trigger.current?.focus())}
+ const valid=failure||((comment.trim().length>=12&&comment.trim().length<=180)||(rating==="not_helpful"&&reason!==null));
+ async function send(){if(!valid)return;setState("sending");const body=failure?{rating:"not_helpful",reason:"operation_failed",comment:comment.trim()||null}:{rating,reason,comment:comment.trim()||null};try{const response=await fetch(`/api/analyses/${encodeURIComponent(analysisId)}/feedback/${encodeURIComponent(target.target_id)}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!response.ok)throw new Error();const saved=await response.json();setConfirmed(saved);sessionStorage.removeItem(draftKey);setState("sent");setTimeout(()=>{setState("idle");setOpen(false)},900)}catch{setState("error")}}
+ function select(next:"helpful"|"not_helpful"){setRating(next);if(next==="helpful")setReason(null)}
+ return <div ref={root} className="relative inline-flex min-h-11 items-center justify-end" data-feedback-target={target.target_id}>
+  {!open?<button ref={trigger} type="button" onClick={()=>setOpen(true)} className="flex size-11 items-center justify-center rounded-full border bg-background text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2" aria-label={failure?"Zgłoś problem":"Przekaż opinię"}>{confirmed?<Check className="size-4"/>:<MessageCircle className="size-4"/>}</button>:
+  <div className="flex max-w-full items-start gap-2 rounded-2xl border bg-background p-2 shadow-sm motion-reduce:transition-none">
+   <button ref={trigger} type="button" onClick={close} className="flex size-11 shrink-0 items-center justify-center rounded-full border" aria-label="Zamknij"><X className="size-4"/></button>
+   {!failure?<><button type="button" onClick={()=>select("helpful")} aria-pressed={rating==="helpful"} className="flex size-11 shrink-0 items-center justify-center rounded-full border aria-pressed:bg-emerald-500/15"><ThumbsUp className="size-4"/></button><button type="button" onClick={()=>select("not_helpful")} aria-pressed={rating==="not_helpful"} className="flex size-11 shrink-0 items-center justify-center rounded-full border aria-pressed:bg-rose-500/15"><ThumbsDown className="size-4"/></button></>:null}
+   <div className="min-w-44 max-w-sm flex-1"><textarea ref={textarea} rows={1} maxLength={180} value={comment} onChange={e=>{setComment(e.target.value);e.target.style.height="auto";e.target.style.height=`${e.target.scrollHeight}px`}} onKeyDown={e=>{if(e.key==="Enter")e.preventDefault()}} aria-describedby={hint} placeholder={failure?"Opcjonalny krótki komentarz":"Napisz 12–180 znaków"} className="min-h-11 w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm"/><div id={hint} className="flex justify-between text-[11px] text-muted-foreground"><span>Nie wpisuj danych kandydata.</span><span>{180-comment.length}</span></div>
+   {rating==="not_helpful"&&!failure?<div className="mt-2 flex flex-wrap gap-1">{reasons.map(item=><button type="button" key={item} onClick={()=>setReason(item)} aria-pressed={reason===item} className="rounded-full border px-2 py-1 text-[11px] aria-pressed:bg-muted">{item.replaceAll("_"," ")}</button>)}</div>:null}{state==="error"?<p className="text-xs text-destructive">Nie udało się zapisać. Szkic pozostał.</p>:null}</div>
+   <button type="button" disabled={!valid||state==="sending"} onClick={send} className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-40" aria-label="Wyślij">{state==="sent"?<Check className="size-4"/>:<Send className="size-4"/>}</button><span className="sr-only" aria-live="polite">{state==="sent"?"Wysłano!":""}</span>
+  </div>}
+ </div>
+}

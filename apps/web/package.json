@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/lib/*.test.mjs"
+    ,"feedback:bootstrap-owner": "node scripts/bootstrap-feedback-owner.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

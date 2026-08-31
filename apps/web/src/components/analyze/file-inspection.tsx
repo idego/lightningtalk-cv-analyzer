@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { CheckCircle2, FileText, ShieldAlert } from "lucide-react";
 import type {
   FileDetail,
@@ -12,6 +14,8 @@ import type {
 import { Badge } from "@/components/ui/badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy, type CopyKey } from "@/lib/app-settings";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget,type FeedbackManifest } from "@/lib/feedback-types";
 
 const FILE_DETAIL_ORDER: FileDetailField[] = [
   "author",
@@ -41,7 +45,7 @@ const FILE_DETAIL_LABELS: Record<FileDetailField, CopyKey> = {
   revision: "revision",
 };
 
-export function FileDetailsDisclosure({ details }: { details?: FileDetails | null }) {
+export function FileDetailsDisclosure({ details,analysisId,manifest }: { details?: FileDetails | null;analysisId?:string;manifest?:FeedbackManifest }) {
   const { t } = useCopy();
   if (!details) return null;
 
@@ -62,11 +66,12 @@ export function FileDetailsDisclosure({ details }: { details?: FileDetails | nul
         {FILE_DETAIL_ORDER.map((field) => {
           const detail = details.fields[field];
           return (
-            <div key={field} className="min-w-0">
+            <div key={field} className="relative min-w-0 pr-12">
               <dt className="text-xs font-semibold text-muted-foreground">{t(FILE_DETAIL_LABELS[field])}</dt>
               <dd className="mt-0.5 break-words leading-relaxed">
                 {detail ? <FileDetailValue detail={detail} /> : <UnavailableValue />}
               </dd>
+              {analysisId&&feedbackTarget(manifest,"file_detail","file_detail",field)?<div className="absolute right-0 top-0"><FeedbackControl analysisId={analysisId} target={feedbackTarget(manifest,"file_detail","file_detail",field)!}/></div>:null}
             </div>
           );
         })}
@@ -88,7 +93,7 @@ function UnavailableValue() {
   return <span className="text-muted-foreground">{t("unavailable")}</span>;
 }
 
-export function LinkInspectionPanel({ inspection }: { inspection?: LinkInspection | null }) {
+export function LinkInspectionPanel({ inspection,analysisId,manifest }: { inspection?: LinkInspection | null;analysisId?:string;manifest?:FeedbackManifest }) {
   const { t } = useCopy();
   if (!inspection || !inspection.links.length) return null;
 
@@ -113,13 +118,13 @@ export function LinkInspectionPanel({ inspection }: { inspection?: LinkInspectio
 
       {suspicious.length ? (
         <div className="space-y-2 pt-1" aria-label={t("suspiciousDocumentLinks", { count: suspicious.length })}>
-          {suspicious.map((link) => <LinkResultCard key={link.link_id} link={link} />)}
+          {suspicious.map((link) => <LinkResultCard key={link.link_id} link={link} action={analysisId&&feedbackTarget(manifest,"link_result","link",link.link_id)?<FeedbackControl analysisId={analysisId} target={feedbackTarget(manifest,"link_result","link",link.link_id)!}/>:undefined} />)}
         </div>
       ) : null}
 
       {unavailable.length ? (
         <div className="space-y-2 pt-1" aria-label={t("unavailableDocumentLinks", { count: unavailable.length })}>
-          {unavailable.map((link) => <LinkResultCard key={link.link_id} link={link} />)}
+          {unavailable.map((link) => <LinkResultCard key={link.link_id} link={link} action={analysisId&&feedbackTarget(manifest,"link_result","link",link.link_id)?<FeedbackControl analysisId={analysisId} target={feedbackTarget(manifest,"link_result","link",link.link_id)!}/>:undefined} />)}
         </div>
       ) : null}
 
@@ -132,14 +137,14 @@ export function LinkInspectionPanel({ inspection }: { inspection?: LinkInspectio
   );
 }
 
-function LinkResultCard({ link }: { link: LinkCheckResult }) {
+function LinkResultCard({ link,action }: { link: LinkCheckResult;action?:ReactNode }) {
   const { t } = useCopy();
   const suspicious = link.status === "SUSPICIOUS";
   const statusLabel: LinkOutcomeStatus = suspicious ? "SUSPICIOUS" : "UNAVAILABLE";
   const title = link.title || t("documentLinkNeedsReview");
 
   return (
-    <HoverDisclosure
+    <div className="relative"><HoverDisclosure
       className={suspicious
         ? "rounded-md border border-rose-500/40 bg-rose-500/5 p-3"
         : "rounded-md border bg-muted/15 p-3"}
@@ -176,7 +181,7 @@ function LinkResultCard({ link }: { link: LinkCheckResult }) {
       <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
         {t("reviewDeclaration")}
       </p>
-    </HoverDisclosure>
+    </HoverDisclosure>{action?<div className="absolute right-2 top-2">{action}</div>:null}</div>
   );
 }
 
