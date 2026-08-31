@@ -24,18 +24,23 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProfileDocumentPreview } from "@/components/profile-builder/profile-document-preview";
 import {
   DEFAULT_PROFILE_TEMPLATE,
   PROFILE_TEMPLATE_SAMPLE_PROFILE,
-  ProfileDocumentPreview,
-  SELECTED_TEMPLATE_STORAGE_KEY,
-  type AnonymizationPolicy,
-  type CandidateProfile,
   type ProfileTemplate,
   type ProfileTemplateLogo,
   type ProfileTemplateSection,
   type TemplateSectionKind,
-} from "@/components/profile-builder/profile-builder-workspace";
+} from "@/components/profile-builder/profile-builder-model";
+import {
+  getPreferences,
+  getProfile as apiGetProfile,
+  getTemplate as apiGetTemplate,
+  savePreferences,
+  saveTemplate as apiSaveTemplate,
+  updateProfile as apiUpdateProfile,
+} from "@/components/profile-builder/profile-builder-client";
 
 const SECTION_DEFAULTS: Record<TemplateSectionKind, Pick<ProfileTemplateSection, "title" | "layout">> = {
   summary: { title: "Summary", layout: "default" },
@@ -198,12 +203,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         setLoading(true);
         setError(null);
         try {
-          const response = await fetch(`/api/profile-builder/templates/${encodeURIComponent(templateId)}`, {
-            cache: "no-store",
-          });
-          if (!response.ok) throw new Error("template_unavailable");
-          const body = await response.json() as { template?: ProfileTemplate };
-          if (!body.template) throw new Error("template_unavailable");
+          const body = await apiGetTemplate(templateId);
           setTemplate(body.template);
           setSelectedSectionId(body.template.sections[0]?.id ?? "");
           setDirty(false);
@@ -344,44 +344,47 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
     setSaving(true);
     setError(null);
     try {
-      const response = await fetch(`/api/profile-builder/templates/${encodeURIComponent(payload.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error("template_save_failed");
+      const savedTemplate = await apiSaveTemplate(payload);
+      setTemplate(savedTemplate);
 
       if (returnProfileId) {
-        const profileResponse = await fetch(`/api/profile-builder/profiles/${encodeURIComponent(returnProfileId)}`, { cache: "no-store" });
-        if (!profileResponse.ok) {
+        let stored;
+        try {
+          stored = await apiGetProfile(returnProfileId);
+        } catch {
           setError("Template saved, but the current profile could not be reopened.");
           setSaving(false);
           return;
         }
-        const stored = await profileResponse.json() as {
-          source_filename: string;
-          profile: CandidateProfile;
-          anonymization: AnonymizationPolicy;
-        };
-        const update = await fetch(`/api/profile-builder/profiles/${encodeURIComponent(returnProfileId)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+        try {
+          await apiUpdateProfile(returnProfileId, {
             source_filename: stored.source_filename,
             profile: stored.profile,
             anonymization: stored.anonymization,
-            template: payload,
-          }),
-        });
-        if (!update.ok) {
+            template: savedTemplate,
+          });
+        } catch {
           setError("Template saved, but the current profile could not be updated.");
           setSaving(false);
           return;
         }
       }
 
+      if (!returnProfileId) {
+        try {
+          const preferences = await getPreferences();
+          await savePreferences({
+            ...preferences,
+            default_template_id: savedTemplate.id,
+          });
+        } catch {
+          setError("Template saved, but it could not be set as the default.");
+          setSaving(false);
+          return;
+        }
+      }
+
       setDirty(false);
-      window.localStorage.setItem(SELECTED_TEMPLATE_STORAGE_KEY, payload.id);
       router.push(returnProfileId ? `/profile-builder?profile=${encodeURIComponent(returnProfileId)}` : "/profile-builder");
     } catch {
       setError("The template could not be saved.");

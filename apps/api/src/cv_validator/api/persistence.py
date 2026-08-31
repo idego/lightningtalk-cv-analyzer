@@ -24,10 +24,17 @@ from cv_validator.file_links.normalization import URLNormalizationError, normali
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
 from cv_validator.profile_builder import (
+    CandidateProfile,
     ProfileBuilderPreferences,
     ProfileBuilderSnapshot,
     ProfileCustomFieldDefinition,
     ProfileTemplate,
+    sanitize_candidate_profile,
+    sanitize_profile_builder_filename,
+    sanitize_profile_builder_preferences,
+    sanitize_profile_builder_snapshot,
+    sanitize_profile_custom_field_definition,
+    sanitize_profile_template,
 )
 from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
 
@@ -224,6 +231,7 @@ class PersistenceStore:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
             )
+            _sanitize_profile_builder_storage(conn)
 
     def persist_report(
         self,
@@ -459,7 +467,8 @@ class PersistenceStore:
             raise PersistenceError("profile builder access token required")
         profile_id = str(uuid4())
         now = _utc_now()
-        payload = snapshot.model_dump(mode="json")
+        safe_snapshot = sanitize_profile_builder_snapshot(snapshot)
+        payload = safe_snapshot.model_dump(mode="json")
         try:
             self.purge_expired()
             with self._connect() as conn:
@@ -503,7 +512,9 @@ class PersistenceStore:
         result: list[dict[str, Any]] = []
         for row in rows:
             try:
-                profile = json.loads(row["profile_json"])
+                profile = sanitize_candidate_profile(
+                    CandidateProfile.model_validate(json.loads(row["profile_json"]))
+                ).model_dump(mode="json")
                 template = ProfileTemplate.model_validate(
                     json.loads(row["template_json"])
                 )
@@ -512,7 +523,7 @@ class PersistenceStore:
             result.append(
                 {
                     "profile_id": row["profile_id"],
-                    "source_filename": row["source_filename"],
+                    "source_filename": sanitize_profile_builder_filename(row["source_filename"]),
                     "candidate_name": _profile_candidate_name(profile),
                     "template_id": template.id,
                     "template_name": template.name,
@@ -541,13 +552,15 @@ class PersistenceStore:
         if row is None:
             return None
         try:
-            snapshot = ProfileBuilderSnapshot.model_validate(
-                {
-                    "source_filename": row["source_filename"],
-                    "profile": json.loads(row["profile_json"]),
-                    "anonymization": json.loads(row["anonymization_json"]),
-                    "template": json.loads(row["template_json"]),
-                }
+            snapshot = sanitize_profile_builder_snapshot(
+                ProfileBuilderSnapshot.model_validate(
+                    {
+                        "source_filename": row["source_filename"],
+                        "profile": json.loads(row["profile_json"]),
+                        "anonymization": json.loads(row["anonymization_json"]),
+                        "template": json.loads(row["template_json"]),
+                    }
+                )
             )
         except (json.JSONDecodeError, ValueError):
             return None
@@ -567,7 +580,8 @@ class PersistenceStore:
         if not access_token:
             return False
         self.purge_expired()
-        payload = snapshot.model_dump(mode="json")
+        safe_snapshot = sanitize_profile_builder_snapshot(snapshot)
+        payload = safe_snapshot.model_dump(mode="json")
         try:
             with self._connect() as conn:
                 updated = conn.execute(
@@ -625,6 +639,11 @@ class PersistenceStore:
                 """,
                 (owner_hash, _SHARED_TEMPLATE_SCOPE, owner_hash),
             ).fetchall()
+        shared_ids = {
+            row["template_id"]
+            for row in rows
+            if row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE
+        }
         templates: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in rows:
@@ -641,6 +660,7 @@ class PersistenceStore:
                 if row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE
                 else "private"
             )
+            template = sanitize_profile_template(template)
             seen.add(template.id)
             templates.append(
                 {
@@ -648,6 +668,10 @@ class PersistenceStore:
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                     "shared": row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE,
+                    "overrides_shared": (
+                        row["access_token_hash"] == owner_hash
+                        and template.id in shared_ids
+                    ),
                 }
             )
         return templates
@@ -682,6 +706,7 @@ class PersistenceStore:
             if row["access_token_hash"] == _SHARED_TEMPLATE_SCOPE
             else "private"
         )
+        template = sanitize_profile_template(template)
         return {
             "template": template.model_dump(mode="json"),
             "created_at": row["created_at"],
@@ -697,7 +722,7 @@ class PersistenceStore:
         if not access_token:
             raise PersistenceError("profile builder access token required")
         owner_hash = _token_hash(access_token)
-        stored_template = template.model_copy(deep=True)
+        stored_template = sanitize_profile_template(template)
         if stored_template.id == "idego-default":
             stored_template.visibility = "shared"
         target_scope = (
@@ -772,8 +797,10 @@ class PersistenceStore:
         for row in rows:
             try:
                 result.append(
-                    ProfileCustomFieldDefinition.model_validate(
-                        json.loads(row["field_json"])
+                    sanitize_profile_custom_field_definition(
+                        ProfileCustomFieldDefinition.model_validate(
+                            json.loads(row["field_json"])
+                        )
                     )
                 )
             except (json.JSONDecodeError, ValueError):
@@ -784,6 +811,7 @@ class PersistenceStore:
         self, definition: ProfileCustomFieldDefinition
     ) -> None:
         now = _utc_now()
+        safe_definition = sanitize_profile_custom_field_definition(definition)
         try:
             with self._connect() as conn:
                 conn.execute(
@@ -794,7 +822,12 @@ class PersistenceStore:
                         field_json = excluded.field_json,
                         updated_at = excluded.updated_at
                     """,
-                    (definition.id, json.dumps(definition.model_dump(mode="json")), now, now),
+                    (
+                        safe_definition.id,
+                        json.dumps(safe_definition.model_dump(mode="json")),
+                        now,
+                        now,
+                    ),
                 )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("profile custom field persistence failed") from exc
@@ -823,8 +856,10 @@ class PersistenceStore:
         if row is None:
             return ProfileBuilderPreferences()
         try:
-            return ProfileBuilderPreferences.model_validate(
-                json.loads(row["preferences_json"])
+            return sanitize_profile_builder_preferences(
+                ProfileBuilderPreferences.model_validate(
+                    json.loads(row["preferences_json"])
+                )
             )
         except (json.JSONDecodeError, ValueError):
             return ProfileBuilderPreferences()
@@ -836,6 +871,7 @@ class PersistenceStore:
     ) -> None:
         if not access_token:
             raise PersistenceError("profile builder access token required")
+        safe_preferences = sanitize_profile_builder_preferences(preferences)
         try:
             with self._connect() as conn:
                 conn.execute(
@@ -848,7 +884,7 @@ class PersistenceStore:
                     """,
                     (
                         _token_hash(access_token),
-                        json.dumps(preferences.model_dump(mode="json")),
+                        json.dumps(safe_preferences.model_dump(mode="json")),
                         _utc_now(),
                     ),
                 )
@@ -1121,6 +1157,128 @@ class PersistenceStore:
             if expired_ids and self._purge_listener is not None:
                 self._purge_listener(tuple(expired_ids))
         return deleted
+
+
+def _sanitize_profile_builder_storage(conn: sqlite3.Connection) -> None:
+    """One-time normalization for rows written before current privacy guards."""
+    marker_key = "profile_builder_storage_sanitized_v1"
+    if conn.execute(
+        "SELECT 1 FROM runtime_settings WHERE key = ?", (marker_key,)
+    ).fetchone() is not None:
+        return
+
+    migration_complete = True
+    for row in conn.execute(
+        """
+        SELECT profile_id, source_filename, profile_json, anonymization_json, template_json
+        FROM candidate_profiles
+        """
+    ).fetchall():
+        try:
+            snapshot = sanitize_profile_builder_snapshot(
+                ProfileBuilderSnapshot.model_validate(
+                    {
+                        "source_filename": row["source_filename"],
+                        "profile": json.loads(row["profile_json"]),
+                        "anonymization": json.loads(row["anonymization_json"]),
+                        "template": json.loads(row["template_json"]),
+                    }
+                )
+            )
+        except (json.JSONDecodeError, ValueError):
+            migration_complete = False
+            continue
+        payload = snapshot.model_dump(mode="json")
+        conn.execute(
+            """
+            UPDATE candidate_profiles
+            SET source_filename = ?, profile_json = ?, template_json = ?
+            WHERE profile_id = ?
+            """,
+            (
+                payload["source_filename"],
+                json.dumps(payload["profile"]),
+                json.dumps(payload["template"]),
+                row["profile_id"],
+            ),
+        )
+
+    for row in conn.execute(
+        "SELECT access_token_hash, template_id, template_json FROM profile_templates"
+    ).fetchall():
+        try:
+            template = sanitize_profile_template(
+                ProfileTemplate.model_validate(json.loads(row["template_json"]))
+            )
+        except (json.JSONDecodeError, ValueError):
+            migration_complete = False
+            continue
+        conn.execute(
+            """
+            UPDATE profile_templates
+            SET name = ?, template_json = ?
+            WHERE access_token_hash = ? AND template_id = ?
+            """,
+            (
+                template.name,
+                json.dumps(template.model_dump(mode="json")),
+                row["access_token_hash"],
+                row["template_id"],
+            ),
+        )
+
+    for row in conn.execute(
+        "SELECT field_id, field_json FROM profile_custom_fields"
+    ).fetchall():
+        try:
+            definition = sanitize_profile_custom_field_definition(
+                ProfileCustomFieldDefinition.model_validate(
+                    json.loads(row["field_json"])
+                )
+            )
+        except (json.JSONDecodeError, ValueError):
+            migration_complete = False
+            continue
+        conn.execute(
+            "UPDATE profile_custom_fields SET field_json = ? WHERE field_id = ?",
+            (json.dumps(definition.model_dump(mode="json")), row["field_id"]),
+        )
+
+    for row in conn.execute(
+        "SELECT access_token_hash, preferences_json FROM profile_builder_preferences"
+    ).fetchall():
+        try:
+            preferences = sanitize_profile_builder_preferences(
+                ProfileBuilderPreferences.model_validate(
+                    json.loads(row["preferences_json"])
+                )
+            )
+        except (json.JSONDecodeError, ValueError):
+            migration_complete = False
+            continue
+        conn.execute(
+            """
+            UPDATE profile_builder_preferences
+            SET preferences_json = ?
+            WHERE access_token_hash = ?
+            """,
+            (
+                json.dumps(preferences.model_dump(mode="json")),
+                row["access_token_hash"],
+            ),
+        )
+
+    if migration_complete:
+        conn.execute(
+            """
+            INSERT INTO runtime_settings (key, value, updated_at)
+            VALUES (?, '1', ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (marker_key, _utc_now()),
+        )
 
 
 def _utc_now() -> str:

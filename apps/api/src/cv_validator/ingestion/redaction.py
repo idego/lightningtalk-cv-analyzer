@@ -36,6 +36,19 @@ class _SensitiveSpan:
     type_hints: tuple[str, ...]
 
 
+def redact_national_ids_in_text(text: str) -> str:
+    """Mask supported national identifiers in arbitrary text without retaining values."""
+    spans = _merge_spans(_find_sensitive_spans(text))
+    if not spans:
+        return text
+    characters = list(text)
+    for span in spans:
+        characters[span.start_offset : span.end_offset] = (
+            MASK_CHARACTER * (span.end_offset - span.start_offset)
+        )
+    return "".join(characters)
+
+
 def redact_national_ids(document: RawDocument) -> RedactedDocument:
     redacted_pages: list[SourcePage] = []
     redactions: list[NationalIdRedaction] = []

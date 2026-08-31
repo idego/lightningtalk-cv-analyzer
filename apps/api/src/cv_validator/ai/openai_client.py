@@ -70,10 +70,10 @@ class OpenAIResponsesDocumentAnalyzer:
         )
 
 
-def _create_json_response(
+def _create_response(
     client: _OpenAIClient,
     request: _StructuredRequest,
-) -> tuple[Any | None, str, dict[str, Any], bool]:
+) -> tuple[Any, dict[str, Any], bool]:
     try:
         response = client.responses.create(**request.to_openai_payload())
     except openai.APITimeoutError as exc:
@@ -93,7 +93,15 @@ def _create_json_response(
         raise DocumentAnalyzerClientError(retryable=False) from exc
 
     usage = response.usage.model_dump() if response.usage is not None else {}
-    if _contains_refusal(response):
+    return response, usage, _contains_refusal(response)
+
+
+def _create_json_response(
+    client: _OpenAIClient,
+    request: _StructuredRequest,
+) -> tuple[Any | None, str, dict[str, Any], bool]:
+    response, usage, refused = _create_response(client, request)
+    if refused:
         return None, response.model, usage, True
     try:
         payload = json.loads(response.output_text)
@@ -168,26 +176,8 @@ class OpenAIResponsesProfileSummarizer:
         )
 
     def summarize(self, request: ProfileSummaryRequest) -> ProfileSummaryResponse:
-        try:
-            response = self._client.responses.create(**request.to_openai_payload())
-        except openai.APITimeoutError as exc:
-            raise DocumentAnalyzerTimeoutError() from exc
-        except openai.APIStatusError as exc:
-            status = exc.status_code
-            raise DocumentAnalyzerClientError(
-                retryable=status == 429 or status >= 500,
-                http_status_class=f"{status // 100}xx",
-                provider_request_id=_safe_request_id(
-                    exc.response.headers.get("x-request-id")
-                ),
-            ) from exc
-        except openai.APIConnectionError as exc:
-            raise DocumentAnalyzerClientError(retryable=True) from exc
-        except openai.APIError as exc:
-            raise DocumentAnalyzerClientError(retryable=False) from exc
-
-        usage = response.usage.model_dump() if response.usage is not None else {}
-        if _contains_refusal(response):
+        response, usage, refused = _create_response(self._client, request)
+        if refused:
             return ProfileSummaryResponse(
                 summary=None,
                 response_model=response.model,
@@ -200,6 +190,7 @@ class OpenAIResponsesProfileSummarizer:
             response_model=response.model,
             usage=usage,
         )
+
 
 
 class OpenAIResponsesProfileTransformer:

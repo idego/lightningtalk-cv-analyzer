@@ -150,3 +150,30 @@ AI Actions and Translation SHALL avoid unnecessary model work by using GPT-5.6 L
 #### Scenario: Recruiter changes the prompt and regenerates
 - **WHEN** the same saved profile and selected sections are submitted again with a different recruiter instruction
 - **THEN** the stable prompt prefix/cache key remains unchanged while the instruction is appended after that cached context
+
+### Requirement: Defense-in-depth Profile Builder privacy
+The Profile Builder SHALL treat national-ID masking as an invariant across the whole structured-profile lifecycle rather than only an upload-time operation. Supported identifiers MUST NOT be persisted, returned from AI-generated text, sent in recruiter AI instructions, rendered into DOCX/PDF, or emitted in a download filename when introduced after extraction. Candidate/profile content supplied to AI SHALL be explicitly treated as untrusted data rather than model instructions.
+
+#### Scenario: Recruiter manually enters a national identifier
+- **WHEN** a supported national identifier is typed into editable profile data after extraction
+- **THEN** the server masks it before persistence, subsequent AI requests, reopened profile responses, and document export
+
+#### Scenario: Candidate CV contains prompt-injection text
+- **WHEN** CV/profile content includes instructions that attempt to redirect the model
+- **THEN** those strings remain candidate data and the provider instruction explicitly tells the model not to follow embedded candidate instructions
+
+### Requirement: Bounded Profile Builder uploads
+Each Profile Builder PDF/DOCX file SHALL be limited to 10 MiB before ingestion. The browser SHALL reject larger selections for immediate feedback, and the authenticated proxy/backend SHALL independently enforce the limit so clients cannot bypass it.
+
+### Requirement: Unified authenticated Profile Builder boundary
+Every Profile Builder API action SHALL require the authenticated user's derived Profile Builder access token at the FastAPI boundary, including extraction, Summary, AI Actions/Translation, exports, profiles, templates, preferences, and custom fields.
+
+### Requirement: Durable navigation autosave
+The browser SHALL preserve the latest canonical profile edit when the recruiter leaves the current profile before the normal autosave debounce expires.
+
+#### Scenario: Recruiter edits and immediately leaves
+- **WHEN** HR changes a field and immediately chooses New CV, another profile flow, Template Creator, or another application destination
+- **THEN** the latest snapshot is persisted or the navigation is blocked when an explicit pre-navigation save fails; full browser unload warns while unsaved state exists
+
+### Requirement: Authoritative default template preference
+The persisted per-user `default_template_id` SHALL be the only durable source for the template used by the next conversion. Browser local storage SHALL NOT maintain a competing selected-template value. Inaccessible stale defaults SHALL fall back to the built-in IDEGO template.

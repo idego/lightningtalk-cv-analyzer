@@ -34,10 +34,13 @@ from cv_validator.ai.validation import (
 )
 from cv_validator.domain import DeterministicAnalysisResult, Report
 from cv_validator.ingestion import RedactedDocument
+from cv_validator.ingestion.redaction import redact_national_ids_in_text
 from cv_validator.profile_builder import (
     CandidateProfile,
     ProfessionalProfile,
     ProfessionalSectionName,
+    sanitize_candidate_profile,
+    sanitize_professional_profile,
 )
 
 
@@ -287,7 +290,9 @@ def extract_candidate_profile(
         if response.refused or response.payload is None:
             raise ProfileExtractionError("profile_extraction_refused")
         try:
-            return _materialize_candidate_profile(response.payload)
+            return sanitize_candidate_profile(
+                _materialize_candidate_profile(response.payload)
+            )
         except ProfileExtractionError:
             if (
                 invalid_retries < settings.invalid_response_retry_limit
@@ -379,7 +384,7 @@ def generate_candidate_profile_summary(
 
         if response.refused or response.summary is None:
             raise ProfileSummaryError("profile_summary_refused")
-        summary = response.summary.strip()
+        summary = redact_national_ids_in_text(response.summary.strip())
         if not summary or len(summary) > 3_000:
             raise ProfileSummaryError("profile_summary_invalid_response")
         return summary
@@ -481,5 +486,5 @@ def generate_candidate_profile_transform(
             for before, after in zip(original.certifications, proposed.certifications):
                 if (after.issuer, after.date, after.url) != (before.issuer, before.date, before.url):
                     raise ProfileTransformError("profile_translation_modified_protected_fact")
-        return proposed
+        return sanitize_professional_profile(proposed)
     raise ProfileTransformError("profile_transform_failed")

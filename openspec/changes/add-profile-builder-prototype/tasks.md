@@ -56,3 +56,13 @@
 - [x] 10.1 Prune AI Action context by selected section and make Translation selected-section-only.
 - [x] 10.2 Use low verbosity, stable prompt caching, and dynamic output-token caps for profile transforms.
 - [x] 10.3 Run focused payload-contract tests, full regression, production build, and diff review.
+
+## 11. Whole-branch hardening and seam cleanup
+- [x] 11.1 Re-sanitize structured profile/config/AI/output boundaries and add explicit untrusted-candidate prompt-injection rules.
+- [x] 11.2 Require owner auth for every Profile Builder backend action and add a backend-enforced 10 MiB per-file upload limit.
+- [x] 11.3 Fix debounce data-loss on navigation and reconcile autosave state from the server-normalized snapshot.
+- [x] 11.4 Make persisted preferences authoritative for the default template and handle stale defaults/private shared-template overrides correctly.
+- [x] 11.5 Enforce custom-field kind/value semantics and national-ID-safe identifiers.
+- [x] 11.6 Consolidate OpenAI Responses transport handling for structured transforms and Summary.
+- [x] 11.7 Extract shared browser domain contracts/defaults, A4 preview, and typed Profile Builder API client into deep modules without fragmenting the editor into micro-components.
+- [x] 11.8 Run final focused/full regression, production build, browser smoke, and whole-branch review after the hardening refactor.

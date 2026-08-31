@@ -91,11 +91,18 @@ from cv_validator.profile_builder import (
     materialize_custom_fields,
     render_candidate_profile_docx,
     render_candidate_profile_pdf,
+    sanitize_candidate_profile,
+    sanitize_profile_builder_filename,
+    sanitize_profile_builder_preferences,
+    sanitize_profile_builder_snapshot,
+    sanitize_profile_custom_field_definition,
+    sanitize_profile_template,
 )
 
 DEFAULT_DB = Path("data/cv_validator.db")
 DEFAULT_BATCH_MAX_FILES = 4
 DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_PROFILE_BUILDER_MAX_BYTES = 10 * 1024 * 1024
 
 
 class _RetentionUpdate(BaseModel):
@@ -145,6 +152,7 @@ def create_app(
     document_analyzer: DocumentAnalyzer | None = None,
     batch_max_files: int | None = None,
     batch_max_bytes: int | None = None,
+    profile_builder_max_bytes: int | None = None,
     company_researcher=None,
     education_researcher=None,
     linkedin_researcher=None,
@@ -229,6 +237,28 @@ def create_app(
     )
     if selected_batch_max_files < 1 or selected_batch_max_bytes < 1:
         raise ValueError("batch limits must be positive integers")
+    selected_profile_builder_max_bytes = (
+        profile_builder_max_bytes
+        if profile_builder_max_bytes is not None
+        else DEFAULT_PROFILE_BUILDER_MAX_BYTES
+    )
+    if selected_profile_builder_max_bytes < 1:
+        raise ValueError("profile builder max bytes must be positive")
+
+    def resolved_profile_builder_preferences(
+        token: str,
+    ) -> ProfileBuilderPreferences:
+        preferences = store.get_profile_builder_preferences(token)
+        template_id = preferences.default_template_id
+        if (
+            template_id != "idego-default"
+            and store.get_profile_template(template_id, token) is None
+        ):
+            preferences = preferences.model_copy(
+                update={"default_template_id": "idego-default"}
+            )
+            store.set_profile_builder_preferences(token, preferences)
+        return preferences
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         try:
@@ -522,6 +552,9 @@ def create_app(
         x_ai_enabled: bool = Header(default=True),
         x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
         if not x_ai_enabled:
             raise HTTPException(
                 status_code=409,
@@ -529,9 +562,13 @@ def create_app(
             )
         if not selected_ai_settings.enabled or selected_profile_extractor is None:
             raise HTTPException(status_code=503, detail="profile_builder_ai_disabled")
-        filename = file.filename or "candidate.pdf"
+        filename = sanitize_profile_builder_filename(
+            file.filename or "candidate.pdf"
+        )
         try:
-            content = await _read_upload(file)
+            content = await _read_upload_limited(
+                file, selected_profile_builder_max_bytes
+            )
             raw_document = ingest_cv(
                 content,
                 filename=filename,
@@ -543,13 +580,12 @@ def create_app(
                 selected_profile_extractor,
                 redacted_document,
             )
-            preferences = store.get_profile_builder_preferences(
-                x_profile_builder_access_token
-            )
+            preferences = resolved_profile_builder_preferences(token)
             profile = apply_profile_conversion_preferences(profile, preferences)
             profile = materialize_custom_fields(
                 profile, store.list_profile_custom_fields()
             )
+            profile = sanitize_candidate_profile(profile)
             if preferences.auto_summary and selected_profile_summarizer is not None:
                 try:
                     profile.summary = generate_candidate_profile_summary(
@@ -588,7 +624,9 @@ def create_app(
     def profile_builder_generate_summary(
         request: ProfileSummaryGenerationRequest,
         x_ai_enabled: bool = Header(default=True),
+        x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
         if not x_ai_enabled:
             raise HTTPException(
                 status_code=409,
@@ -600,7 +638,7 @@ def create_app(
             summary = generate_candidate_profile_summary(
                 selected_ai_settings,
                 selected_profile_summarizer,
-                request.profile,
+                sanitize_candidate_profile(request.profile),
                 request.instruction,
             )
         except ProfileSummaryError as exc:
@@ -615,7 +653,9 @@ def create_app(
     def profile_builder_transform(
         request: ProfileTransformGenerationRequest,
         x_ai_enabled: bool = Header(default=True),
+        x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
         if not x_ai_enabled:
             raise HTTPException(
                 status_code=409,
@@ -627,7 +667,7 @@ def create_app(
             proposal = generate_candidate_profile_transform(
                 selected_ai_settings,
                 selected_profile_transformer,
-                request.profile,
+                sanitize_candidate_profile(request.profile),
                 request.sections,
                 request.instruction,
                 mode=request.mode,
@@ -645,9 +685,13 @@ def create_app(
         )
 
     @app.post("/profile-builder/export/docx")
-    def profile_builder_export_docx(request: ProfileExportRequest) -> Response:
+    def profile_builder_export_docx(
+        request: ProfileExportRequest,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> Response:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
         content = render_candidate_profile_docx(
-            request.profile,
+            sanitize_candidate_profile(request.profile),
             request.anonymization,
             request.template,
         )
@@ -663,10 +707,14 @@ def create_app(
         )
 
     @app.post("/profile-builder/export/pdf")
-    def profile_builder_export_pdf(request: ProfileExportRequest) -> Response:
+    def profile_builder_export_pdf(
+        request: ProfileExportRequest,
+        x_profile_builder_access_token: str | None = Header(default=None),
+    ) -> Response:
+        _require_profile_builder_access_token(x_profile_builder_access_token)
         try:
             content = render_candidate_profile_pdf(
-                request.profile,
+                sanitize_candidate_profile(request.profile),
                 request.anonymization,
                 request.template,
             )
@@ -686,12 +734,11 @@ def create_app(
     def profile_builder_list_profiles(
         x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
         return JSONResponse(
-            {
-                "profiles": store.list_candidate_profiles(
-                    x_profile_builder_access_token
-                )
-            }
+            {"profiles": store.list_candidate_profiles(token)}
         )
 
     @app.post("/profile-builder/profiles")
@@ -702,22 +749,30 @@ def create_app(
         token = _require_profile_builder_access_token(
             x_profile_builder_access_token
         )
+        safe_snapshot = sanitize_profile_builder_snapshot(snapshot)
         try:
-            profile_id = store.create_candidate_profile(token, snapshot)
+            profile_id = store.create_candidate_profile(token, safe_snapshot)
         except PersistenceError as exc:
             raise HTTPException(
                 status_code=500, detail="profile_builder_persistence_failed"
             ) from exc
-        return JSONResponse({"profile_id": profile_id}, status_code=201)
+        return JSONResponse(
+            {
+                "profile_id": profile_id,
+                "snapshot": safe_snapshot.model_dump(mode="json"),
+            },
+            status_code=201,
+        )
 
     @app.get("/profile-builder/profiles/{profile_id}")
     def profile_builder_get_profile(
         profile_id: str,
         x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
-        payload = store.get_candidate_profile(
-            profile_id, x_profile_builder_access_token
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
         )
+        payload = store.get_candidate_profile(profile_id, token)
         if payload is None:
             raise HTTPException(status_code=404, detail="profile_not_found")
         return JSONResponse(payload)
@@ -728,11 +783,15 @@ def create_app(
         snapshot: ProfileBuilderSnapshot,
         x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
+        safe_snapshot = sanitize_profile_builder_snapshot(snapshot)
         try:
             updated = store.update_candidate_profile(
                 profile_id,
-                x_profile_builder_access_token,
-                snapshot,
+                token,
+                safe_snapshot,
             )
         except PersistenceError as exc:
             raise HTTPException(
@@ -740,17 +799,23 @@ def create_app(
             ) from exc
         if not updated:
             raise HTTPException(status_code=404, detail="profile_not_found")
-        return JSONResponse({"updated": True})
+        return JSONResponse(
+            {
+                "updated": True,
+                "snapshot": safe_snapshot.model_dump(mode="json"),
+            }
+        )
 
     @app.delete("/profile-builder/profiles/{profile_id}")
     def profile_builder_delete_profile(
         profile_id: str,
         x_profile_builder_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
+        token = _require_profile_builder_access_token(
+            x_profile_builder_access_token
+        )
         try:
-            deleted = store.delete_candidate_profile(
-                profile_id, x_profile_builder_access_token
-            )
+            deleted = store.delete_candidate_profile(profile_id, token)
         except PersistenceError as exc:
             raise HTTPException(
                 status_code=500, detail="profile_builder_persistence_failed"
@@ -782,13 +847,16 @@ def create_app(
         _require_profile_builder_access_token(x_profile_builder_access_token)
         if definition.id != field_id:
             raise HTTPException(status_code=400, detail="custom_field_id_mismatch")
+        safe_definition = sanitize_profile_custom_field_definition(definition)
         try:
-            store.upsert_profile_custom_field(definition)
+            store.upsert_profile_custom_field(safe_definition)
         except PersistenceError as exc:
             raise HTTPException(
                 status_code=500, detail="profile_builder_persistence_failed"
             ) from exc
-        return JSONResponse({"saved": True, "field": definition.model_dump(mode="json")})
+        return JSONResponse(
+            {"saved": True, "field": safe_definition.model_dump(mode="json")}
+        )
 
     @app.delete("/profile-builder/custom-fields/{field_id}")
     def profile_builder_delete_custom_field(
@@ -814,7 +882,7 @@ def create_app(
             x_profile_builder_access_token
         )
         return JSONResponse(
-            store.get_profile_builder_preferences(token).model_dump(mode="json")
+            resolved_profile_builder_preferences(token).model_dump(mode="json")
         )
 
     @app.put("/profile-builder/preferences")
@@ -825,13 +893,23 @@ def create_app(
         token = _require_profile_builder_access_token(
             x_profile_builder_access_token
         )
+        safe_preferences = sanitize_profile_builder_preferences(preferences)
+        if (
+            safe_preferences.default_template_id != "idego-default"
+            and store.get_profile_template(safe_preferences.default_template_id, token) is None
+        ):
+            raise HTTPException(
+                status_code=400, detail="default_template_not_found"
+            )
         try:
-            store.set_profile_builder_preferences(token, preferences)
+            store.set_profile_builder_preferences(token, safe_preferences)
         except PersistenceError as exc:
             raise HTTPException(
                 status_code=500, detail="profile_builder_persistence_failed"
             ) from exc
-        return JSONResponse({"saved": True, "preferences": preferences.model_dump(mode="json")})
+        return JSONResponse(
+            {"saved": True, "preferences": safe_preferences.model_dump(mode="json")}
+        )
 
     @app.get("/profile-builder/templates")
     def profile_builder_list_templates(
@@ -908,13 +986,20 @@ def create_app(
         token = _require_profile_builder_access_token(
             x_profile_builder_access_token
         )
+        safe_template = sanitize_profile_template(template)
+        if safe_template.id == "idego-default":
+            safe_template = safe_template.model_copy(
+                update={"visibility": "shared"}
+            )
         try:
-            store.upsert_profile_template(token, template)
+            store.upsert_profile_template(token, safe_template)
         except PersistenceError as exc:
             raise HTTPException(
                 status_code=500, detail="profile_builder_persistence_failed"
             ) from exc
-        return JSONResponse({"saved": True, "template": template.model_dump(mode="json")})
+        return JSONResponse(
+            {"saved": True, "template": safe_template.model_dump(mode="json")}
+        )
 
     @app.delete("/profile-builder/templates/{template_id}")
     def profile_builder_delete_template(
@@ -1244,6 +1329,7 @@ def create_app(
     app.state.document_analyzer = selected_document_analyzer
     app.state.batch_max_files = selected_batch_max_files
     app.state.batch_max_bytes = selected_batch_max_bytes
+    app.state.profile_builder_max_bytes = selected_profile_builder_max_bytes
     app.state.link_check_config = selected_link_check_config
     app.state.company_researcher = selected_company_researcher
     app.state.education_researcher = selected_education_researcher
@@ -1269,6 +1355,18 @@ async def _read_upload(upload: UploadFile) -> bytes:
         return await upload.read()
     except OSError as exc:
         raise UploadReadError("upload read failed") from exc
+
+
+async def _read_upload_limited(upload: UploadFile, max_bytes: int) -> bytes:
+    try:
+        content = await upload.read(max_bytes + 1)
+    except OSError as exc:
+        raise UploadReadError("upload read failed") from exc
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=413, detail="profile_builder_file_size_limit_exceeded"
+        )
+    return content
 
 
 async def _prepare_batch(

@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from datetime import date
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
@@ -15,6 +16,8 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from cv_validator.ingestion.redaction import redact_national_ids_in_text
 
 
 class _StrictModel(BaseModel):
@@ -100,15 +103,13 @@ class ProfileCustomFieldDefinition(_StrictModel):
     default_value: CustomFieldScalar = None
 
     @model_validator(mode="after")
-    def validate_options(self) -> ProfileCustomFieldDefinition:
-        clean = [option.strip() for option in self.options if option.strip()]
-        if self.kind == "select" and not clean:
-            raise ValueError("select custom fields require at least one option")
-        if self.kind != "select" and clean:
-            raise ValueError("only select custom fields may define options")
-        if self.kind == "select" and self.default_value not in {None, *clean}:
-            raise ValueError("select default must be one of the configured options")
-        self.options = clean
+    def validate_options_and_default(self) -> ProfileCustomFieldDefinition:
+        if redact_national_ids_in_text(self.id) != self.id:
+            raise ValueError("custom field ID must not contain a national identifier")
+        self.options = _normalize_custom_field_options(self.kind, self.options)
+        _validate_custom_field_scalar(
+            self.kind, self.default_value, self.options, field_name="default_value"
+        )
         return self
 
 
@@ -118,6 +119,63 @@ class ProfileCustomFieldValue(_StrictModel):
     kind: CustomFieldKind = "text"
     value: CustomFieldScalar = None
     options: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_options_and_value(self) -> ProfileCustomFieldValue:
+        if redact_national_ids_in_text(self.id) != self.id:
+            raise ValueError("custom field ID must not contain a national identifier")
+        self.options = _normalize_custom_field_options(self.kind, self.options)
+        _validate_custom_field_scalar(
+            self.kind, self.value, self.options, field_name="value"
+        )
+        return self
+
+
+def _normalize_custom_field_options(
+    kind: CustomFieldKind, options: list[str]
+) -> list[str]:
+    clean: list[str] = []
+    seen: set[str] = set()
+    for raw in options:
+        option = raw.strip()
+        if option and option not in seen:
+            clean.append(option)
+            seen.add(option)
+    if kind == "select" and not clean:
+        raise ValueError("select custom fields require at least one option")
+    if kind != "select" and clean:
+        raise ValueError("only select custom fields may define options")
+    return clean
+
+
+def _validate_custom_field_scalar(
+    kind: CustomFieldKind,
+    value: CustomFieldScalar,
+    options: list[str],
+    *,
+    field_name: str,
+) -> None:
+    if value is None:
+        return
+    if kind == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError(f"boolean custom field {field_name} must be boolean")
+        return
+    if kind == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"number custom field {field_name} must be numeric")
+        return
+    if not isinstance(value, str):
+        raise ValueError(f"{kind} custom field {field_name} must be text")
+    if kind == "select" and value not in options:
+        raise ValueError(f"select custom field {field_name} must be one of its options")
+    if kind == "date":
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"date custom field {field_name} must use YYYY-MM-DD"
+            ) from exc
 
 
 class CandidateProfile(_StrictModel):
@@ -210,6 +268,12 @@ class ProfileTemplateSection(_StrictModel):
     layout: TemplateSectionLayout = "default"
     placement: Literal["full", "left", "right"] = "full"
 
+    @model_validator(mode="after")
+    def validate_safe_id(self) -> ProfileTemplateSection:
+        if redact_national_ids_in_text(self.id) != self.id:
+            raise ValueError("template section ID must not contain a national identifier")
+        return self
+
 
 class ProfileTemplate(_StrictModel):
     schema_version: Literal["profile-template-v1"] = "profile-template-v1"
@@ -225,6 +289,8 @@ class ProfileTemplate(_StrictModel):
 
     @model_validator(mode="after")
     def validate_unique_sections(self) -> ProfileTemplate:
+        if redact_national_ids_in_text(self.id) != self.id:
+            raise ValueError("template ID must not contain a national identifier")
         ids = [section.id for section in self.sections]
         kinds = [section.kind for section in self.sections]
         if len(ids) != len(set(ids)):
@@ -255,7 +321,12 @@ class ProfileBuilderPreferences(_StrictModel):
     anonymization: AnonymizationPolicy = Field(default_factory=_default_profile_builder_anonymization)
     aggregate_technologies: bool = True
     date_format: Literal["preserve", "yyyy-mm", "mm/yyyy", "yyyy"] = "preserve"
-    default_template_id: str = "idego-default"
+    default_template_id: str = Field(
+        default="idego-default",
+        min_length=1,
+        max_length=96,
+        pattern=r"^[A-Za-z0-9._-]+$",
+    )
     filename_pattern: str = Field(default="{name}-profile", min_length=1, max_length=120)
 
 
@@ -393,6 +464,99 @@ def default_profile_template() -> ProfileTemplate:
     )
 
 
+def sanitize_candidate_profile(profile: CandidateProfile) -> CandidateProfile:
+    """Return a copy with supported national identifiers masked in every text field."""
+    payload = _sanitize_profile_value(profile.model_dump(mode="python"))
+    return CandidateProfile.model_validate(payload)
+
+
+def sanitize_professional_profile(
+    profile: ProfessionalProfile,
+) -> ProfessionalProfile:
+    payload = _sanitize_profile_value(profile.model_dump(mode="python"))
+    return ProfessionalProfile.model_validate(payload)
+
+
+def sanitize_profile_template(template: ProfileTemplate) -> ProfileTemplate:
+    payload = template.model_dump(mode="python")
+    payload["name"] = redact_national_ids_in_text(payload["name"])
+    if payload["description"] is not None:
+        payload["description"] = redact_national_ids_in_text(payload["description"])
+    payload["branding"]["brand_name"] = redact_national_ids_in_text(
+        payload["branding"]["brand_name"]
+    )
+    for section in payload["sections"]:
+        section["title"] = redact_national_ids_in_text(section["title"])
+    logo = payload.get("logo")
+    if logo is not None:
+        logo["original_name"] = sanitize_profile_builder_filename(
+            logo["original_name"]
+        )
+    return ProfileTemplate.model_validate(payload)
+
+
+def sanitize_profile_custom_field_definition(
+    definition: ProfileCustomFieldDefinition,
+) -> ProfileCustomFieldDefinition:
+    payload = definition.model_dump(mode="python")
+    payload["label"] = redact_national_ids_in_text(payload["label"])
+    payload["options"] = [
+        redact_national_ids_in_text(option) for option in payload["options"]
+    ]
+    if isinstance(payload["default_value"], str):
+        payload["default_value"] = redact_national_ids_in_text(
+            payload["default_value"]
+        )
+    return ProfileCustomFieldDefinition.model_validate(payload)
+
+
+def sanitize_profile_builder_preferences(
+    preferences: ProfileBuilderPreferences,
+) -> ProfileBuilderPreferences:
+    return preferences.model_copy(
+        update={
+            "summary_instruction": redact_national_ids_in_text(
+                preferences.summary_instruction
+            ),
+            "filename_pattern": redact_national_ids_in_text(
+                preferences.filename_pattern
+            ),
+        },
+        deep=True,
+    )
+
+
+def sanitize_profile_builder_filename(filename: str) -> str:
+    suffix = Path(filename).suffix
+    stem = filename[:-len(suffix)] if suffix else filename
+    return f"{redact_national_ids_in_text(stem)}{suffix}"
+
+
+def sanitize_profile_builder_snapshot(
+    snapshot: ProfileBuilderSnapshot,
+) -> ProfileBuilderSnapshot:
+    return snapshot.model_copy(
+        update={
+            "source_filename": sanitize_profile_builder_filename(
+                snapshot.source_filename
+            ),
+            "profile": sanitize_candidate_profile(snapshot.profile),
+            "template": sanitize_profile_template(snapshot.template),
+        },
+        deep=True,
+    )
+
+
+def _sanitize_profile_value(value):
+    if isinstance(value, str):
+        return redact_national_ids_in_text(value)
+    if isinstance(value, list):
+        return [_sanitize_profile_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_profile_value(item) for key, item in value.items()}
+    return value
+
+
 def materialize_custom_fields(
     profile: CandidateProfile,
     definitions: list[ProfileCustomFieldDefinition],
@@ -517,8 +681,12 @@ def render_candidate_profile_docx(
     policy: AnonymizationPolicy,
     template: ProfileTemplate | None = None,
 ) -> bytes:
-    selected_template = template or default_profile_template()
-    presentation = apply_profile_anonymization(profile, policy)
+    selected_template = sanitize_profile_template(
+        template or default_profile_template()
+    )
+    presentation = apply_profile_anonymization(
+        sanitize_candidate_profile(profile), policy
+    )
     document = Document()
     section = document.sections[0]
     section.top_margin = Inches(0.65)

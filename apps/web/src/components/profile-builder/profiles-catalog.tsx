@@ -5,19 +5,12 @@ import Link from "next/link";
 import { LoaderCircle, Search, Trash2, UserRoundPen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { RecentProfileItem } from "@/components/profile-builder/profile-builder-model";
+import { deleteProfile as apiDeleteProfile, listProfiles } from "@/components/profile-builder/profile-builder-client";
 
-type ProfileRow = {
-  profile_id: string;
-  source_filename: string;
-  candidate_name: string | null;
-  template_id: string;
-  template_name: string;
-  created_at: string;
-  updated_at: string;
-};
 
 export function ProfilesCatalog() {
-  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [profiles, setProfiles] = useState<RecentProfileItem[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,10 +19,7 @@ export function ProfilesCatalog() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/profile-builder/profiles", { cache: "no-store" });
-      if (!response.ok) throw new Error("profiles_unavailable");
-      const body = await response.json() as { profiles?: ProfileRow[] };
-      setProfiles(body.profiles ?? []);
+      setProfiles(await listProfiles());
     } catch {
       setError("Profiles could not be loaded.");
     } finally {
@@ -49,11 +39,14 @@ export function ProfilesCatalog() {
       .some((value) => value?.toLocaleLowerCase().includes(needle)));
   }, [profiles, query]);
 
-  async function deleteProfile(profile: ProfileRow) {
+  async function deleteProfile(profile: RecentProfileItem) {
     if (!window.confirm(`Delete ${profile.candidate_name ?? profile.source_filename}?`)) return;
-    const response = await fetch(`/api/profile-builder/profiles/${encodeURIComponent(profile.profile_id)}`, { method: "DELETE" });
-    if (response.ok) setProfiles((current) => current.filter((item) => item.profile_id !== profile.profile_id));
-    else setError("Profile could not be deleted.");
+    try {
+      await apiDeleteProfile(profile.profile_id);
+      setProfiles((current) => current.filter((item) => item.profile_id !== profile.profile_id));
+    } catch {
+      setError("Profile could not be deleted.");
+    }
   }
 
   return (
