@@ -30,6 +30,8 @@ import { StructuralAuditPanel } from "@/components/analyze/structural-audit-pane
 import { selectStructuredRecords, type DisplayRecord } from "@/lib/understanding-selectors";
 import { educationOverviewDetail, employmentOverviewDetail } from "@/lib/overview-record-details";
 import { RecordAuthorityDetails, type RecordAuthorityDetailLabels } from "@/components/analyze/record-authority-details";
+import { GoogleSearchAction } from "@/components/analyze/google-search-action";
+import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
   const { t } = useCopy();
@@ -98,20 +100,23 @@ function OverviewRow({
   value,
   detail,
   tone,
+  action,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   detail?: ReactNode;
   tone: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="flex min-w-0 items-start gap-3 py-1.5">
       <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
-      <div className="min-w-0 pt-0.5">
+      <div className="min-w-0 flex-1 pt-0.5">
         <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>
         {detail ? <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{detail}</p> : null}
       </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -221,18 +226,22 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
               {educationTimeline ? <span className="text-xs font-normal text-muted-foreground">{educationTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {education.map((fact) => <OverviewRow
-                key={fact.id}
-                icon={<GraduationCap className="size-4" />}
-                label={t("educationEntry")}
-                value={fact.institution ?? t("educationEntry")}
-                detail={<RecordAuthorityDetails
-                  record={fact}
-                  labels={recordDetailsLabels(fact, t)}
-                  leading={[educationOverviewDetail(fact)]}
-                />}
-                tone={educationTone}
-              />)}
+              {education.map((fact) => {
+                const href = educationGoogleSearchUrl({ institution: fact.institution, program: fact.program });
+                return <OverviewRow
+                  key={fact.id}
+                  icon={<GraduationCap className="size-4" />}
+                  label={t("educationEntry")}
+                  value={fact.institution ?? t("educationEntry")}
+                  detail={<RecordAuthorityDetails
+                    record={fact}
+                    labels={recordDetailsLabels(fact, t)}
+                    leading={[educationOverviewDetail(fact)]}
+                  />}
+                  tone={educationTone}
+                  action={href && fact.institution ? <GoogleSearchAction href={href} subject={fact.institution} variant="compact" /> : null}
+                />;
+              })}
             </div>
           </section> : null}
 
@@ -242,18 +251,22 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
               {employmentTimeline ? <span className="text-xs font-normal text-muted-foreground">{employmentTimeline}</span> : null}
             </div>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {employment.map((fact) => <OverviewRow
-                key={fact.id}
-                icon={<BriefcaseBusiness className="size-4" />}
-                label={t("employmentEntry")}
-                value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
-                detail={<RecordAuthorityDetails
-                  record={fact}
-                  labels={recordDetailsLabels(fact, t)}
-                  leading={[employmentOverviewDetail(fact)]}
-                />}
-                tone={employmentTone}
-              />)}
+              {employment.map((fact) => {
+                const href = companyGoogleSearchUrl({ organization: fact.organization, location: fact.location });
+                return <OverviewRow
+                  key={fact.id}
+                  icon={<BriefcaseBusiness className="size-4" />}
+                  label={t("employmentEntry")}
+                  value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
+                  detail={<RecordAuthorityDetails
+                    record={fact}
+                    labels={recordDetailsLabels(fact, t)}
+                    leading={[employmentOverviewDetail(fact)]}
+                  />}
+                  tone={employmentTone}
+                  action={href && fact.organization ? <GoogleSearchAction href={href} subject={fact.organization} variant="compact" /> : null}
+                />;
+              })}
             </div>
           </section> : null}
 

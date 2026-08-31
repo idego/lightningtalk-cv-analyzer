@@ -11,9 +11,9 @@
 
 ## 3. Contextual placement
 
-- [ ] 3.1 Extend the structured overview row with an optional trailing action and add compact searches to every eligible company and education entry using its row-specific query context; verify repeated entries each retain an action and missing/ineligible subjects do not render one.
-- [ ] 3.2 Add labeled search actions to Company Research result headers using organization name and available company location; verify the action remains independent of research loading/state controls and wraps cleanly with confidence metadata.
-- [ ] 3.3 Add labeled search actions to Education Research credential headers using institution plus program or certificate fallback; verify the action wraps cleanly with status and confidence badges.
+- [x] 3.1 Extend the structured overview row with an optional trailing action and add compact searches to every eligible company and education entry using its row-specific query context; verify repeated entries each retain an action and missing/ineligible subjects do not render one.
+- [x] 3.2 Add labeled search actions to Company Research result headers using organization name and available company location; verify the action remains independent of research loading/state controls and wraps cleanly with confidence metadata.
+- [x] 3.3 Add labeled search actions to Education Research credential headers using institution plus program or certificate fallback; verify the action wraps cleanly with status and confidence badges.
 
 ## 4. Integrated verification
 
