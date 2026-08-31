@@ -45,12 +45,14 @@ function FlagList({ flags, reportLanguage, analysisId, manifest, report }: { fla
           ?? (observation ? feedbackTarget(manifest, "structural_observation", "deterministic", observation.id) : null)
           ?? (fact ? feedbackTarget(manifest, "structured_fact", "facts", fact.id) : null);
         return (
-        <div key={flag.id} className="relative"><HoverDisclosure
+        <HoverDisclosure
+          key={flag.id}
           className="rounded-md border bg-muted/15 p-3 text-sm"
           allowHover
           title={
             <span className="block font-medium leading-snug">{copy.whatWeFound}</span>
           }
+          action={target ? <FeedbackControl analysisId={analysisId} target={target} /> : undefined}
           contentClassName="pt-3"
         >
           <dl className="space-y-3 border-t pt-3">
@@ -62,7 +64,7 @@ function FlagList({ flags, reportLanguage, analysisId, manifest, report }: { fla
               {t("evidence")}: „{flag.evidence[0].excerpt}”
             </p>
           ) : null}
-        </HoverDisclosure>{target?<div className="absolute right-2 top-2"><FeedbackControl analysisId={analysisId} target={target}/></div>:null}</div>
+        </HoverDisclosure>
       );})}
     </div>
   );
