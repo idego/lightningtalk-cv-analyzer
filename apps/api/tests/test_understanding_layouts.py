@@ -2,6 +2,8 @@ from io import BytesIO
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 from cv_validator.document_understanding.service import understand_document, understanding_to_payload
 from cv_validator.ingestion import PresentationSpan, RawDocument, SourcePage
@@ -158,6 +160,42 @@ def test_docx_list_item_duty_does_not_become_employment_identity():
     ]
 
 
+def test_direct_docx_numbering_on_identity_heading_remains_eligible():
+    document = Document(); document.add_paragraph("Experience")
+    identity = document.add_paragraph("Software Engineer | Example Company Ltd")
+    properties = identity._p.get_or_add_pPr(); numbering = OxmlElement("w:numPr")
+    level = OxmlElement("w:ilvl"); level.set(qn("w:val"), "0")
+    number = OxmlElement("w:numId"); number.set(qn("w:val"), "1")
+    numbering.extend((level, number)); properties.append(numbering)
+    document.add_paragraph("Jan 2020 - Feb 2022")
+    buffer = BytesIO(); document.save(buffer)
+
+    parsed = extract_docx(buffer.getvalue())
+    assert next(block for block in parsed.source_blocks if "Software Engineer" in parsed.pages[0].text[block.start_offset:block.end_offset]).kind == "list_item"
+    payload = understanding_to_payload(understand_document(redact_national_ids(parsed), "test", snapshot_month="2026-08"))
+    record = next(record for record in payload["records"] if record["kind"] == "employment")
+    fields = {field["name"]: field["value"] for field in record["fields"]}
+    assert (fields["role"], fields["organization"]) == ("Software Engineer", "Example Company Ltd")
+
+
+def test_lead_title_is_not_treated_as_duty_prose():
+    text = "Experience\nLead Engineer | Example Company Ltd\nJan 2020 - Feb 2022"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    record = next(record for record in payload["records"] if record["kind"] == "employment")
+    fields = {field["name"]: field["value"] for field in record["fields"]}
+    assert (fields["role"], fields["organization"]) == ("Lead Engineer", "Example Company Ltd")
+
+
+@pytest.mark.parametrize("duty", ["Led a platform migration", "Leading a platform migration"])
+def test_inflected_lead_duty_prose_does_not_become_a_title(duty):
+    text = f"Experience\nCompany: Example Company Ltd\n{duty}\nJan 2020 - Feb 2022"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    record = next(record for record in payload["records"] if record["kind"] == "employment")
+    role = next(field for field in record["fields"] if field["name"] == "role")
+    assert role["status"] == "unknown"
+    assert role["value"] is None
+
+
 def test_combined_education_line_uses_bounded_semantic_fragments():
     text = "Education\nExample University | MSc Computer Science | 2020 - 2022"
     payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
@@ -174,3 +212,22 @@ def test_unbounded_combined_education_line_abstains_instead_of_storing_whole_lin
     text = "Education\nExample University MSc Computer Science 2020 - 2022"
     payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
     assert [record for record in payload["records"] if record["kind"] == "education"] == []
+
+
+def test_identity_first_education_entries_keep_distinct_dates_links_and_subjects():
+    text = """Education
+First University | MSc Computer Science
+2020 - 2022
+Second University | Bachelor of Engineering
+2016 - 2020"""
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    records = [record for record in payload["records"] if record["kind"] == "education"]
+    fields = [{field["name"]: field["value"] for field in record["fields"]} for record in records]
+
+    assert [(item["institution"], item["study_dates"]) for item in fields] == [
+        ("First University", "2020 - 2022"),
+        ("Second University", "2016 - 2020"),
+    ]
+    assert len(payload["timeline_record_links"]) == 2
+    assert len({link["record_id"] for link in payload["timeline_record_links"]}) == 2
+    assert [item["subject"] for item in payload["code_research_subjects"]] == ["First University", "Second University"]

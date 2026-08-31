@@ -53,3 +53,21 @@ def test_legacy_and_malformed_nested_understanding_load_fail_safely():
     assert deserialize_analysis_payload({})["document_understanding"] is None
     malformed = {"document_understanding": {"contract_version": "document-understanding-v1", "records": [None]}}
     assert deserialize_analysis_payload(malformed)["document_understanding"] is None
+
+
+def test_multiple_employment_dates_abstain_and_serialize_without_duplicate_ids():
+    text = """Experience
+Company: Example Company Ltd
+Role: Software Engineer
+Jan 2020 - Feb 2022
+Mar 2022 - Apr 2024"""
+    settings = AISettings(enabled=False)
+    result = analyze_cv_text_result(text, ai_settings=settings)
+    payload = serialize_analysis_payload(result, settings, analysis_id="ambiguous-employment")
+    understanding = payload["document_understanding"]
+
+    assert understanding["records"] == []
+    findings = [item for item in understanding["ambiguous_spans"] if item["reason_code"] == "multiple_date_anchors"]
+    assert len(findings) == 1
+    assert len({item["id"] for item in understanding["ambiguous_spans"]}) == len(understanding["ambiguous_spans"])
+    assert deserialize_analysis_payload(json.loads(json.dumps(payload)))["document_understanding"] == understanding

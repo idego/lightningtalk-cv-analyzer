@@ -28,7 +28,7 @@ _ROLES = ("engineer", "developer", "manager", "consultant", "analyst", "designer
 _ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag|sa|s\.a\.|sp\.\s*z\s*o\.o\.|labs?|studio|group)\b")
 _IDENTITY_CONNECTOR = re.compile(r"(?i)^\s*(?P<role>[^|;\t•—–]{2,80}?)\s+(?P<connector>at|@|[—–]|-{2,}|\|)\s+(?P<organization>[^|;\t•—–]{2,80}?)\s*$")
 _WORK_MODE = frozenset({"remote", "hybrid", "onsite", "on-site", "zdalnie", "hybrydowo", "stacjonarnie"})
-_DUTY_PREFIX = re.compile(r"(?i)^(?:built|build|developed|develop|created|create|managed|manage|led|lead|designed|design|implemented|implement|maintained|maintain|responsible\s+for)\b")
+_DUTY_PREFIX = re.compile(r"(?i)^(?:built|build(?:ing)?|developed|develop(?:ing)?|created|creat(?:e|ing)|managed|manag(?:e|ing)|led|leading|designed|design(?:ing)?|implemented|implement(?:ing)?|maintained|maintain(?:ing)?|responsible\s+for)\b")
 _VISIBLE_BULLET_PREFIX = re.compile(r"^\s*(?:[•●▪◦‣⁃]|[-*]\s)")
 _MAX_EMPLOYMENT_ENTRY_LINES = 64
 _MAX_EMPLOYMENT_ENTRY_CHARS = 8192
@@ -141,15 +141,13 @@ def _entries(document, sections, dates):
             if current and row_boundary:
                 result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False; anchor_block_index=None
             if current and found and anchors:
-                if anchor_first or section.kind is SectionKind.EDUCATION:
+                if anchor_first:
                     result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False; anchor_block_index=None
                 else:
-                    split_at=_next_employment_identity_start(document,(*current,block),(anchor_block_index or 0)+1)
+                    split_at=(_next_education_identity_start if section.kind is SectionKind.EDUCATION else _next_employment_identity_start)(document,(*current,block),(anchor_block_index or 0)+1)
                     if split_at is not None:
                         result.append(_entry(section.id,current[:split_at],anchors,len(result)))
                         current=current[split_at:]; anchors=[]; anchor_first=False; anchor_block_index=None
-                    else:
-                        issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
             non_date_before=bool(current)
             current.append(block); table,row=block.table_id,block.row_index
             anchors.extend(d for d in found if d.id not in {x.id for x in anchors})
@@ -158,15 +156,16 @@ def _entries(document, sections, dates):
                 if anchor_block_index is None: anchor_block_index=len(current)-1
             if len(anchors)>1: issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
         if current: result.append(_entry(section.id,current,anchors,len(result)))
-    return tuple(result),tuple(issues)
+    unique_issues={issue.id:issue for issue in issues}
+    return tuple(result),tuple(unique_issues.values())
 
 
 def _next_employment_identity_start(document, blocks, start):
     lookup={line.line_id:line for line in document.source_lines}; hints=[]
     for index,block in enumerate(blocks[start:],start):
         lines=[lookup[line_id] for line_id in block.line_ids if line_id in lookup]
-        text=" ".join(line.text.strip() for line in lines).strip()
-        if not text or block.kind=="list_item" or _VISIBLE_BULLET_PREFIX.match(text) or _DUTY_PREFIX.search(text):continue
+        text=_strip_visible_bullet(" ".join(line.text.strip() for line in lines).strip())
+        if not text or _DUTY_PREFIX.search(text):continue
         without_dates=_strip_date_ranges(text)
         if without_dates and (any(pattern.search(without_dates) for pattern in (_LABELS["organization"],_LABELS["role"])) or _looks_org(without_dates) or _has_role_marker(without_dates) or _IDENTITY_CONNECTOR.match(without_dates)):
             hints.append(index)
@@ -174,9 +173,21 @@ def _next_employment_identity_start(document, blocks, start):
     identity_index=hints[-1]
     if identity_index>start:
         previous=blocks[identity_index-1]; lines=[lookup[line_id] for line_id in previous.line_ids if line_id in lookup]
-        text=" ".join(line.text.strip() for line in lines).strip()
-        if text and previous.kind!="list_item" and not _VISIBLE_BULLET_PREFIX.match(text) and not _DUTY_PREFIX.search(text):identity_index-=1
+        text=_strip_visible_bullet(" ".join(line.text.strip() for line in lines).strip())
+        if text and not _DUTY_PREFIX.search(text):identity_index-=1
     return identity_index
+
+
+def _next_education_identity_start(document, blocks, start):
+    lookup={line.line_id:line for line in document.source_lines}
+    for index,block in enumerate(blocks[start:],start):
+        lines=[lookup[line_id] for line_id in block.line_ids if line_id in lookup]
+        if any(marker in normalize_text(_strip_date_ranges(line.text)) for line in lines for marker in _INSTITUTIONS):return index
+    return None
+
+
+def _strip_visible_bullet(value):
+    return _VISIBLE_BULLET_PREFIX.sub("",value,1).strip()
 
 
 def _strip_date_ranges(value):
@@ -217,12 +228,12 @@ def _education(document,section,entry,lines,dates,exclusion):
 def _employment(document,section,entry,lines,dates,exclusion,blocks):
     relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role"); client=_label(lines,"client"); organization=_label(lines,"organization")
     issues=();truncated=False
+    if len(dates)>1:return None,issues
     # Unlabelled layout inference is anchored to a shared date annotation.  This
     # prevents descriptive text in an employment section from becoming a record
     # merely because two short, styled fragments happen to be adjacent.
     if dates:
-        inadmissible_line_ids={line_id for block in blocks if block.kind=="list_item" for line_id in block.line_ids}
-        candidates,truncated=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")},inadmissible_line_ids=inadmissible_line_ids)
+        candidates,truncated=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")})
         if truncated:
             issues=_issue(document,lines,"employment_candidate_limit",entry.source_order,exclusion)
         else:
@@ -259,7 +270,7 @@ def _looks_org(value):
     return not is_self_employment_label(text) and not _LABELS["client"].search(text) and bool(_ORG_SUFFIX.search(text))
 
 
-def _employment_candidates(document,lines,dates,exclusion,excluded,inadmissible_line_ids=frozenset()):
+def _employment_candidates(document,lines,dates,exclusion,excluded):
     if len(lines)>_MAX_EMPLOYMENT_ENTRY_LINES or sum(len(line.text) for line in lines)>_MAX_EMPLOYMENT_ENTRY_CHARS:
         return (),True
     line_order={line.line_id:index for index,line in enumerate(lines)}
@@ -271,7 +282,7 @@ def _employment_candidates(document,lines,dates,exclusion,excluded,inadmissible_
                 date_intervals.setdefault(evidence.line_id,[]).append((evidence.start_offset,evidence.end_offset))
     result=[]
     for line in lines:
-        if line in excluded or line.line_id in inadmissible_line_ids or _VISIBLE_BULLET_PREFIX.match(line.text) or any(pattern.search(line.text) for pattern in _LABELS.values()):
+        if line in excluded or any(pattern.search(line.text) for pattern in _LABELS.values()):
             continue
         intervals=sorted(date_intervals.get(line.line_id,()))
         line_presentation=presentation_by_line.get(line.line_id,())

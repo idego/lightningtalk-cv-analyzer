@@ -194,6 +194,25 @@ def test_mixed_batch(client):
     assert "report" not in failed
 
 
+def test_ambiguous_multiple_dates_do_not_abort_batch(client):
+    ambiguous = _docx_bytes("Experience\nCompany: Example Company Ltd\nRole: Software Engineer\nJan 2020 - Feb 2022\nMar 2022 - Apr 2024")
+    valid = _docx_bytes("Experience\nLead Engineer | Other Company Ltd\nMay 2024 - Present")
+    response = client.post(
+        "/analyze/batch",
+        files=[
+            ("files", ("ambiguous.docx", ambiguous, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+            ("files", ("valid.docx", valid, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+        ],
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert [item["status"] for item in results] == ["ok", "ok"]
+    understanding = results[0]["report"]["document_understanding"]
+    assert understanding["records"] == []
+    assert [item["reason_code"] for item in understanding["ambiguous_spans"]].count("multiple_date_anchors") == 1
+
+
 def test_batch_rejects_more_than_the_v1_file_limit_before_analysis(
     tmp_path,
     location_resolver,
