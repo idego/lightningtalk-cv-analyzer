@@ -83,6 +83,7 @@ class LinkHTTPClient(Protocol):
         headers: Mapping[str, str],
         timeout_seconds: float,
         max_response_bytes: int,
+        connect_addresses: Sequence[str] = (),
     ) -> LinkHTTPResponse: ...
 
 
@@ -174,7 +175,7 @@ class SystemDNSResolver:
 
 
 class HttpxLinkHTTPClient:
-    """Small httpx adapter with redirects, cookies, credentials, and bodies disabled."""
+    """Small HTTP adapter with pinned DNS destinations and bounded bodies."""
 
     def request(
         self,
@@ -184,43 +185,114 @@ class HttpxLinkHTTPClient:
         headers: Mapping[str, str],
         timeout_seconds: float,
         max_response_bytes: int,
+        connect_addresses: Sequence[str] = (),
     ) -> LinkHTTPResponse:
         try:
-            import httpx
+            import httpcore
         except ImportError as exc:  # pragma: no cover - packaging failure
             raise LinkNetworkError("http client unavailable") from exc
 
-        timeout = httpx.Timeout(timeout_seconds)
+        if not connect_addresses:
+            raise LinkNetworkError("validated destination addresses are required")
+        backend = _ValidatedAddressBackend(httpcore, connect_addresses)
+        parsed = httpcore.URL(url)
+        request_headers = list(headers.items())
+        if not any(key.lower() == "host" for key, _ in request_headers):
+            authority = parsed.host.decode("ascii")
+            if ":" in authority:
+                authority = f"[{authority}]"
+            if parsed.port is not None:
+                authority = f"{authority}:{parsed.port}"
+            request_headers.insert(0, ("Host", authority))
+        pool = httpcore.ConnectionPool(
+            ssl_context=(httpcore.default_ssl_context() if parsed.scheme == b"https" else None),
+            max_connections=1,
+            max_keepalive_connections=0,
+            keepalive_expiry=0,
+            network_backend=backend,
+        )
+        request = httpcore.Request(
+            method,
+            url,
+            headers=request_headers,
+            extensions={
+                "sni_hostname": parsed.host.decode("ascii"),
+                "timeout": {
+                    "connect": timeout_seconds,
+                    "read": timeout_seconds,
+                    "write": timeout_seconds,
+                    "pool": timeout_seconds,
+                },
+            },
+        )
         try:
-            with httpx.Client(
-                follow_redirects=False,
-                cookies=None,
-                headers=dict(headers),
-                timeout=timeout,
-                trust_env=False,
-            ) as client:
-                with client.stream(method, url) as response:
-                    body_bytes = 0
-                    if method == "GET":
-                        for chunk in response.iter_bytes(chunk_size=4096):
-                            body_bytes += len(chunk)
-                            if body_bytes > max_response_bytes:
-                                raise LinkResponseLimitError("response exceeded configured limit")
-                    return LinkHTTPResponse(
-                        status_code=response.status_code,
-                        headers=dict(response.headers),
-                        body_bytes=body_bytes,
-                    )
+            response = pool.handle_request(request)
+            try:
+                body_bytes = 0
+                if method == "GET":
+                    for chunk in response.iter_stream():
+                        body_bytes += len(chunk)
+                        if body_bytes > max_response_bytes:
+                            raise LinkResponseLimitError("response exceeded configured limit")
+                return LinkHTTPResponse(
+                    status_code=response.status,
+                    headers={
+                        key.decode("latin-1"): value.decode("latin-1")
+                        for key, value in response.headers
+                    },
+                    body_bytes=body_bytes,
+                )
+            finally:
+                response.close()
         except LinkResponseLimitError:
             raise
-        except httpx.TimeoutException as exc:
+        except httpcore.TimeoutException as exc:
             raise LinkTimeoutError("link request timed out") from exc
-        except httpx.ConnectError as exc:
+        except httpcore.ConnectError as exc:
             if "ssl" in str(exc).lower() or "tls" in str(exc).lower():
                 raise ssl.SSLError("link TLS negotiation failed") from exc
             raise LinkNetworkError("link connection failed") from exc
-        except httpx.HTTPError as exc:
+        except httpcore.NetworkError as exc:
+            raise LinkNetworkError("link connection failed") from exc
+        except httpcore.HTTPError as exc:
             raise LinkNetworkError("link request failed") from exc
+        finally:
+            pool.close()
+
+
+class _ValidatedAddressBackend:
+    """Connect only to addresses already validated by :class:`LinkInspector`."""
+
+    def __init__(self, httpcore: Any, addresses: Sequence[str]) -> None:
+        self._backend = httpcore.SyncBackend()
+        self._addresses = tuple(dict.fromkeys(addresses))
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any | None = None,
+    ) -> Any:
+        last_error: Exception | None = None
+        for address in self._addresses:
+            try:
+                return self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise OSError("validated destination addresses are empty")
+
+    def sleep(self, seconds: float) -> None:
+        self._backend.sleep(seconds)
 
 
 class LinkInspector:
@@ -391,6 +463,7 @@ class LinkInspector:
         deadline: float,
     ) -> LinkCheckResult:
         current = initial
+        current_addresses: tuple[str, ...] | None = None
         redirects = 0
         while True:
             if self.clock() >= deadline:
@@ -401,7 +474,10 @@ class LinkInspector:
                     LinkReasonCode.REQUEST_BUDGET_EXCEEDED,
                     terminal_registrable_domain=current.registrable_domain,
                 )
-            address_error = self._validate_destination(current)
+            if current_addresses is None:
+                current_addresses, address_error = self._resolve_destination(current)
+            else:
+                address_error = None
             if address_error is not None:
                 reason, suspicious = address_error
                 return self._result(
@@ -411,7 +487,12 @@ class LinkInspector:
                     reason,
                     terminal_registrable_domain=current.registrable_domain,
                 )
-            response = self._request_with_retries(current, deadline)
+            assert current_addresses is not None
+            response = self._request_with_retries(
+                current,
+                deadline,
+                connect_addresses=current_addresses,
+            )
             status = response.status_code
             headers = _normalized_headers(response.headers)
             if 300 <= status <= 399:
@@ -467,7 +548,7 @@ class LinkInspector:
                         terminal_status=status,
                         terminal_registrable_domain=current.registrable_domain,
                     )
-                redirect_address_error = self._validate_destination(next_url)
+                redirect_addresses, redirect_address_error = self._resolve_destination(next_url)
                 if redirect_address_error is not None:
                     reason, suspicious = redirect_address_error
                     return self._result(
@@ -478,7 +559,17 @@ class LinkInspector:
                         terminal_status=status,
                         terminal_registrable_domain=current.registrable_domain,
                     )
+                if not self._same_or_allowed_domain(initial, next_url, initial_service):
+                    return self._result(
+                        base,
+                        LinkOutcomeStatus.SUSPICIOUS,
+                        current.sanitized_url,
+                        LinkReasonCode.UNRELATED_CROSS_DOMAIN_REDIRECT,
+                        terminal_status=status,
+                        terminal_registrable_domain=next_url.registrable_domain,
+                    )
                 current = next_url
+                current_addresses = redirect_addresses
                 continue
 
             if status in {405, 501}:
@@ -548,24 +639,35 @@ class LinkInspector:
         self,
         url: NormalizedURL,
     ) -> tuple[LinkReasonCode, bool] | None:
+        _, error = self._resolve_destination(url)
+        return error
+
+    def _resolve_destination(
+        self,
+        url: NormalizedURL,
+    ) -> tuple[tuple[str, ...], tuple[LinkReasonCode, bool] | None]:
         if url.is_ip_literal:
-            return (LinkReasonCode.UNSAFE_DESTINATION, True) if _blocked_ip(url.hostname) else None
+            if _blocked_ip(url.hostname):
+                return (), (LinkReasonCode.UNSAFE_DESTINATION, True)
+            return (url.hostname,), None
         try:
             addresses = self.dns_resolver.resolve(url.hostname, url.port)
         except socket.gaierror:
-            return LinkReasonCode.DNS_FAILURE, False
+            return (), (LinkReasonCode.DNS_FAILURE, False)
         except OSError:
-            return LinkReasonCode.DNS_FAILURE, False
+            return (), (LinkReasonCode.DNS_FAILURE, False)
         if not addresses:
-            return LinkReasonCode.DNS_FAILURE, False
+            return (), (LinkReasonCode.DNS_FAILURE, False)
         if any(_blocked_ip(address) for address in addresses):
-            return LinkReasonCode.UNSAFE_DESTINATION, True
-        return None
+            return (), (LinkReasonCode.UNSAFE_DESTINATION, True)
+        return tuple(addresses), None
 
     def _request_with_retries(
         self,
         url: NormalizedURL,
         deadline: float,
+        *,
+        connect_addresses: Sequence[str],
     ) -> LinkHTTPResponse:
         attempts = 0
         while True:
@@ -581,6 +683,7 @@ class LinkInspector:
                     headers={"User-Agent": self.config.user_agent},
                     timeout_seconds=timeout,
                     max_response_bytes=self.config.max_response_bytes,
+                    connect_addresses=connect_addresses,
                 )
                 if response.status_code in {405, 501}:
                     response = self.http_client.request(
@@ -589,6 +692,7 @@ class LinkInspector:
                         headers={"User-Agent": self.config.user_agent},
                         timeout_seconds=min(self.config.timeout_seconds, deadline - self.clock()),
                         max_response_bytes=self.config.max_response_bytes,
+                        connect_addresses=connect_addresses,
                     )
                 if _response_exceeds_limit(response, self.config.max_response_bytes):
                     raise LinkResponseLimitError("response exceeded configured limit")

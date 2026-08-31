@@ -34,9 +34,6 @@ PARTIAL_VALIDATION_WARNING = (
     "Część danych nie została pokazana, ponieważ nie udało się potwierdzić "
     "ich w tekście CV."
 )
-MODEL_CONCLUSION_REVIEW_WARNING = (
-    "Model notes were preserved and require human review."
-)
 _CATEGORY_CHECK_IDS = {
     "contact_conflict": "contact",
     "missing_contact_data": "contact",
@@ -48,11 +45,16 @@ _CATEGORY_CHECK_IDS = {
     "semantic_outlier": "employment",
     "education_outside_eu": "education",
 }
+_PROTECTED_BOUNDARY_TERMS = (
+    r"score|band|verdict|ranking|hiring recommendation|nationality|ethnicity|"
+    r"race|racial|national origin|appearance|religion|health|age|gender|sex|"
+    r"family status|work eligibility"
+)
 _FORBIDDEN_AUTHORED_PATTERNS = (
     re.compile(
-        r"\b(?:score|band|verdict|ranking|hiring recommendation|nationality|"
-        r"ethnicity|race|racial|national origin|appearance|religion|health|"
-        r"age|gender|sex|family status|work eligibility)\b",
+        r"\b(?:the\s+)?(?:candidate|applicant|person)\s+"
+        r"(?:is|appears|seems|may be|is likely)\s+"
+        r"[A-Z][a-z]+(?:ish|ese|ian|ean|ican|i|ic)\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -63,11 +65,58 @@ _FORBIDDEN_AUTHORED_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
+        r"\b(?:the\s+)?(?:candidate|applicant|person)(?:'s)?\s+"
+        rf"(?:{_PROTECTED_BOUNDARY_TERMS})\s+"
+        r"(?:is|appears|seems|may be|is likely|was|were|can be inferred)\s+"
+        r"(?!not\b|unknown\b|unclear\b|undetermined\b|unconfirmed\b)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:{_PROTECTED_BOUNDARY_TERMS})\s*(?:is|:|=)\s*"
+        r"(?!unknown\b|unclear\b|undetermined\b|unconfirmed\b|"
+        r"not\b|n/?a\b)[^.!?\n]{1,100}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:the\s+)?(?:candidate|applicant|person)\b[^.!?\n]{0,60}"
+        r"\b(?:has|gets?|received|was given)\s+"
+        r"(?:a\s+)?(?:score|band|verdict|ranking)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\b(?:(?:do not|don't|should not|must not)\s+"
         r"(?:interview|hire|advance|progress|select|consider)|"
+        r"(?:interview|hire|advance|progress|select)\s+"
+        r"(?:(?:this|the)\s+)?(?:candidate|applicant)|"
         r"(?:reject|advance|hire)\s+(?:(?:this|the)\s+)?"
         r"(?:candidate|applicant)|"
-        r"recommend(?:ation)?\s+(?:to\s+)?(?:hire|reject|advance))\b",
+        r"(?:candidate|applicant)\s+(?:should|must|needs? to)\s+"
+        r"(?:be\s+)?(?:interviewed|hired|advanced|selected|rejected|"
+        r"interview|hire|advance|progress|select|consider)|"
+        r"recommend(?:ation)?\s*(?:to|:)??\s*"
+        r"(?:interview(?:ing)?|hir(?:e|ing)|reject(?:ing)?|"
+        r"advanc(?:e|ing)|select(?:ing)|consider(?:ing))|"
+        r"(?:candidate|applicant)\s+(?:is\s+)?(?:not\s+)?recommended\s+"
+        r"(?:for|to)\s+(?:interview|hire|advance))\b",
+        re.IGNORECASE,
+    ),
+)
+_NEUTRAL_PROTECTED_BOUNDARY_PATTERNS = (
+    re.compile(
+        rf"\b(?:does not|doesn't|cannot|can't|never|no)\b[^.!?\n]{{0,100}}"
+        r"\b(?:establish|determine|infer|prove|assign|make)\b[^.!?\n]{0,100}"
+        rf"\b(?:{_PROTECTED_BOUNDARY_TERMS})\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\bno\s+(?:{_PROTECTED_BOUNDARY_TERMS})\b[^.!?\n]{{0,60}}"
+        r"\b(?:is|was|were|has been|will be|made|assigned)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        rf"\b(?:{_PROTECTED_BOUNDARY_TERMS})\b[^.!?\n]{{0,40}}\b"
+        r"(?:is|was|were|remains?|appears?)\s+"
+        r"(?:not|unknown|unclear|undetermined|unconfirmed)\b",
         re.IGNORECASE,
     ),
 )
@@ -109,9 +158,8 @@ def validate_document_analysis_payload(
 ) -> ValidatedDocumentAnalysis:
     """Validate/materialize the v8 model-only response.
 
-    A bad root or unusable finding evidence is a response failure. Model-authored
-    conclusions that cross a protected boundary are preserved with a warning
-    instead of discarding the paid response. Individual fact fields are different: an unsupported
+    A bad root, protected-boundary violation, or unusable finding evidence is a
+    response failure. Individual fact fields are different: an unsupported
     optional field is discarded while independently supported fields remain.
     The model supplies only values, line IDs, and reviewer prose; code owns
     excerpts, metadata, checklist counts, and research candidates.
@@ -136,11 +184,13 @@ def validate_document_analysis_payload(
             "AI document analysis response failed validation: schema"
         )
 
-    model_conclusion_requires_review = any(
-        pattern.search(text)
+    if any(
+        _contains_protected_boundary_violation(text)
         for text in _iter_model_authored_conclusions_lean(payload)
-        for pattern in _FORBIDDEN_AUTHORED_PATTERNS
-    )
+    ):
+        raise DocumentAnalysisValidationError(
+            "AI document analysis response failed validation: protected boundary"
+        )
     source_lines = _source_line_index(pages)
 
     # Findings are reviewer-facing claims.  An unusable finding citation
@@ -306,8 +356,6 @@ def validate_document_analysis_payload(
     validation_warnings: list[str] = []
     if partial:
         validation_warnings.append(PARTIAL_VALIDATION_WARNING)
-    if model_conclusion_requires_review:
-        validation_warnings.append(MODEL_CONCLUSION_REVIEW_WARNING)
     if validation_warnings:
         # This is code-owned presentation metadata; it is intentionally not
         # accepted from the model schema.
@@ -835,6 +883,26 @@ def _iter_model_authored_conclusions_lean(payload: dict[str, Any]) -> Iterator[s
     for unknown in payload["unknowns"]:
         yield unknown["reason"]
     yield from payload["analysis_limitations"]
+
+
+def _contains_protected_boundary_violation(text: str) -> bool:
+    """Reject actionable protected conclusions without rejecting safety caveats."""
+    for sentence in re.split(
+        r"(?<=[.!?;])\s+|\n+|,\s*(?=(?:but|however|although|yet|while)\b)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        if not sentence.strip():
+            continue
+        residual = sentence
+        for neutral_pattern in _NEUTRAL_PROTECTED_BOUNDARY_PATTERNS:
+            residual = neutral_pattern.sub(" ", residual)
+        if any(
+            pattern.search(residual)
+            for pattern in _FORBIDDEN_AUTHORED_PATTERNS
+        ):
+            return True
+    return False
 
 
 def _source_line_index(

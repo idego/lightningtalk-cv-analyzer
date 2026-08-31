@@ -1265,24 +1265,28 @@ def test_validator_rejects_fields_outside_the_structured_contract(
     "authored_conclusion",
     (
         "The candidate is Polish based on their name.",
+        "The candidate is Polish.",
+        "The candidate is polish.",
         "The candidate is Asian based on their name.",
+        "Nationality is unknown and the candidate should be hired.",
         "Do not interview this candidate.",
     ),
 )
-def test_validator_preserves_model_conclusions_for_human_review(
+def test_validator_rejects_model_conclusions_at_the_response_boundary(
     authored_conclusion,
 ) -> None:
     _, redacted = _documents()
     response = _valid_response()
     response["analysis_limitations"] = [authored_conclusion]
 
-    validated = validate_document_analysis_response(response, redacted)
+    with pytest.raises(
+        DocumentAnalysisValidationError,
+        match="protected boundary",
+    ):
+        validate_document_analysis_response(response, redacted)
 
-    assert validated.payload["analysis_limitations"] == [authored_conclusion]
-    assert validated.payload["validation_warnings"]
 
-
-def test_application_keeps_paid_response_instead_of_retrying_for_model_wording() -> None:
+def test_application_accepts_neutral_protected_boundary_limitation() -> None:
     _, redacted = _documents()
     deterministic = analyze_deterministically(redacted, "1.0.0")
     response = _valid_response()
@@ -1309,7 +1313,50 @@ def test_application_keeps_paid_response_instead_of_retrying_for_model_wording()
     assert len(analyzer.requests) == 1
     assert outcome.analysis is not None
     assert outcome.analysis.payload["analysis_limitations"] == response["analysis_limitations"]
-    assert outcome.analysis.payload["validation_warnings"]
+    assert "validation_warnings" not in outcome.analysis.payload
+
+
+@pytest.mark.parametrize(
+    "limitation",
+    ("No score is assigned.", "No hiring recommendation is made."),
+)
+def test_validator_accepts_explicit_absence_of_protected_conclusion(limitation) -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["analysis_limitations"] = [limitation]
+
+    validate_document_analysis_response(response, redacted)
+
+
+def test_application_retries_and_fails_closed_for_protected_conclusions() -> None:
+    _, redacted = _documents()
+    deterministic = analyze_deterministically(redacted, "1.0.0")
+    response = _valid_response()
+    response["analysis_limitations"] = ["Do not interview this candidate."]
+    analyzer = FakeDocumentAnalyzer(
+        DocumentAnalyzerResponse(
+            payload=response,
+            response_model="gpt-5.6-luna-runtime",
+            usage={"input_tokens": 10, "output_tokens": 5},
+        )
+    )
+
+    outcome = run_document_analysis(
+        AISettings(
+            enabled=True,
+            api_key="test-key",
+            invalid_response_retry_limit=0,
+        ),
+        analyzer,
+        redacted,
+        deterministic,
+    )
+
+    assert outcome.status is AIAnalysisStatus.FAILED
+    assert outcome.failure_reason is AIFailureReason.INVALID_RESPONSE
+    assert outcome.failure_stage == "protected boundary"
+    assert outcome.analysis is None
+    assert "Do not interview" not in repr(outcome)
 
 
 def test_validator_allows_protected_word_inside_literal_entity_and_evidence() -> None:
@@ -1318,7 +1365,7 @@ def test_validator_allows_protected_word_inside_literal_entity_and_evidence() ->
             SourcePage(
                 "page-0001",
                 1,
-                "Alex Example\nEducation\nOrigin University",
+                "Alex Example\nEducation\nNational Health University",
             ),
         ),
         source_format="pdf",
@@ -1326,11 +1373,20 @@ def test_validator_allows_protected_word_inside_literal_entity_and_evidence() ->
     redacted = redact_national_ids(raw)
     response = _valid_response()
     education = response["facts"]["education"][0]
-    education["institution"] = _field("Origin University", "page-0001-line-0003")
+    education["institution"] = _field(
+        "National Health University",
+        "page-0001-line-0003",
+    )
+    response["analysis_limitations"] = [
+        "The candidate attended National Health University."
+    ]
 
     validated = validate_document_analysis_response(response, redacted)
 
-    assert validated.payload["facts"]["education"][0]["institution"] == "Origin University"
+    assert validated.payload["facts"]["education"][0]["institution"] == (
+        "National Health University"
+    )
+    assert validated.payload["analysis_limitations"] == response["analysis_limitations"]
 
 
 @pytest.mark.parametrize(

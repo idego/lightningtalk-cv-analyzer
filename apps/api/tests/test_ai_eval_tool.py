@@ -112,9 +112,17 @@ def test_validate_result_rejects_unknown_source_line():
     assert materialized["validation_warnings"]
 
 
-@pytest.mark.parametrize("protected_conclusion", (None, "Do not interview this candidate."))
+@pytest.mark.parametrize(
+    ("protected_conclusion", "expected_accepted"),
+    (
+        (None, True),
+        ("Education history does not establish nationality or current location.", True),
+        ("Do not interview this candidate.", False),
+    ),
+)
 def test_runtime_and_eval_use_the_same_canonical_validation_boundary(
     protected_conclusion,
+    expected_accepted,
 ):
     pages = {"page-0001": "source evidence"}
     result = valid_result()
@@ -136,6 +144,7 @@ def test_runtime_and_eval_use_the_same_canonical_validation_boundary(
     eval_accepted = not MODULE.validate_result(result, pages)
 
     assert eval_accepted is runtime_accepted
+    assert runtime_accepted is expected_accepted
 
 
 def test_score_names_finding_evidence_metric_precisely():

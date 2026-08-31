@@ -215,6 +215,33 @@ def test_timeout_retry_and_concurrent_duplicate(tmp_path):
     assert len(blocking.calls)==1
 
 
+def test_deletion_during_blocked_research_returns_not_found_without_orphan(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Blocking(Fake):
+        def research(self, request):
+            self.calls.append(request)
+            entered.set()
+            assert release.wait(timeout=2)
+            return self.result, "gpt-5.6-luna", {}
+
+    app = _app(tmp_path, Blocking())
+    client = _client(app)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        in_flight = pool.submit(client.post, "/analyses/analysis-edu/research/education")
+        assert entered.wait(timeout=2)
+        assert client.delete("/analyses/analysis-edu").status_code == 200
+        release.set()
+        assert in_flight.result().status_code == 404
+
+    with app.state.store._connect() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM education_research WHERE analysis_id = ?",
+            ("analysis-edu",),
+        ).fetchone() is None
+
+
 def test_uncertainty_mismatch_and_uncited_evidence_fail_closed(tmp_path):
     mismatch=_result(); item=mismatch["credentials"][0]; item["cv_consistency"]="mismatch"; item["location_difference_for_review"]=None
     assert _client(_app(tmp_path/"mismatch", Fake(mismatch))).post("/analyses/analysis-edu/research/education").status_code == 502

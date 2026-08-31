@@ -93,7 +93,7 @@ def understand_document(document, deterministic_ruleset_version: str, *, snapsho
     # Quarantined presentation evidence is intentionally excluded from every
     # downstream collection.  The visible projection is therefore honest but
     # necessarily partial even when the extraction adapter covered the file.
-    status = Status.PARTIAL if omitted or exclusion.intervals else Status.COMPLETED
+    status = Status.PARTIAL if omitted or exclusion.intervals or structural.status.value != "completed" else Status.COMPLETED
     audited = ["canonical_pages", "source_blocks", "presentation_spans", "section_annotations", "date_annotations", "entry_annotations"]
     if skills_available: audited.append("skill_taxonomy")
     coverage = UnderstandingCoverage(status, document.source_format, tuple(audited), tuple(omitted))

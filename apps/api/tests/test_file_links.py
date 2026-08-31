@@ -152,10 +152,19 @@ class _Resolver:
 class _HTTP:
     def __init__(self, responses: list[LinkHTTPResponse]) -> None:
         self.responses = list(responses)
-        self.calls: list[tuple[str, str, dict[str, str]]] = []
+        self.calls: list[tuple[str, str, dict[str, str], tuple[str, ...]]] = []
 
-    def request(self, method, url, *, headers, timeout_seconds, max_response_bytes):
-        self.calls.append((method, url, dict(headers)))
+    def request(
+        self,
+        method,
+        url,
+        *,
+        headers,
+        timeout_seconds,
+        max_response_bytes,
+        connect_addresses=(),
+    ):
+        self.calls.append((method, url, dict(headers), tuple(connect_addresses)))
         return self.responses.pop(0)
 
 
@@ -177,6 +186,7 @@ def test_checker_reaches_public_link_and_uses_bounded_get_fallback() -> None:
     assert result.links[0].status is LinkOutcomeStatus.REACHABLE
     assert result.links[0].sanitized_target == "https://example.com/profile"
     assert [call[0] for call in http.calls] == ["HEAD", "GET"]
+    assert all(call[3] == ("93.184.216.34",) for call in http.calls)
     assert all("Cookie" not in call[2] for call in http.calls)
 
 
@@ -291,6 +301,10 @@ def test_checker_follows_a_same_registrable_domain_redirect_after_revalidation()
     assert [call[1] for call in http.calls] == [
         "https://example.com/profile",
         "https://www.example.com/profile",
+    ]
+    assert [call[3] for call in http.calls] == [
+        ("93.184.216.34",),
+        ("93.184.216.34",),
     ]
 
 

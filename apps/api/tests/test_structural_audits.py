@@ -99,6 +99,82 @@ def test_visibility_grouping_ignores_bold_for_v1_compatibility():
     assert payload(differing)["reported_observation_count"] == 1
 
 
+@pytest.mark.parametrize(
+    ("source_format", "audited_part"),
+    [("pdf", "pdf_page_text_spans"), ("docx", "docx_body_paragraph_runs")],
+)
+@pytest.mark.parametrize("association", ["partial", "unmapped"])
+def test_uncertain_presentation_mapping_marks_structural_audit_partial(source_format, audited_part, association):
+    text = "Hidden content"
+    page = SourcePage("page-0001", 1, text)
+    offsets = (0, 1) if association == "partial" else (None, None)
+    span = PresentationSpan(
+        page_id=page.page_id,
+        page_number=1,
+        text=text,
+        start_offset=offsets[0],
+        end_offset=offsets[1],
+        association=association,
+        explicit_hidden=True,
+    )
+    raw = RawDocument(
+        pages=(page,),
+        source_format=source_format,
+        presentation_spans=(span,),
+        presentation_audited_parts=(audited_part,),
+    )
+
+    audits = audit_document(redact_national_ids(raw), snapshot_month="2026-08")
+
+    assert audits.visibility.status is AuditStatus.PARTIAL
+    assert audits.coverage.status is AuditStatus.PARTIAL
+    assert audits.status is AuditStatus.PARTIAL
+
+
+@pytest.mark.parametrize(
+    ("source_format", "audited_part"),
+    [("pdf", "pdf_page_text_spans"), ("docx", "docx_body_paragraph_runs")],
+)
+def test_exact_presentation_mapping_remains_completed(source_format, audited_part):
+    text = "Hidden content"
+    page = SourcePage("page-0001", 1, text)
+    span = PresentationSpan(
+        page_id=page.page_id,
+        page_number=1,
+        text=text,
+        start_offset=0,
+        end_offset=len(text),
+        association="exact",
+        explicit_hidden=True,
+    )
+    raw = RawDocument(
+        pages=(page,),
+        source_format=source_format,
+        presentation_spans=(span,),
+        presentation_audited_parts=(audited_part,),
+    )
+
+    audits = audit_document(redact_national_ids(raw), snapshot_month="2026-08")
+
+    assert audits.visibility.status is AuditStatus.COMPLETED
+    assert audits.coverage.status is AuditStatus.COMPLETED
+    assert audits.status is AuditStatus.COMPLETED
+
+
+def test_partial_source_block_mapping_marks_structural_coverage_partial():
+    raw = RawDocument(
+        pages=(SourcePage("page-0001", 1, "Experience"),),
+        source_format="docx",
+        presentation_audited_parts=("docx_body_paragraph_runs",),
+        source_blocks_partial=True,
+    )
+
+    audits = audit_document(redact_national_ids(raw), snapshot_month="2026-08")
+
+    assert audits.coverage.status is AuditStatus.PARTIAL
+    assert audits.status is AuditStatus.PARTIAL
+
+
 def test_unknown_visibility_field_fails_closed():
     payload = _audit("Experience\nA 2020 - 2021").to_dict()
     payload["visibility"]["observations"] = [{"excerpt": "secret"}]

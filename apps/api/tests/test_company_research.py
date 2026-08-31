@@ -261,7 +261,8 @@ def test_concurrent_duplicate_requests_share_one_completed_call(tmp_path):
             return self.result, "gpt-5.6-luna", {"input_tokens": 10}
 
     researcher = BlockingResearcher()
-    client = _client(_app(tmp_path, researcher))
+    app = _app(tmp_path, researcher)
+    client = _client(app)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(client.post, "/analyses/analysis-1/research/company")
         assert entered.wait(timeout=2)
@@ -269,6 +270,60 @@ def test_concurrent_duplicate_requests_share_one_completed_call(tmp_path):
         release.set()
         assert first.result().status_code == second.result().status_code == 200
     assert len(researcher.calls) == 1
+
+
+def test_deletion_during_blocked_research_returns_not_found_without_orphan(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingResearcher(FakeResearcher):
+        def research(self, request):
+            self.calls.append(request)
+            entered.set()
+            assert release.wait(timeout=2)
+            return self.result, "gpt-5.6-luna", {"input_tokens": 10}
+
+    app = _app(tmp_path, BlockingResearcher())
+    client = _client(app)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        in_flight = pool.submit(client.post, "/analyses/analysis-1/research/company")
+        assert entered.wait(timeout=2)
+        assert client.delete("/analyses/analysis-1").status_code == 200
+        release.set()
+        assert in_flight.result().status_code == 404
+
+    with app.state.store._connect() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM company_research WHERE analysis_id = ?",
+            ("analysis-1",),
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM research_cache_audit WHERE analysis_id = ?",
+            ("analysis-1",),
+        ).fetchone() is None
+        assert conn.execute("SELECT 1 FROM reusable_research_cache").fetchone() is not None
+    assert len(app.state.research_locks) == 0
+
+
+def test_sequential_unique_requests_release_research_locks(tmp_path):
+    class DynamicResearcher(FakeResearcher):
+        def research(self, request):
+            self.calls.append(request)
+            result = deepcopy(self.result)
+            result["organizations"][0]["query_subject"] = request.input_facts[0]["organization"]
+            return result, "gpt-5.6-luna", {"input_tokens": 10}
+
+    researcher = DynamicResearcher()
+    app = _app(tmp_path, researcher)
+    client = _client(app)
+    for index in range(2, 5):
+        payload = _stored_payload(f"Company {index}")
+        payload["analysis_id"] = f"analysis-{index}"
+        app.state.store.persist_analysis_payload_for_test(payload)
+        response = client.post(f"/analyses/analysis-{index}/research/company")
+        assert response.status_code == 200
+        assert len(app.state.research_locks) == 0
+    assert len(researcher.calls) == 3
 
 
 def test_company_research_inputs_are_candidate_isolated():

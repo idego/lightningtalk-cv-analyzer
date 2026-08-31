@@ -38,7 +38,12 @@ from cv_validator.ingestion import IngestionError
 from cv_validator.pipeline import PipelineResult, analyze_cv_bytes_result
 from cv_validator.ai.domain import AIAnalysisStatus
 from cv_validator.location import LocationResolver, SQLiteLocationResolver
-from cv_validator.errors import AnalysisRuntimeError, PersistenceError, UploadReadError
+from cv_validator.errors import (
+    AnalysisNotFoundPersistenceError,
+    AnalysisRuntimeError,
+    PersistenceError,
+    UploadReadError,
+)
 from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.research.company import CompanyResearchService, build_company_research_request
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout
@@ -80,6 +85,62 @@ class _PreparedUpload:
 class _RetryFlight:
     future: Future[dict]
     waiters: int = 1
+
+
+@dataclass
+class _ResearchLockEntry:
+    lock: threading.Lock
+    users: int = 0
+
+
+class _ResearchLockLease:
+    def __init__(self, registry: _ResearchLockRegistry, key: str, entry: _ResearchLockEntry) -> None:
+        self._registry = registry
+        self._key = key
+        self._entry = entry
+
+    def __enter__(self) -> _ResearchLockLease:
+        try:
+            self._entry.lock.acquire()
+        except BaseException:
+            self._registry.release(self._key, self._entry)
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._entry.lock.release()
+        self._registry.release(self._key, self._entry)
+
+
+class _ResearchLockRegistry:
+    """Coalesce keyed research requests without retaining idle locks."""
+
+    def __init__(self) -> None:
+        self._entries: dict[str, _ResearchLockEntry] = {}
+        self._guard = threading.Lock()
+
+    def acquire(self, key: str) -> _ResearchLockLease:
+        with self._guard:
+            entry = self._entries.get(key)
+            if entry is None:
+                entry = _ResearchLockEntry(threading.Lock())
+                self._entries[key] = entry
+            entry.users += 1
+        return _ResearchLockLease(self, key, entry)
+
+    def release(self, key: str, entry: _ResearchLockEntry) -> None:
+        with self._guard:
+            entry.users -= 1
+            if entry.users == 0 and self._entries.get(key) is entry:
+                del self._entries[key]
+
+    def clear(self) -> None:
+        with self._guard:
+            self._entries.clear()
+
+    def __len__(self) -> int:
+        with self._guard:
+            return len(self._entries)
 
 
 def _db_path_from_env() -> Path:
@@ -187,6 +248,7 @@ def create_app(
             retry_locks.clear()
             retry_flights.clear()
             retry_invalidated.clear()
+            research_locks.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
 
@@ -620,8 +682,7 @@ def create_app(
             ) from exc
         return JSONResponse({"days": store.config.retention_days})
 
-    research_locks: dict[str, threading.Lock] = {}
-    research_locks_guard = threading.Lock()
+    research_locks = _ResearchLockRegistry()
 
     @app.post("/analyses/{analysis_id}/research/company")
     def research_company(analysis_id: str, x_analysis_access_token: str | None = Header(default=None), x_ai_enabled: bool = Header(default=True)) -> JSONResponse:
@@ -638,9 +699,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         descriptor = company_cache_descriptor(request)
-        with research_locks_guard:
-            lock = research_locks.setdefault(f"cache:{descriptor.cache_key}", threading.Lock())
-        with lock:
+        with research_locks.acquire(f"cache:{descriptor.cache_key}"):
             completed = store.get_company_research(analysis_id)
             if completed is not None:
                 result = json.loads(completed["result_json"])
@@ -648,8 +707,11 @@ def create_app(
                 cached = store.get_reusable_research(descriptor)
                 if cached is not None:
                     result = materialize_cache_hit("company", cached, descriptor=descriptor)
-                    store.record_cache_use(analysis_id, "company", descriptor.cache_key, "hit")
-                    store.persist_company_research(analysis_id, result)
+                    try:
+                        store.record_cache_use(analysis_id, "company", descriptor.cache_key, "hit")
+                        store.persist_company_research(analysis_id, result)
+                    except PersistenceError as exc:
+                        _raise_research_persistence_error(exc)
                     telemetry.increment("research_cache_total", category="company", outcome="hit")
                 else:
                     try:
@@ -673,6 +735,8 @@ def create_app(
                         telemetry.increment("research_failures_total", category="company", outcome="client_error")
                         safe_log("research_failed", analysis_id=analysis_id, category="company", error_code="client_error")
                         raise HTTPException(status_code=502, detail="company_research_client_error") from exc
+                    except PersistenceError as exc:
+                        _raise_research_persistence_error(exc)
         response = deepcopy(stored_payload)
         response["company_research"] = result
         return JSONResponse(response)
@@ -692,9 +756,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         descriptor = education_cache_descriptor(request)
-        with research_locks_guard:
-            lock = research_locks.setdefault(f"cache:{descriptor.cache_key}", threading.Lock())
-        with lock:
+        with research_locks.acquire(f"cache:{descriptor.cache_key}"):
             completed = store.get_education_research(analysis_id)
             if completed is not None:
                 result = json.loads(completed["result_json"])
@@ -703,7 +765,10 @@ def create_app(
                 if cached is not None:
                     public_result = materialize_cache_hit("education", cached, descriptor=descriptor)
                     public_result = normalize_public_education_result(public_result)
-                    store.record_cache_use(analysis_id, "education", descriptor.cache_key, "hit")
+                    try:
+                        store.record_cache_use(analysis_id, "education", descriptor.cache_key, "hit")
+                    except PersistenceError as exc:
+                        _raise_research_persistence_error(exc)
                     telemetry.increment("research_cache_total", category="education", outcome="hit")
                 else:
                     try:
@@ -726,12 +791,17 @@ def create_app(
                         telemetry.increment("research_failures_total", category="education", outcome="client_error")
                         safe_log("research_failed", analysis_id=analysis_id, category="education", error_code="client_error")
                         raise HTTPException(status_code=502, detail="education_research_client_error") from exc
+                    except PersistenceError as exc:
+                        _raise_research_persistence_error(exc)
                 result = apply_owner_scoped_education_context(
                     public_result,
                     stored_payload,
                     location_resolver=resolver,
                 )
-                store.persist_education_research(analysis_id, result)
+                try:
+                    store.persist_education_research(analysis_id, result)
+                except PersistenceError as exc:
+                    _raise_research_persistence_error(exc)
         response = deepcopy(stored_payload)
         response["education_research"] = result
         return JSONResponse(response)
@@ -741,8 +811,7 @@ def create_app(
         stored_payload = _owned_payload(store, analysis_id, x_analysis_access_token)
         require_analysis_ai_enabled(stored_payload, x_ai_enabled)
         if selected_linkedin_researcher is None: raise HTTPException(status_code=503, detail="linkedin_research_disabled")
-        with research_locks_guard: lock = research_locks.setdefault(f"linkedin:{analysis_id}", threading.Lock())
-        with lock:
+        with research_locks.acquire(f"linkedin:{analysis_id}"):
             completed = store.get_linkedin_discovery(analysis_id)
             if completed is not None: result = json.loads(completed["result_json"])
             else:
@@ -768,6 +837,8 @@ def create_app(
                 except LinkedInResearchClientError as exc:
                     _record_research_failure(telemetry, analysis_id, "linkedin_discovery", "client_error")
                     raise HTTPException(status_code=502, detail="linkedin_discovery_client_error") from exc
+                except PersistenceError as exc:
+                    _raise_research_persistence_error(exc)
         response = deepcopy(stored_payload); response["linkedin_discovery"] = result
         return JSONResponse(response)
 
@@ -784,6 +855,7 @@ def create_app(
     app.state.linkedin_connection_threshold = selected_linkedin_threshold
     app.state.linkedin_max_profiles = selected_linkedin_max_profiles
     app.state.research_cache_ttl_days = store.config.research_cache_ttl_days
+    app.state.research_locks = research_locks
     app.state.telemetry = telemetry
     app.state.ai_retry_contexts = retry_contexts
     app.state.ai_retry_locks = retry_locks
@@ -795,6 +867,12 @@ def create_app(
 def _record_research_failure(telemetry: OperationsTelemetry, analysis_id: str, category: str, outcome: str) -> None:
     telemetry.increment("research_failures_total", category=category, outcome=outcome)
     safe_log("research_failed", analysis_id=analysis_id, category=category, error_code=outcome)
+
+
+def _raise_research_persistence_error(exc: PersistenceError) -> None:
+    if isinstance(exc, AnalysisNotFoundPersistenceError):
+        raise HTTPException(status_code=404, detail="analysis_not_found") from None
+    raise HTTPException(status_code=409, detail="research_persistence_conflict") from None
 
 
 async def _read_upload(upload: UploadFile) -> bytes:

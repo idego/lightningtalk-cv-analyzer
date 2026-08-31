@@ -86,7 +86,8 @@ def build_shared_annotations(document: RedactedDocument, *, snapshot_month: str 
 def project_structural_v1(document: RedactedDocument, snapshot: str, timeline: TimelineAudit, visibility: VisibilityAudit) -> StructuralAuditResult:
     """Serialize shared annotations through the unchanged V1 domain contract."""
     omitted = document.presentation_omitted_parts
-    coverage_status = AuditStatus.PARTIAL if omitted or document.presentation_truncated else AuditStatus.COMPLETED
+    partial_mapping = _has_partial_presentation_mapping(document)
+    coverage_status = AuditStatus.PARTIAL if omitted or document.presentation_truncated or document.source_blocks_partial or partial_mapping else AuditStatus.COMPLETED
     audited = document.presentation_audited_parts
     if document.source_format == "text":
         audited = ("plain_text_pages",)
@@ -228,8 +229,15 @@ def _visibility(document: RedactedDocument, cfg: StructuralAuditConfig) -> Visib
         observations.append(VisibilityObservation(f"visibility-observation-{len(observations)+1:04d}", kind, "needs_review", "high" if "explicit_hidden" in triggers else "medium", location, tuple(triggers[:4]), len(span.text), len(span.text.split()), RedactionMetadata(True, span.redaction_type_hints) if span.redaction_type_hints else None, cfg.threshold_version))
     total = len(observations); reported = observations[:cfg.max_visibility_observations]
     truncated = total > len(reported) or document.presentation_truncated
-    status = AuditStatus.PARTIAL if truncated or document.presentation_omitted_parts else AuditStatus.COMPLETED
+    status = AuditStatus.PARTIAL if truncated or document.presentation_omitted_parts or _has_partial_presentation_mapping(document) else AuditStatus.COMPLETED
     return VisibilityAudit(status, DETECTOR_VERSION, cfg.threshold_version, tuple(reported), len(reported), total - len(reported), truncated)
+
+
+def _has_partial_presentation_mapping(document: RedactedDocument) -> bool:
+    """Report uncertain presentation mapping only for format-level surfaces we inspect."""
+    return document.source_format in {"pdf", "docx"} and any(
+        span.association != "exact" for span in document.presentation_spans
+    )
 
 
 def _group_presentation_spans(spans):

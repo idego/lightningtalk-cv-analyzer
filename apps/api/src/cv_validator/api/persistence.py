@@ -19,7 +19,7 @@ from cv_validator.domain import (
     LinkSource,
     Report,
 )
-from cv_validator.errors import PersistenceError
+from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
 from cv_validator.file_links.normalization import URLNormalizationError, normalize_url
 from cv_validator.ingestion import RedactedDocumentIdentity
 from cv_validator.ingestion.redaction import MASK_CHARACTER
@@ -55,8 +55,23 @@ class PersistenceStore:
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.config.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _require_report_parent(conn: sqlite3.Connection, analysis_id: str) -> None:
+        """Require the report parent in the same transaction as a child write.
+
+        Foreign-key enforcement closes the check/write race if deletion wins
+        between this query and the INSERT.
+        """
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute(
+            "SELECT 1 FROM reports WHERE analysis_id = ?",
+            (analysis_id,),
+        ).fetchone() is None:
+            raise AnalysisNotFoundPersistenceError("analysis not found")
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -171,17 +186,20 @@ class PersistenceStore:
             _ensure_column(conn, "reports", "file_details_json", "TEXT")
             _ensure_column(conn, "reports", "link_inspection_json", "TEXT")
             _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
-            conn.execute(
-                "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
-            )
-            conn.execute(
-                "UPDATE audit_log SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
-            )
+            # Child tables reference reports(analysis_id), so the parent key
+            # must be unique before foreign-key enforcement can validate the
+            # legacy NULL backfill below.
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS reports_analysis_id ON reports(analysis_id)"
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
+            )
+            conn.execute(
+                "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
+            )
+            conn.execute(
+                "UPDATE audit_log SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
             )
 
     def persist_report(
@@ -455,6 +473,7 @@ class PersistenceStore:
         now = _utc_now()
         try:
             with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
                 conn.execute(
                     """
                     INSERT INTO company_research (
@@ -485,6 +504,7 @@ class PersistenceStore:
         versions, model, now = result["versions"], result["model"], _utc_now()
         try:
             with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
                 conn.execute(
                     """INSERT INTO education_research (
                         analysis_id, research_version, status, prompt_version,
@@ -535,9 +555,13 @@ class PersistenceStore:
             )
 
     def record_cache_use(self, analysis_id: str, category: str, cache_key: str, outcome: str) -> None:
-        with self._connect() as conn:
-            conn.execute("INSERT INTO research_cache_audit (analysis_id, category, cache_key, outcome, created_at) VALUES (?, ?, ?, ?, ?)",
-                         (analysis_id, category, cache_key, outcome, _utc_now()))
+        try:
+            with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
+                conn.execute("INSERT INTO research_cache_audit (analysis_id, category, cache_key, outcome, created_at) VALUES (?, ?, ?, ?, ?)",
+                             (analysis_id, category, cache_key, outcome, _utc_now()))
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("research cache audit persistence failed") from exc
 
     def get_cache_audit(self, analysis_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -566,6 +590,7 @@ class PersistenceStore:
                  "caveat": "Confirmation authorizes comparison only; it does not establish identity."}
         try:
             with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
                 cursor = conn.execute(
                     """INSERT INTO linkedin_confirmation
                     (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
@@ -620,6 +645,7 @@ class PersistenceStore:
         placeholders = ", ".join("?" for _ in values)
         try:
             with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
                 conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON CONFLICT(analysis_id, research_version) DO NOTHING", values)
         except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin research persistence failed") from exc
 

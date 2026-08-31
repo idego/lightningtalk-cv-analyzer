@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from cv_validator.ai.config import AISettings
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
@@ -19,6 +22,34 @@ def _saved(tmp_path):
     store = PersistenceStore(PersistenceConfig(tmp_path / "understanding.db"))
     store.persist_report(result.document_identity, result.report, report_payload=payload, analysis_id="understanding-1", ai_analysis=payload["ai_analysis"], access_token="token")
     return store, payload
+
+
+def test_sqlite_foreign_keys_are_enabled_for_candidate_owned_research(tmp_path):
+    store = PersistenceStore(PersistenceConfig(tmp_path / "foreign-keys.db"))
+
+    with store._connect() as conn:
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """INSERT INTO company_research (
+                    analysis_id, research_version, status, prompt_version,
+                    schema_version, configured_model, response_model,
+                    accessed_at, usage_json, result_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "missing-analysis",
+                    "research-v1",
+                    "completed",
+                    "prompt-v1",
+                    "schema-v1",
+                    "model",
+                    None,
+                    "2026-08-31T00:00:00+00:00",
+                    "{}",
+                    "{}",
+                    "2026-08-31T00:00:00+00:00",
+                ),
+            )
 
 
 def test_understanding_initial_save_reload_and_retry_are_byte_stable(tmp_path):

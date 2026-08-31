@@ -14,5 +14,11 @@ class PersistenceError(AnalysisRuntimeError):
     pass
 
 
+class AnalysisNotFoundPersistenceError(PersistenceError):
+    """The report parent disappeared before a candidate-owned write."""
+
+    pass
+
+
 class ReportSerializationError(AnalysisRuntimeError):
     pass

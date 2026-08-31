@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -103,6 +105,36 @@ def test_timeout_retry_duplicate_and_not_found_semantics(tmp_path):
     service=LinkedInDiscoveryService(type("NoProfile", (), {"discover": lambda self, request: (_discovery(profiles=False), "gpt-5.6-luna", {})})())
     result=service.run(_stored())
     assert result["linkedin_not_found"] and result["searches_performed"] and result["search_limitations"] and "does not prove" in result["not_found_caveat"]
+
+
+def test_deletion_during_blocked_discovery_returns_not_found_without_orphan(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Blocking(Fake):
+        def discover(self, request):
+            self.discovery_calls.append(request)
+            entered.set()
+            assert release.wait(timeout=2)
+            return _discovery(), "gpt-5.6-luna", {}
+
+    app = _app(tmp_path, Blocking())
+    client = _client(app)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        in_flight = pool.submit(
+            client.post,
+            "/analyses/analysis-linkedin/research/linkedin/discovery",
+        )
+        assert entered.wait(timeout=2)
+        assert client.delete("/analyses/analysis-linkedin").status_code == 200
+        release.set()
+        assert in_flight.result().status_code == 404
+
+    with app.state.store._connect() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM linkedin_discovery WHERE analysis_id = ?",
+            ("analysis-linkedin",),
+        ).fetchone() is None
 
 
 def test_wrong_person_ambiguity_uncited_appearance_and_unknown_are_fail_closed():
