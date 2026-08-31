@@ -16,42 +16,76 @@ export type AppSettings = {
   expandSectionsByDefault: boolean;
 };
 
-const STORAGE_KEY = "cv-analyzer-settings-v1";
+export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_STORAGE_KEY = "cv-analyzer-settings-v2";
+export const LEGACY_SETTINGS_STORAGE_KEY = "cv-analyzer-settings-v1";
 const EVENT_NAME = "cv-analyzer-settings-changed";
-const DEFAULT_SETTINGS: AppSettings = {
+export const DEFAULT_SETTINGS: AppSettings = {
   uiLanguage: "en", reportLanguage: "en",
   aiEnabled: true,
-  autoResearchEnabled: false, autoCompanyResearch: false,
-  autoEducationResearch: false, autoLinkedinDiscovery: false,
+  autoResearchEnabled: true, autoCompanyResearch: true,
+  autoEducationResearch: true, autoLinkedinDiscovery: true,
   previewFindingsOnHover: false,
   expandSectionsByDefault: false,
 };
 
+function parseObject(raw: string | null): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(raw ?? "null");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSettings(value: Record<string, unknown>, researchDefault: boolean): AppSettings {
+  return {
+    uiLanguage: value.uiLanguage === "pl" ? "pl" : "en",
+    reportLanguage: value.reportLanguage === "pl" ? "pl" : "en",
+    aiEnabled: value.aiEnabled !== false,
+    autoResearchEnabled: typeof value.autoResearchEnabled === "boolean" ? value.autoResearchEnabled : researchDefault,
+    autoCompanyResearch: typeof value.autoCompanyResearch === "boolean" ? value.autoCompanyResearch : researchDefault,
+    autoEducationResearch: typeof value.autoEducationResearch === "boolean" ? value.autoEducationResearch : researchDefault,
+    autoLinkedinDiscovery: typeof value.autoLinkedinDiscovery === "boolean" ? value.autoLinkedinDiscovery : researchDefault,
+    previewFindingsOnHover: value.previewFindingsOnHover === true,
+    expandSectionsByDefault: value.expandSectionsByDefault === true,
+  };
+}
+
+export function resolveStoredAppSettings(v2Raw: string | null, v1Raw: string | null): AppSettings {
+  const current = parseObject(v2Raw);
+  if (current?.version === SETTINGS_SCHEMA_VERSION) return normalizeSettings(current, true);
+  const legacy = parseObject(v1Raw);
+  if (legacy) {
+    const preserved = normalizeSettings(legacy, true);
+    return { ...preserved, autoResearchEnabled: true, autoCompanyResearch: true, autoEducationResearch: true, autoLinkedinDiscovery: true };
+  }
+  return DEFAULT_SETTINGS;
+}
+
+function serializeSettings(settings: AppSettings) {
+  return JSON.stringify({ version: SETTINGS_SCHEMA_VERSION, ...settings });
+}
+
+type SettingsStorage = Pick<Storage, "getItem" | "setItem">;
+export function loadStoredAppSettings(storage: SettingsStorage): AppSettings {
+  const current = storage.getItem(SETTINGS_STORAGE_KEY);
+  const legacy = storage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
+  const settings = resolveStoredAppSettings(current, legacy);
+  if (current === null && legacy !== null) storage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(settings));
+  return settings;
+}
+
 function readSettings(): AppSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
-  try {
-    const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
-    return {
-      uiLanguage: value.uiLanguage === "pl" ? "pl" : "en",
-      reportLanguage: value.reportLanguage === "pl" ? "pl" : "en",
-      aiEnabled: value.aiEnabled !== false,
-      autoResearchEnabled: value.autoResearchEnabled === true,
-      autoCompanyResearch: value.autoCompanyResearch === true,
-      autoEducationResearch: value.autoEducationResearch === true,
-      autoLinkedinDiscovery: value.autoLinkedinDiscovery === true,
-      previewFindingsOnHover: value.previewFindingsOnHover === true,
-      expandSectionsByDefault: value.expandSectionsByDefault === true,
-    };
-  } catch {
-    return DEFAULT_SETTINGS;
-  }
+  return loadStoredAppSettings(window.localStorage);
 }
 
 let cachedRaw = "";
 let cachedSettings = DEFAULT_SETTINGS;
 function snapshot() {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
-  const raw = window.localStorage.getItem(STORAGE_KEY) ?? "";
+  const raw = `${window.localStorage.getItem(SETTINGS_STORAGE_KEY) ?? ""}\u0000${window.localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY) ?? ""}`;
   if (raw !== cachedRaw) {
     cachedRaw = raw;
     cachedSettings = readSettings();
@@ -70,7 +104,7 @@ function subscribe(callback: () => void) {
 
 export function updateAppSettings(patch: Partial<AppSettings>) {
   const next = { ...readSettings(), ...patch };
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializeSettings(next));
   window.dispatchEvent(new Event(EVENT_NAME));
 }
 

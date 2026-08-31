@@ -14,7 +14,7 @@ export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnable
   return [settings.autoCompanyResearch && "company", settings.autoEducationResearch && "education", settings.autoLinkedinDiscovery && "linkedin"].filter(Boolean) as AutoResearchKind[];
 }
 
-function eligibleKinds(report: AnalysisReport): Set<AutoResearchKind> {
+export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResearchKind> {
   if (!report.analysis_access_token || report.ai_features_enabled === false) return new Set();
   const categories = new Set(report.ai_analysis.research_candidates.map((item) => item.category));
   const codeCategories = new Set(report.document_understanding?.code_research_subjects.map((item) => item.category) ?? []);
@@ -61,7 +61,7 @@ export function createAutoResearchOrchestrator({
 
   async function schedule(report: AnalysisReport, settings: AppSettings) {
     if (settings.aiEnabled === false || report.ai_features_enabled === false) return;
-    const eligible = eligibleKinds(report);
+    const eligible = eligibleAutoResearchKinds(report);
     const completions = effectiveAutoResearchKinds(settings).filter((kind) => eligible.has(kind)).map((kind) => {
       const existing = states.get(key(report.analysis_id, kind));
       if (existing) return Promise.resolve();

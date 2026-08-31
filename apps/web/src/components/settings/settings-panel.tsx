@@ -112,6 +112,10 @@ export function SettingsPanel() {
     </label>
   );
   const serverAiAvailable = health?.capabilities.document_ai?.ready === true;
+  const companyResearchAvailable = health?.capabilities.company_research?.ready === true;
+  const educationResearchAvailable = health?.capabilities.education_research?.ready === true;
+  const linkedinResearchAvailable = health?.capabilities.linkedin_research?.ready === true;
+  const anyResearchAvailable = companyResearchAvailable || educationResearchAvailable || linkedinResearchAvailable;
 
   return <div className="mx-auto w-full max-w-3xl space-y-8">
     <section className="divide-y rounded-xl border bg-card px-5">
@@ -126,11 +130,11 @@ export function SettingsPanel() {
         {toggle("preview-findings-on-hover", t("previewFindingsOnHover"), settings.previewFindingsOnHover, previewFindingsOnHover => updateAppSettings({ previewFindingsOnHover }))}
         {toggle("expand-sections-by-default", t("expandSectionsByDefault"), settings.expandSectionsByDefault, expandSectionsByDefault => updateAppSettings({ expandSectionsByDefault }))}
         {settings.aiEnabled && serverAiAvailable ? <>
-        {toggle("auto-research", t("runResearchAutomatically"), settings.autoResearchEnabled, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }))}
+        {toggle("auto-research", t("runResearchAutomatically"), settings.autoResearchEnabled && anyResearchAvailable, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }), !anyResearchAvailable)}
         <div className="pl-4">
-          {toggle("auto-company", t("companyResearch"), settings.autoCompanyResearch, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled)}
-          {toggle("auto-education", t("educationResearch"), settings.autoEducationResearch, autoEducationResearch => updateAppSettings({ autoEducationResearch }), !settings.autoResearchEnabled)}
-          {toggle("auto-linkedin", t("linkedinDiscovery"), settings.autoLinkedinDiscovery, autoLinkedinDiscovery => updateAppSettings({ autoLinkedinDiscovery }), !settings.autoResearchEnabled)}
+          {toggle("auto-company", t("companyResearch"), settings.autoCompanyResearch && companyResearchAvailable, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled || !companyResearchAvailable)}
+          {toggle("auto-education", t("educationResearch"), settings.autoEducationResearch && educationResearchAvailable, autoEducationResearch => updateAppSettings({ autoEducationResearch }), !settings.autoResearchEnabled || !educationResearchAvailable)}
+          {toggle("auto-linkedin", t("linkedinDiscovery"), settings.autoLinkedinDiscovery && linkedinResearchAvailable, autoLinkedinDiscovery => updateAppSettings({ autoLinkedinDiscovery }), !settings.autoResearchEnabled || !linkedinResearchAvailable)}
         </div>
         </> : null}
       </div>

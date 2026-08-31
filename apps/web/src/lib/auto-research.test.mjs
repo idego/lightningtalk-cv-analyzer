@@ -5,6 +5,7 @@ import {
   AUTO_RESEARCH_MAX_CONCURRENCY,
   createAutoResearchOrchestrator,
   effectiveAutoResearchKinds,
+  eligibleAutoResearchKinds,
 } from "./auto-research.ts";
 
 const settings = {
@@ -48,6 +49,13 @@ test("does not schedule any research when AI is disabled", async () => {
   await orchestrator.schedule({ ...report("server-off"), ai_features_enabled: false }, settings);
 
   assert.equal(calls, 0);
+});
+
+test("unavailable AI or category capabilities are neither eligible nor scheduled", async () => {
+  const unavailable = { ...report("unavailable"), ai_features_enabled: false };
+  assert.deepEqual([...eligibleAutoResearchKinds(unavailable)], []);
+  const categoryOff = { ...report("category-off"), ai_capabilities: { company_research: false, education_research: false, linkedin_research: false } };
+  assert.deepEqual([...eligibleAutoResearchKinds(categoryOff)], []);
 });
 
 test("intersects automatic research with each server capability", async () => {
