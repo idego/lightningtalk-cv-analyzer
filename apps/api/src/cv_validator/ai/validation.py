@@ -46,7 +46,6 @@ _CATEGORY_CHECK_IDS = {
     "relationship_ambiguity": "relationships",
     "document_artifact": "document_quality",
     "semantic_outlier": "employment",
-    "internal_fact_conflict": "contact",
     "education_outside_eu": "education",
 }
 _FORBIDDEN_AUTHORED_PATTERNS = (
@@ -87,6 +86,8 @@ class DocumentAnalysisValidationError(ValueError):
 def validate_document_analysis_response(
     payload: Any,
     document: RedactedDocument,
+    *,
+    understanding_context: Mapping[str, Any] | None = None,
 ) -> ValidatedDocumentAnalysis:
     if not isinstance(document, RedactedDocument):
         raise TypeError("Document Analyzer validation requires a RedactedDocument")
@@ -95,6 +96,7 @@ def validate_document_analysis_response(
         payload,
         pages={page.page_id: page.text for page in document.pages},
         deterministic_observations_version=DETERMINISTIC_OBSERVATIONS_VERSION,
+        understanding_context=understanding_context,
     )
 
 
@@ -103,6 +105,7 @@ def validate_document_analysis_payload(
     *,
     pages: Mapping[str, str],
     deterministic_observations_version: str,
+    understanding_context: Mapping[str, Any] | None = None,
 ) -> ValidatedDocumentAnalysis:
     """Validate/materialize the v8 model-only response.
 
@@ -144,12 +147,9 @@ def validate_document_analysis_payload(
     # cannot be safely shown, so it fails closed at the response boundary.
     findings: list[dict[str, Any]] = []
     for finding in payload["findings"]:
-        if not _finding_classification_is_valid(finding):
-            raise DocumentAnalysisValidationError(
-                "AI document analysis response failed validation: finding classification"
-            )
+        normalized_finding = _normalize_finding_classification(finding)
         evidence = _materialize_evidence(
-            finding["evidence"],
+            normalized_finding["evidence"],
             source_lines,
             require_support=False,
         )
@@ -157,14 +157,13 @@ def validate_document_analysis_payload(
             raise DocumentAnalysisValidationError(
                 "AI document analysis response failed validation: finding evidence"
             )
-        item = deepcopy(finding)
+        item = normalized_finding
         item["evidence"] = evidence
         if (
-            finding["category"] == "document_artifact"
-            and not _material_document_artifact(finding, evidence)
+            normalized_finding["category"] == "document_artifact"
+            and not _material_document_artifact(normalized_finding, evidence)
         ):
             continue
-        item["check_id"] = _check_id_for_category(finding["category"])
         _add_code_owned_metadata(item)
         findings.append(item)
 
@@ -235,6 +234,13 @@ def validate_document_analysis_payload(
         group: _dedupe_facts(items)
         for group, items in materialized_facts.items()
     }
+    findings.extend(
+        _synthesize_identity_conflicts(
+            materialized_facts, understanding_context, findings
+        )
+    )
+    for finding in findings:
+        finding["check_id"] = _check_id_for_finding(finding)
     accepted_education_line_ids = {
         evidence["line_id"]
         for education in materialized_facts["education"]
@@ -340,17 +346,24 @@ def _material_document_artifact(
     )
 
 
-def _finding_classification_is_valid(finding: Mapping[str, Any]) -> bool:
-    if finding.get("category") != "document_artifact":
-        return (
-            finding.get("material_effect") == "none"
-            and finding.get("affected_fact") == "not_applicable"
-        )
-    return (
-        finding.get("material_effect")
-        in {"important_fact_unreadable", "meaning_changed"}
-        and finding.get("affected_fact") != "not_applicable"
-    )
+def _normalize_finding_classification(finding: Mapping[str, Any]) -> dict[str, Any]:
+    item = deepcopy(dict(finding))
+    if item.get("category") == "document_artifact":
+        if (
+            item.get("material_effect") not in {"important_fact_unreadable", "meaning_changed"}
+            or item.get("affected_fact") == "not_applicable"
+        ):
+            raise DocumentAnalysisValidationError(
+                "AI document analysis response failed validation: finding classification"
+            )
+        return item
+    item["material_effect"] = "none"
+    if item.get("category") != "internal_fact_conflict" or item.get("affected_fact") not in {
+        "candidate_name", "phone", "stated_location", "education", "employment",
+        "employment_dates", "relationship",
+    }:
+        item["affected_fact"] = "not_applicable"
+    return item
 
 
 def _materialize_evidence(
@@ -580,8 +593,71 @@ def _add_code_owned_metadata(item: dict[str, Any]) -> None:
     item["source"] = "document_analyzer"
 
 
-def _check_id_for_category(category: str) -> str:
-    return _CATEGORY_CHECK_IDS.get(category, "document_quality")
+def _check_id_for_finding(finding: Mapping[str, Any]) -> str:
+    category = finding.get("category")
+    if category == "internal_fact_conflict":
+        return {
+            "candidate_name": "contact", "phone": "contact",
+            "stated_location": "contact", "education": "education",
+            "employment": "employment", "employment_dates": "employment",
+            "relationship": "employment",
+        }.get(finding.get("affected_fact"), "document_quality")
+    return _CATEGORY_CHECK_IDS.get(str(category), "document_quality")
+
+
+def _synthesize_identity_conflicts(
+    facts: Mapping[str, list[dict[str, Any]]],
+    understanding: Mapping[str, Any] | None,
+    existing_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(understanding, Mapping):
+        return []
+    conflicts: list[dict[str, Any]] = []
+    identity_fields = {"education": "institution", "employment": "organization"}
+    for record in list(understanding.get("records", []))[:100]:
+        if not isinstance(record, Mapping):
+            continue
+        kind = record.get("kind")
+        identity = identity_fields.get(kind)
+        if identity is None:
+            continue
+        code_field = next((field for field in list(record.get("fields", []))[:8]
+            if isinstance(field, Mapping) and field.get("name") == identity
+            and field.get("status") == "supported" and isinstance(field.get("value"), str)), None)
+        if code_field is None:
+            continue
+        code_lines = {item.get("line_id") for item in list(code_field.get("evidence", []))[:4]
+            if isinstance(item, Mapping) and item.get("line_id")}
+        for fact in facts.get(kind, []):
+            ai_value = fact.get(identity)
+            evidence = fact.get("field_evidence", {}).get(identity, [])
+            ai_lines = {item.get("line_id") for item in evidence if isinstance(item, Mapping)}
+            if not code_lines.intersection(ai_lines) or _identity_key(ai_value) == _identity_key(code_field["value"]):
+                continue
+            if any(
+                finding.get("category") == "internal_fact_conflict"
+                and finding.get("affected_fact") == kind
+                and ai_lines.intersection(
+                    item.get("line_id") for item in finding.get("evidence", [])
+                    if isinstance(item, Mapping)
+                )
+                for finding in existing_findings
+            ):
+                continue
+            conflicts.append({
+                "category": "internal_fact_conflict", "status": "conflicting",
+                "observation": f"AI and code read different {kind} identities from the same source.",
+                "reason": "The code-owned identity remains authoritative; the AI reading is retained for human review.",
+                "importance": "attention", "confidence": "medium",
+                "limitation": "The document alone does not resolve the competing interpretations.",
+                "material_effect": "none", "affected_fact": kind,
+                "evidence": deepcopy(evidence), "authority": "code", "source": "reconciliation",
+            })
+    return conflicts
+
+
+def _identity_key(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
 
 
 def _build_checklist(findings: list[dict[str, Any]]) -> dict[str, dict[str, int | bool]]:

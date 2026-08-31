@@ -144,7 +144,11 @@ def run_document_analysis(
             )
 
         try:
-            validated = validate_document_analysis_response(response.payload, _masked_document(document, exclusion_intervals))
+            validated = validate_document_analysis_response(
+                response.payload,
+                _masked_document(document, exclusion_intervals),
+                understanding_context=understanding_context,
+            )
         except DocumentAnalysisValidationError as exc:
             stage = str(exc).rsplit(": ", 1)[-1]
             if invalid_retries < settings.invalid_response_retry_limit and attempts < settings.absolute_attempt_limit:

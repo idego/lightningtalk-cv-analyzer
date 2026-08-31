@@ -366,7 +366,8 @@ def test_prompt_requires_structural_material_fields_for_every_finding() -> None:
     instructions = " ".join(_prompt_instructions().split())
 
     assert "For every finding, always return both `material_effect` and `affected_fact`" in instructions
-    assert "`material_effect: none` and `affected_fact: not_applicable`" in instructions
+    assert "For every other non-`document_artifact` finding, return `affected_fact: not_applicable`" in instructions
+    assert "For `internal_fact_conflict`, set `affected_fact` to the closed target" in instructions
 
 
 def test_prompt_surfaces_explicit_education_outside_eu_as_neutral_context() -> None:
@@ -471,7 +472,7 @@ def test_education_outside_eu_finding_is_name_and_score_invariant(
     ("material_effect", "affected_fact"),
     (("meaning_changed", "timeline"), ("none", "timeline")),
 )
-def test_validator_rejects_material_effect_on_non_document_artifact(
+def test_validator_normalizes_material_effect_on_non_document_artifact(
     material_effect: str,
     affected_fact: str,
 ) -> None:
@@ -494,8 +495,11 @@ def test_validator_rejects_material_effect_on_non_document_artifact(
         }
     ]
 
-    with pytest.raises(DocumentAnalysisValidationError, match="finding classification"):
-        validate_document_analysis_response(response, redacted)
+    validated = validate_document_analysis_response(response, redacted)
+    finding = validated.payload["findings"][0]
+    assert finding["material_effect"] == "none"
+    assert finding["affected_fact"] == "not_applicable"
+    assert finding["check_id"] == "timeline"
 
 
 def test_validator_rejects_not_applicable_document_artifact_fact() -> None:
@@ -524,6 +528,48 @@ def test_validator_rejects_not_applicable_document_artifact_fact() -> None:
 
     with pytest.raises(DocumentAnalysisValidationError, match="finding classification"):
         validate_document_analysis_response(response, redact_national_ids(raw))
+
+
+def test_validator_synthesizes_code_ai_education_identity_conflict() -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    understanding = {"records": [{
+        "id": "education-1", "kind": "education", "fields": [{
+            "name": "institution", "status": "supported", "value": "Example",
+            "evidence": [{"line_id": "page-0002-line-0002"}],
+        }],
+    }]}
+
+    validated = validate_document_analysis_response(
+        response, redacted, understanding_context=understanding,
+    )
+
+    conflict = next(item for item in validated.payload["findings"] if item["category"] == "internal_fact_conflict")
+    assert conflict["affected_fact"] == "education"
+    assert conflict["check_id"] == "education"
+    assert conflict["authority"] == "code"
+    assert validated.payload["checklist"]["education"]["issue_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("affected_fact", "check_id"),
+    (("employment", "employment"), ("education", "education"), ("phone", "contact")),
+)
+def test_internal_conflict_uses_bounded_affected_fact_for_checklist(
+    affected_fact: str, check_id: str,
+) -> None:
+    _, redacted = _documents()
+    response = _valid_response()
+    response["findings"] = [{
+        "category": "internal_fact_conflict", "status": "conflicting",
+        "observation": "Two supported readings conflict.",
+        "reason": "Code and AI disagree.", "importance": "attention",
+        "confidence": "medium", "limitation": "Human review is required.",
+        "material_effect": "none", "affected_fact": affected_fact,
+        "evidence": [{"page_id": "page-0001", "line_id": "page-0001-line-0001"}],
+    }]
+    validated = validate_document_analysis_response(response, redacted)
+    assert validated.payload["findings"][0]["check_id"] == check_id
 
 
 def test_validator_suppresses_understandable_document_artifact_finding() -> None:

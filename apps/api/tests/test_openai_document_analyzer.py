@@ -149,6 +149,30 @@ def test_request_frames_luna_as_an_independent_gap_first_second_pass() -> None:
     assert "<redacted_cv_markdown>" in input_text
 
 
+def test_gap_checklist_excludes_fields_the_strict_ai_schema_cannot_return() -> None:
+    document = redact_national_ids(RawDocument(
+        pages=(SourcePage("page-0001", 1, "Education\nExample University"),),
+        source_format="text",
+    ))
+    context = {"status": "completed", "sections": [], "ambiguous_spans": [], "records": [{
+        "id": "education-1", "kind": "education", "section_id": "section-1",
+        "fields": [
+            {"name": name, "status": "unknown", "value": None, "authority": "code", "confidence": "low"}
+            for name in ("program", "study_dates", "degree", "result", "education_location")
+        ],
+    }]}
+    request = build_document_analysis_request(
+        AISettings(enabled=True, api_key="test-key"), document,
+        analyze_deterministically(document, "1.0.0"), understanding_context=context,
+    )
+    text = request.openai_payload["input"][0]["content"][0]["text"]
+    assert '"field": "program"' in text
+    assert '"field": "study_dates"' in text
+    assert '"field": "degree"' not in text
+    assert '"field": "result"' not in text
+    assert '"field": "education_location"' not in text
+
+
 def test_responses_analyzer_maps_timeout_and_refusal_without_payload_text() -> None:
     settings, request = _request()
     timeout = OpenAIResponsesDocumentAnalyzer(

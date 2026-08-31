@@ -88,8 +88,12 @@ and a marker such as `??`, an HTML-like tag, or an entity is not enough. For a
 `meaning_changed`, and select the closed `affected_fact` value that identifies
 the blocked fact or document meaning; never use `not_applicable`. For every
 finding, always return both `material_effect` and `affected_fact`. For every
-non-`document_artifact` finding, return `material_effect: none` and
-`affected_fact: not_applicable`. Do not use prose to replace this structural
+non-`document_artifact` finding, return `material_effect: none`. For
+`internal_fact_conflict`, set `affected_fact` to the closed target that
+conflicts (`candidate_name`, `phone`, `stated_location`, `education`,
+`employment`, `employment_dates`, or `relationship`). For every other
+non-`document_artifact` finding, return `affected_fact: not_applicable`. Do not
+use prose to replace this structural
 classification. State which important fact or meaning is blocked. Put other source-structure limits in
 `analysis_limitations`.
 

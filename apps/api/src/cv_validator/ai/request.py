@@ -16,6 +16,13 @@ SCHEMA_VERSION = "document-analysis-schema-v9"
 LEGACY_SCHEMA_VERSION = "document-analysis-schema-v7"
 INPUT_CONTRACT_VERSION = "document-analysis-input-v4"
 DETERMINISTIC_OBSERVATIONS_VERSION = "deterministic-observations-v1"
+_AI_REPRESENTABLE_FIELDS = {
+    "education": {"institution", "program", "study_dates"},
+    "employment": {
+        "organization", "role", "employment_dates", "employment_location",
+        "relationship_type",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -160,7 +167,10 @@ def _bounded_understanding_context(value: dict[str, Any] | None) -> dict[str, An
         missing_fields.extend(
             {"record_id": item.get("id"), "kind": item.get("kind"), "field": field.get("name"), "status": field.get("status")}
             for field in fields
-            if field.get("status") != "supported" or field.get("value") is None
+            if (
+                field.get("name") in _AI_REPRESENTABLE_FIELDS.get(item.get("kind"), set())
+                and (field.get("status") != "supported" or field.get("value") is None)
+            )
         )
     ambiguous = [{"id": item.get("id"), "category": item.get("category"), "reason_code": item.get("reason_code")} for item in value.get("ambiguous_spans", [])[:100] if isinstance(item, dict)]
     return {
