@@ -16,6 +16,17 @@ export function consumePreviewWheel(event: {
   event.stopPropagation();
 }
 
+export function measureRenderedDocx(root: HTMLElement) {
+  const pageWidths = Array.from(
+    root.querySelectorAll<HTMLElement>(".docx"),
+    (page) => page.offsetWidth,
+  ).filter((width) => width > 0);
+  return {
+    width: pageWidths.length ? Math.max(...pageWidths) : root.scrollWidth,
+    height: root.scrollHeight,
+  };
+}
+
 export function fitWidthTransform({
   viewportWidth,
   contentWidth,

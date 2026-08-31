@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText, LoaderCircle, Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/app-settings";
-import { consumePreviewWheel, fitWidthTransform, pdfPageWidthUrl, wheelTransform, type ViewTransform } from "@/lib/document-preview";
+import { consumePreviewWheel, fitWidthTransform, measureRenderedDocx, pdfPageWidthUrl, wheelTransform, type ViewTransform } from "@/lib/document-preview";
 
 type ContentBounds = { width: number; height: number };
 
@@ -52,8 +52,7 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
   const measureDocument = useCallback(() => {
     const documentNode = documentRef.current;
     if (!documentNode) return false;
-    const width = documentNode.scrollWidth;
-    const height = documentNode.scrollHeight;
+    const { width, height } = measureRenderedDocx(documentNode);
     if (!width || !height) return false;
     boundsRef.current = { width, height };
     if (canvasRef.current) {
@@ -166,7 +165,7 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
         <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
           {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80"><LoaderCircle className="size-6 animate-spin" /></div> : null}
           {error ? <div className="absolute inset-x-4 top-4 z-10 rounded-lg border border-amber-500/30 bg-background p-3 text-sm">{error}</div> : null}
-          <div ref={canvasRef} className="document-preview-canvas absolute left-0 top-0 origin-top-left will-change-transform" data-programmatic="false"><div ref={documentRef} className="docx-preview-host inline-block p-4" /></div>
+          <div ref={canvasRef} className="document-preview-canvas absolute left-0 top-0 origin-top-left will-change-transform" data-programmatic="false"><div ref={documentRef} className="docx-preview-host inline-block" /></div>
         </div>
       )}
     </aside>

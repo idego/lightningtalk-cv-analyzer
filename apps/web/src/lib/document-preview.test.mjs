@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { consumePreviewWheel, fitWidthTransform, pdfPageWidthUrl, wheelTransform } from "./document-preview.ts";
+import { consumePreviewWheel, fitWidthTransform, measureRenderedDocx, pdfPageWidthUrl, wheelTransform } from "./document-preview.ts";
 
 test("fit width ignores document height and fills the viewport", () => {
   assert.deepEqual(fitWidthTransform({ viewportWidth: 900, contentWidth: 600 }), { x: 0, y: 0, scale: 1.5 });
   assert.deepEqual(fitWidthTransform({ viewportWidth: 900, contentWidth: 600, contentHeight: 12000 }), { x: 0, y: 0, scale: 1.5 });
+});
+
+test("DOCX measurement uses the rendered page instead of host and wrapper gutters", () => {
+  const root = {
+    scrollWidth: 880,
+    scrollHeight: 2200,
+    querySelectorAll: (selector) => {
+      assert.equal(selector, ".docx");
+      return [{ offsetWidth: 816 }, { offsetWidth: 816 }];
+    },
+  };
+
+  assert.deepEqual(measureRenderedDocx(root), { width: 816, height: 2200 });
+  assert.equal(fitWidthTransform({ viewportWidth: 612, contentWidth: measureRenderedDocx(root).width }).scale, 0.75);
 });
 
 test("focal wheel zoom keeps the document point below the pointer invariant", () => {

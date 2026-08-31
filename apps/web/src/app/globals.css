@@ -154,7 +154,7 @@
 .docx-preview-host .docx-wrapper {
   min-height: 0;
   width: max-content;
-  padding: 1rem;
+  padding: 0;
   background: transparent;
 }
 
