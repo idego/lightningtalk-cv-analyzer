@@ -28,7 +28,7 @@ import { useCopy } from "@/lib/app-settings";
 import { summarizeDateRanges } from "@/lib/date-range-summary";
 import { StructuralAuditPanel } from "@/components/analyze/structural-audit-panel";
 import { selectStructuredRecords } from "@/lib/understanding-selectors";
-import { RecordAuthorityDetails } from "@/components/analyze/record-authority-details";
+import { educationOverviewDetail, employmentOverviewDetail } from "@/lib/overview-record-details";
 
 function FlagList({ flags, reportLanguage }: { flags: ReviewFlag[]; reportLanguage: "en" | "pl" }) {
   const { t } = useCopy();
@@ -121,13 +121,6 @@ function displayCountry(countryCode: string, language: "en" | "pl") {
   return name && name !== code ? `${name} (${code})` : code;
 }
 
-function employmentDetail(organization: string, location?: string | null, dates?: string | null) {
-  const locationAlreadyShown = location
-    ? organization.toLocaleLowerCase().includes(location.toLocaleLowerCase())
-    : false;
-  return [organization, locationAlreadyShown ? null : location, dates].filter(Boolean).join(" · ");
-}
-
 function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { status: "ok" }>["report"] }) {
   const { settings, t } = useCopy();
   const aiContact = report.ai_analysis.facts.contact;
@@ -212,7 +205,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<GraduationCap className="size-4" />}
                 label={t("educationEntry")}
                 value={fact.institution ?? t("educationEntry")}
-                detail={<RecordAuthorityDetails record={fact} leading={[fact.program, fact.study_dates]} />}
+                detail={educationOverviewDetail(fact)}
                 tone={educationTone}
               />)}
             </div>
@@ -229,7 +222,7 @@ function StructuredFacts({ report }: { report: Extract<AnalyzeItemResult, { stat
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
                 value={fact.role ?? fact.relationship_type ?? t("employmentEntry")}
-                detail={<RecordAuthorityDetails record={fact} leading={[employmentDetail(fact.organization ?? fact.relationship_type ?? "", fact.location, fact.employment_dates)]} />}
+                detail={employmentOverviewDetail(fact)}
                 tone={employmentTone}
               />)}
             </div>

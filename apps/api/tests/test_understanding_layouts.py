@@ -117,3 +117,60 @@ def test_oversized_employment_entry_abstains_with_explicit_limit_issue():
     payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
     assert [record for record in payload["records"] if record["kind"] == "employment"] == []
     assert any(item["reason_code"] == "employment_candidate_limit" for item in payload["ambiguous_spans"])
+
+
+def test_duties_between_date_anchored_jobs_do_not_own_the_next_identity():
+    text = """Experience
+Software Engineer | First Company Ltd
+Jan 2020 - Feb 2022
+• Led platform migration
+• Managed release support
+Product Manager | Second Company Ltd
+Mar 2022 - Present"""
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    records = [record for record in payload["records"] if record["kind"] == "employment"]
+    fields = [{field["name"]: field["value"] for field in record["fields"]} for record in records]
+
+    assert [(item["role"], item["organization"], item["employment_dates"]) for item in fields] == [
+        ("Software Engineer", "First Company Ltd", "Jan 2020 - Feb 2022"),
+        ("Product Manager", "Second Company Ltd", "Mar 2022 - Present"),
+    ]
+    assert all("Led" not in (item["role"] or "") and "Managed" not in (item["role"] or "") for item in fields)
+    assert len(payload["timeline_record_links"]) == 2
+    assert len({link["record_id"] for link in payload["timeline_record_links"]}) == 2
+
+
+def test_docx_list_item_duty_does_not_become_employment_identity():
+    document = Document(); document.add_paragraph("Experience")
+    document.add_paragraph("Software Engineer | First Company Ltd")
+    document.add_paragraph("Jan 2020 - Feb 2022")
+    document.add_paragraph("Led platform migration", style="List Bullet")
+    document.add_paragraph("Product Manager | Second Company Ltd")
+    document.add_paragraph("Mar 2022 - Present")
+    buffer = BytesIO(); document.save(buffer)
+
+    payload = understanding_to_payload(understand_document(redact_national_ids(extract_docx(buffer.getvalue())), "test", snapshot_month="2026-08"))
+    records = [record for record in payload["records"] if record["kind"] == "employment"]
+    fields = [{field["name"]: field["value"] for field in record["fields"]} for record in records]
+    assert [(item["role"], item["organization"]) for item in fields] == [
+        ("Software Engineer", "First Company Ltd"),
+        ("Product Manager", "Second Company Ltd"),
+    ]
+
+
+def test_combined_education_line_uses_bounded_semantic_fragments():
+    text = "Education\nExample University | MSc Computer Science | 2020 - 2022"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    record = next(record for record in payload["records"] if record["kind"] == "education")
+    fields = {field["name"]: field for field in record["fields"]}
+
+    assert fields["institution"]["value"] == "Example University"
+    assert fields["degree"]["value"] == "MSc Computer Science"
+    assert fields["study_dates"]["value"] == "2020 - 2022"
+    assert fields["institution"]["evidence"][0]["excerpt"] == "Example University"
+
+
+def test_unbounded_combined_education_line_abstains_instead_of_storing_whole_line():
+    text = "Education\nExample University MSc Computer Science 2020 - 2022"
+    payload = understanding_to_payload(understand_document(redact_national_ids(RawDocument(pages=(SourcePage("page-0001", 1, text),), source_format="text")), "test", snapshot_month="2026-08"))
+    assert [record for record in payload["records"] if record["kind"] == "education"] == []

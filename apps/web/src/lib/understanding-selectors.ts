@@ -3,7 +3,7 @@ import { isSelfEmploymentLabel } from "./relationship-labels.js";
 
 export type DisplayRecord = {
   id: string; kind: "education" | "employment"; authority: "code" | "ai";
-  confidence: string; institution?: string; program?: string | null; study_dates?: string | null;
+  confidence: string; institution?: string; program?: string | null; degree?: string | null; study_dates?: string | null;
   organization?: string; role?: string | null; employment_dates?: string | null; location?: string | null;
   relationship_type?: string | null; unknown_fields: string[];
   ai_enrichments?: Array<{ name: string; value: string; authority: "ai" }>;
@@ -20,7 +20,7 @@ function codeRecord(record: UnderstandingRecord): DisplayRecord | null {
   const relationship = field(record, "relationship_type")?.value;
   if ((identity?.status !== "supported" || !identity.value) && !(record.kind === "employment" && isSelfEmploymentLabel(relationship))) return null;
   const unknown_fields = record.fields.filter((item) => item.status !== "supported").map((item) => item.name);
-  if (record.kind === "education") return { id: record.id, kind: "education", authority: "code", confidence: record.confidence, institution: identity?.value ?? undefined, program: field(record, "program")?.value, study_dates: field(record, "study_dates")?.value, location: field(record, "education_location")?.value, unknown_fields, ai_enrichments: [], conflicts: [] };
+  if (record.kind === "education") return { id: record.id, kind: "education", authority: "code", confidence: record.confidence, institution: identity?.value ?? undefined, program: field(record, "program")?.value, degree: field(record, "degree")?.value, study_dates: field(record, "study_dates")?.value, location: field(record, "education_location")?.value, unknown_fields, ai_enrichments: [], conflicts: [] };
   return { id: record.id, kind: "employment", authority: "code", confidence: record.confidence, organization: identity?.value ?? undefined, relationship_type: relationship, role: field(record, "role")?.value, employment_dates: field(record, "employment_dates")?.value, location: field(record, "employment_location")?.value, unknown_fields, ai_enrichments: [], conflicts: [] };
 }
 

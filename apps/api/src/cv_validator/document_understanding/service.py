@@ -17,6 +17,7 @@ from cv_validator.document_understanding.normalization import normalize_text, su
 from cv_validator.document_understanding.relationships import is_self_employment_label
 from cv_validator.document_understanding.skills import DEFAULT_INDEX, SkillIndexError, match_explicit_skills
 from cv_validator.extraction.deterministic import analyze_deterministically
+from cv_validator.ingestion import SourceLine
 from cv_validator.location import LocationResolver
 
 PARSER_VERSION = "document-understanding-parser-v1"
@@ -28,6 +29,7 @@ _ORG_SUFFIX = re.compile(r"(?i)\b(?:ltd|limited|inc|corp|corporation|llc|gmbh|ag
 _IDENTITY_CONNECTOR = re.compile(r"(?i)^\s*(?P<role>[^|;\t•—–]{2,80}?)\s+(?P<connector>at|@|[—–]|-{2,}|\|)\s+(?P<organization>[^|;\t•—–]{2,80}?)\s*$")
 _WORK_MODE = frozenset({"remote", "hybrid", "onsite", "on-site", "zdalnie", "hybrydowo", "stacjonarnie"})
 _DUTY_PREFIX = re.compile(r"(?i)^(?:built|build|developed|develop|created|create|managed|manage|led|lead|designed|design|implemented|implement|maintained|maintain|responsible\s+for)\b")
+_VISIBLE_BULLET_PREFIX = re.compile(r"^\s*(?:[•●▪◦‣⁃]|[-*]\s)")
 _MAX_EMPLOYMENT_ENTRY_LINES = 64
 _MAX_EMPLOYMENT_ENTRY_CHARS = 8192
 _MAX_EMPLOYMENT_CANDIDATES = 32
@@ -132,21 +134,55 @@ def _entries(document, sections, dates):
         if section.kind not in {SectionKind.EDUCATION,SectionKind.EMPLOYMENT}: continue
         start,end=line_order[section.start_line_id],line_order[section.end_line_id]
         blocks=[b for b in document.source_blocks if b.line_ids and any(start < line_order.get(line_id,-1) <= end for line_id in b.line_ids)]
-        current=[]; anchors=[]; table=None; row=None; anchor_first=False
+        current=[]; anchors=[]; table=None; row=None; anchor_first=False; anchor_block_index=None
         for block in blocks:
             row_boundary=current and block.table_id is not None and table==block.table_id and row is not None and block.row_index!=row
             found=[d for line_id in block.line_ids for d in dates_by_line.get(line_id,())]
-            if current and (row_boundary or (found and anchors)):
-                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False
+            if current and row_boundary:
+                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False; anchor_block_index=None
+            if current and found and anchors:
+                if anchor_first or section.kind is SectionKind.EDUCATION:
+                    result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False; anchor_block_index=None
+                else:
+                    split_at=_next_employment_identity_start(document,(*current,block),(anchor_block_index or 0)+1)
+                    if split_at is not None:
+                        result.append(_entry(section.id,current[:split_at],anchors,len(result)))
+                        current=current[split_at:]; anchors=[]; anchor_first=False; anchor_block_index=None
+                    else:
+                        issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
             non_date_before=bool(current)
             current.append(block); table,row=block.table_id,block.row_index
             anchors.extend(d for d in found if d.id not in {x.id for x in anchors})
-            if found and not non_date_before: anchor_first=True
+            if found:
+                if not non_date_before: anchor_first=True
+                if anchor_block_index is None: anchor_block_index=len(current)-1
             if len(anchors)>1: issues.extend(_ambiguous_from_evidence(anchors[0].evidence,"multiple_date_anchors",block.source_order))
-            if found and non_date_before and not anchor_first:
-                result.append(_entry(section.id,current,anchors,len(result))); current=[]; anchors=[]; anchor_first=False
         if current: result.append(_entry(section.id,current,anchors,len(result)))
     return tuple(result),tuple(issues)
+
+
+def _next_employment_identity_start(document, blocks, start):
+    lookup={line.line_id:line for line in document.source_lines}; hints=[]
+    for index,block in enumerate(blocks[start:],start):
+        lines=[lookup[line_id] for line_id in block.line_ids if line_id in lookup]
+        text=" ".join(line.text.strip() for line in lines).strip()
+        if not text or block.kind=="list_item" or _VISIBLE_BULLET_PREFIX.match(text) or _DUTY_PREFIX.search(text):continue
+        without_dates=_strip_date_ranges(text)
+        if without_dates and (any(pattern.search(without_dates) for pattern in (_LABELS["organization"],_LABELS["role"])) or _looks_org(without_dates) or _has_role_marker(without_dates) or _IDENTITY_CONNECTOR.match(without_dates)):
+            hints.append(index)
+    if not hints:return None
+    identity_index=hints[-1]
+    if identity_index>start:
+        previous=blocks[identity_index-1]; lines=[lookup[line_id] for line_id in previous.line_ids if line_id in lookup]
+        text=" ".join(line.text.strip() for line in lines).strip()
+        if text and previous.kind!="list_item" and not _VISIBLE_BULLET_PREFIX.match(text) and not _DUTY_PREFIX.search(text):identity_index-=1
+    return identity_index
+
+
+def _strip_date_ranges(value):
+    # Structural date evidence supplies the exact ownership later. This helper
+    # only decides whether the same block also contains an identity fragment.
+    return re.sub(r"(?i)(?:[a-ząćęłńóśźż]{3,12}\.?\s+)?\d{4}\s*(?:[-–—]|\bto\b)\s*(?:(?:[a-ząćęłńóśźż]{3,12}\.?\s+)?\d{4}|present|current|now|obecnie|teraz)","",value).strip(" |,;:–—-")
 
 
 def _entry(section_id,blocks,dates,order):
@@ -157,17 +193,20 @@ def _entry(section_id,blocks,dates,order):
 def _records(document,sections,dates,entries,exclusion):
     section_by_id={x.id:x for x in sections}; block_by_id={x.id:x for x in document.source_blocks}; date_by_id={x.id:x for x in dates}; records=[]; issues=[]
     for entry in entries:
-        lines=_lines(document,[block_by_id[x] for x in entry.block_ids]); entry_dates=[date_by_id[x] for x in entry.date_range_ids]
+        entry_blocks=[block_by_id[x] for x in entry.block_ids]; lines=_lines(document,entry_blocks); entry_dates=[date_by_id[x] for x in entry.date_range_ids]
         if not lines: continue
         if section_by_id[entry.section_id].kind is SectionKind.EDUCATION: record,new_issues=_education(document,section_by_id[entry.section_id],entry,lines,entry_dates,exclusion)
-        else: record,new_issues=_employment(document,section_by_id[entry.section_id],entry,lines,entry_dates,exclusion)
+        else: record,new_issues=_employment(document,section_by_id[entry.section_id],entry,lines,entry_dates,exclusion,entry_blocks)
         issues.extend(new_issues)
         if record: records.append(record)
     return tuple(records),tuple(issues)
 
 
 def _education(document,section,entry,lines,dates,exclusion):
-    identity=_unique(lines,lambda s:any(m in normalize_text(s) for m in _INSTITUTIONS)); degree=_unique(lines,lambda s:any(m in normalize_text(s) for m in _DEGREES)); program=_label(lines,"program")
+    candidates=_education_candidates(document,lines,dates)
+    identity=_unique(candidates,lambda s:any(m in normalize_text(s) for m in _INSTITUTIONS)); degree=_unique(candidates,lambda s:any(m in normalize_text(s) for m in _DEGREES)); program=_label(lines,"program")
+    if identity is not None and degree is identity and program is None:
+        return None,_issue(document,lines,"unsupported_education_identity",entry.source_order,exclusion)
     if identity is None: return None,_issue(document,lines,"unsupported_education_identity",entry.source_order,exclusion)
     institution=_field(document,"institution",identity,exclusion)
     if institution.status!="supported" or not (degree or program or dates): return None,_issue(document,lines,"insufficient_education_support",entry.source_order,exclusion)
@@ -175,14 +214,15 @@ def _education(document,section,entry,lines,dates,exclusion):
     return _record("education",section,entry,lines,fields,dates),()
 
 
-def _employment(document,section,entry,lines,dates,exclusion):
+def _employment(document,section,entry,lines,dates,exclusion,blocks):
     relationship=_unique(lines,is_self_employment_label); role=_label(lines,"role"); client=_label(lines,"client"); organization=_label(lines,"organization")
     issues=();truncated=False
     # Unlabelled layout inference is anchored to a shared date annotation.  This
     # prevents descriptive text in an employment section from becoming a record
     # merely because two short, styled fragments happen to be adjacent.
     if dates:
-        candidates,truncated=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")})
+        inadmissible_line_ids={line_id for block in blocks if block.kind=="list_item" for line_id in block.line_ids}
+        candidates,truncated=_employment_candidates(document,lines,dates,exclusion,excluded={relationship,client,_label(lines,"location")},inadmissible_line_ids=inadmissible_line_ids)
         if truncated:
             issues=_issue(document,lines,"employment_candidate_limit",entry.source_order,exclusion)
         else:
@@ -219,7 +259,7 @@ def _looks_org(value):
     return not is_self_employment_label(text) and not _LABELS["client"].search(text) and bool(_ORG_SUFFIX.search(text))
 
 
-def _employment_candidates(document,lines,dates,exclusion,excluded):
+def _employment_candidates(document,lines,dates,exclusion,excluded,inadmissible_line_ids=frozenset()):
     if len(lines)>_MAX_EMPLOYMENT_ENTRY_LINES or sum(len(line.text) for line in lines)>_MAX_EMPLOYMENT_ENTRY_CHARS:
         return (),True
     line_order={line.line_id:index for index,line in enumerate(lines)}
@@ -231,7 +271,7 @@ def _employment_candidates(document,lines,dates,exclusion,excluded):
                 date_intervals.setdefault(evidence.line_id,[]).append((evidence.start_offset,evidence.end_offset))
     result=[]
     for line in lines:
-        if line in excluded or any(pattern.search(line.text) for pattern in _LABELS.values()):
+        if line in excluded or line.line_id in inadmissible_line_ids or _VISIBLE_BULLET_PREFIX.match(line.text) or any(pattern.search(line.text) for pattern in _LABELS.values()):
             continue
         intervals=sorted(date_intervals.get(line.line_id,()))
         line_presentation=presentation_by_line.get(line.line_id,())
@@ -247,6 +287,7 @@ def _employment_candidates(document,lines,dates,exclusion,excluded):
         for start,end,value,date_side,role_layout,organization_layout in spans:
             normalized=normalize_text(value); words=value.split()
             if not normalized or len(value)>110 or len(words)>12 or len(words)>0 and len(words)==1 and not any(ch.isalpha() for ch in value):continue
+            if _DUTY_PREFIX.search(value):continue
             if any(marker in normalized for marker in _INSTITUTIONS) or is_self_employment_label(value):continue
             if re.search(r"(?i)(?:https?://|www\.|@|\+?\d[\d ()./-]{6,})",value):continue
             if value.rstrip().endswith((".",";")) and len(words)>5:continue
@@ -265,6 +306,26 @@ def _employment_candidates(document,lines,dates,exclusion,excluded):
         unique[key]=replace(candidate,role_layout_signal=candidate.role_layout_signal or bool(previous and previous.role_layout_signal),organization_layout_signal=candidate.organization_layout_signal or bool(previous and previous.organization_layout_signal))
     candidates=tuple(sorted(unique.values(),key=lambda item:(item.source_order,item.start_offset,item.end_offset)))
     return _sequence_layout_signals(candidates,date_intervals,line_order),False
+
+
+def _education_candidates(document,lines,dates):
+    date_intervals={}
+    for item in dates:
+        for evidence in item.evidence:
+            if evidence.line_id and evidence.start_offset is not None and evidence.end_offset is not None:
+                date_intervals.setdefault(evidence.line_id,[]).append((evidence.start_offset,evidence.end_offset))
+    presentation_by_line=_presentation_by_line(document,lines); result=[]
+    for line in lines:
+        intervals=sorted(date_intervals.get(line.line_id,())); spans=[]; cursor=line.start_offset
+        for start,end in intervals:
+            if cursor<start:spans.extend(_candidate_fragments(document,line,cursor,start,"before",presentation_by_line.get(line.line_id,())))
+            cursor=max(cursor,end)
+        if cursor<line.end_offset:spans.extend(_candidate_fragments(document,line,cursor,line.end_offset,"after" if intervals else None,presentation_by_line.get(line.line_id,())))
+        for start,end,value,*_ in spans:
+            if not value or len(value)>256 or _VISIBLE_BULLET_PREFIX.match(value):continue
+            result.append(SourceLine(line.page_id,line.line_number,value,start,end))
+    unique={(line.page_id,line.start_offset,line.end_offset):line for line in result}
+    return tuple(sorted(unique.values(),key=lambda line:(line.page_id,line.start_offset,line.end_offset)))
 
 
 def _presentation_by_line(document,lines):
