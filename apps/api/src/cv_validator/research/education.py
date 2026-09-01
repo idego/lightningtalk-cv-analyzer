@@ -28,8 +28,13 @@ class EducationResearcher(Protocol):
 class EducationResearchService:
     researcher: EducationResearcher
 
-    def run(self, stored_report: dict[str, Any]) -> dict[str, Any]:
-        request = build_education_research_request(stored_report)
+    def run(
+        self,
+        stored_report: dict[str, Any],
+        *,
+        request: EducationResearchRequest | None = None,
+    ) -> dict[str, Any]:
+        request = request or build_education_research_request(stored_report)
         payload, response_model, usage = self.researcher.research(request)
         validate_education_research(payload, request=request)
         result = normalize_public_education_result(payload)

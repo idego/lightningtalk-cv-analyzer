@@ -50,6 +50,7 @@ def extract_mechanical(segments: Iterable[TextSegment]) -> dict[str, object]:
         "email_findings": _email_findings(emails),
         "location_resolution": [],
         "eu_status": None,
+        "comparisons": [],
     }
 
 

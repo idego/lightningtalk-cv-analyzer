@@ -4,7 +4,9 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CV_VALIDATOR_DB_PATH=/app/data/cv_analyzer_v2.db
+    CV_VALIDATOR_DB_PATH=/app/data/docling_luna.db \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 COPY pyproject.toml README.md ./
 COPY src ./src

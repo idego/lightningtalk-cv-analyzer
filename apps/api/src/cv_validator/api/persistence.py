@@ -358,7 +358,15 @@ class PersistenceStore:
                         schema_version, configured_model, response_model,
                         accessed_at, usage_json, result_json, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(analysis_id, research_version) DO NOTHING
+                    ON CONFLICT(analysis_id, research_version) DO UPDATE SET
+                        status=excluded.status, prompt_version=excluded.prompt_version,
+                        schema_version=excluded.schema_version,
+                        configured_model=excluded.configured_model,
+                        response_model=excluded.response_model,
+                        accessed_at=excluded.accessed_at,
+                        usage_json=excluded.usage_json,
+                        result_json=excluded.result_json,
+                        created_at=excluded.created_at
                     """,
                     (analysis_id, versions["research"], result["status"],
                      versions["prompt"], versions["schema"], model["configured"],
@@ -388,7 +396,15 @@ class PersistenceStore:
                         schema_version, configured_model, response_model,
                         accessed_at, usage_json, result_json, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(analysis_id, research_version) DO NOTHING""",
+                    ON CONFLICT(analysis_id, research_version) DO UPDATE SET
+                        status=excluded.status, prompt_version=excluded.prompt_version,
+                        schema_version=excluded.schema_version,
+                        configured_model=excluded.configured_model,
+                        response_model=excluded.response_model,
+                        accessed_at=excluded.accessed_at,
+                        usage_json=excluded.usage_json,
+                        result_json=excluded.result_json,
+                        created_at=excluded.created_at""",
                     (analysis_id, versions["research"], result["status"], versions["prompt"],
                      versions["schema"], model["configured"], model["response"], result["accessed_at"],
                      json.dumps(result["usage"]), json.dumps(result), now),

@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from dataclasses import dataclass
+from time import perf_counter
+from typing import Any
+
+from cv_validator.analysis.candidates import (
+    EDUCATION_FIELDS,
+    EMPLOYMENT_FIELDS,
+    apply_review,
+    public_profile,
+    public_records,
+    validate_specialists,
+)
+from cv_validator.analysis.docling_converter import (
+    CONVERTER_VERSION,
+    DOCLING_VERSION,
+    DoclingTextConverter,
+)
+from cv_validator.analysis.luna_client import (
+    REVIEWER_REASONING_EFFORT,
+    SPECIALIST_REASONING_EFFORT,
+    LunaAnalysisClient,
+    ModelPassError,
+)
+from cv_validator.analysis.source import SourceDocument
+from cv_validator.analysis.strategy import AnalysisInput
+from cv_validator.location import Ambiguous, LocationResolver, Resolved, ResolutionLevel
+from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
+
+
+STRATEGY_NAME = "docling-luna"
+STRATEGY_VERSION = "docling-luna-analysis-v1"
+MAX_PASS_ATTEMPTS = 2
+EU_COUNTRY_CODES = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
+    "FR", "GR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL",
+    "PT", "RO", "SE", "SI", "SK",
+}
+
+
+@dataclass(frozen=True)
+class _PassOutcome:
+    payload: dict[str, Any]
+    status: str
+    attempt_count: int
+    latency_ms: int
+    failure_reason: str | None
+    usage: dict[str, Any]
+    model: str | None
+
+    def status_payload(self, effort: str) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "attempt_count": self.attempt_count,
+            "latency_ms": self.latency_ms,
+            "failure_reason": self.failure_reason,
+            "usage": _bounded_usage(self.usage),
+            "model": self.model,
+            "reasoning_effort": effort,
+        }
+
+
+class DoclingLunaAnalysisStrategy:
+    name = STRATEGY_NAME
+    version = STRATEGY_VERSION
+
+    def __init__(
+        self,
+        *,
+        converter: DoclingTextConverter | None = None,
+        client: LunaAnalysisClient | None = None,
+        location_resolver: LocationResolver | None = None,
+    ) -> None:
+        self._converter = converter or DoclingTextConverter()
+        self._client = client
+        self._location_resolver = location_resolver
+
+    @property
+    def ready(self) -> bool:
+        return True
+
+    def analyze(self, request: AnalysisInput) -> dict[str, Any]:
+        analysis_started = perf_counter()
+        source = self._converter.convert(
+            request.content,
+            request.filename,
+            request.source_format,
+        )
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="cv-base") as pool:
+            pass_futures = {
+                name: pool.submit(self._run_pass, name, source)
+                for name in ("profile", "employment", "education")
+            }
+            mechanical_future = pool.submit(extract_mechanical, source.blocks)
+            outcomes = {name: future.result() for name, future in pass_futures.items()}
+            mechanical = mechanical_future.result()
+
+        state = validate_specialists(
+            source,
+            outcomes["profile"].payload,
+            outcomes["employment"].payload,
+            outcomes["education"].payload,
+        )
+        review_context = {
+            "profile": public_profile(state.profile),
+            "employment": public_records(state.employment, EMPLOYMENT_FIELDS),
+            "education": public_records(state.education, EDUCATION_FIELDS),
+            "rejected": state.rejected,
+            "conflicts": state.conflicts,
+            "mechanical": mechanical,
+            "pass_statuses": {name: outcome.status for name, outcome in outcomes.items()},
+        }
+        review_outcome = self._run_pass("review", source, review_context)
+        state, review = apply_review(source, state, review_outcome.payload)
+        mechanical = _enrich_mechanical(
+            deepcopy(mechanical),
+            public_profile(state.profile),
+            self._location_resolver,
+        )
+        pass_statuses = {
+            name: outcome.status_payload(SPECIALIST_REASONING_EFFORT)
+            for name, outcome in outcomes.items()
+        }
+        pass_statuses["review"] = review_outcome.status_payload(REVIEWER_REASONING_EFFORT)
+        statuses = [outcome.status for outcome in outcomes.values()]
+        status = _overall_status(statuses, review["status"])
+        total_usage = _aggregate_usage([*outcomes.values(), review_outcome])
+        return {
+            "contract_version": "base-analysis-v2",
+            "strategy": {"name": self.name, "version": self.version},
+            "source": {
+                "format": request.source_format.value,
+                "sha256": request.sha256,
+                "identity": source.identity,
+                "conversion_status": "completed",
+                "block_count": len(source.blocks),
+            },
+            "base_analysis": {
+                "status": status,
+                "profile": public_profile(state.profile),
+                "employment": public_records(state.employment, EMPLOYMENT_FIELDS),
+                "education": public_records(state.education, EDUCATION_FIELDS),
+                "pass_statuses": pass_statuses,
+                "review": review,
+            },
+            "mechanical": mechanical,
+            "research": {"status": "pending_automatic_start"},
+            "limitations": _limitations(statuses, review),
+            "versions": {
+                "contract": "base-analysis-v2",
+                "strategy": self.version,
+                "docling": DOCLING_VERSION,
+                "converter": CONVERTER_VERSION,
+                "mechanical": MECHANICAL_VERSION,
+                "model": PINNED_OPENAI_MODEL,
+            },
+            "usage": {
+                **total_usage,
+                "latency_ms": int((perf_counter() - analysis_started) * 1000),
+                "live_model_calls": self._client is not None,
+            },
+        }
+
+    def _run_pass(
+        self,
+        name: str,
+        source: SourceDocument,
+        context: dict[str, Any] | None = None,
+    ) -> _PassOutcome:
+        started = perf_counter()
+        if self._client is None:
+            return _PassOutcome({}, "unavailable", 0, 0, "ai_disabled", {}, None)
+        failure = "pass_failed"
+        for attempt in range(1, MAX_PASS_ATTEMPTS + 1):
+            try:
+                response = self._client.run(name, source, context)
+                return _PassOutcome(
+                    response.payload,
+                    "completed",
+                    attempt,
+                    int((perf_counter() - started) * 1000),
+                    None,
+                    response.usage,
+                    response.model,
+                )
+            except ModelPassError as exc:
+                failure = exc.code
+            except Exception:
+                failure = "client_error"
+        return _PassOutcome(
+            {},
+            "failed",
+            MAX_PASS_ATTEMPTS,
+            int((perf_counter() - started) * 1000),
+            failure,
+            {},
+            None,
+        )
+
+
+def _enrich_mechanical(
+    mechanical: dict[str, Any],
+    profile: dict[str, Any],
+    resolver: LocationResolver | None,
+) -> dict[str, Any]:
+    declared = profile.get("declared_location")
+    declared_sources = {
+        item["source_id"]
+        for item in (declared or {}).get("evidence", [])
+        if isinstance(item, dict) and isinstance(item.get("source_id"), str)
+    }
+    accepted_postal = []
+    for candidate in mechanical["postal_candidates"]:
+        evidence = candidate.get("evidence", [])
+        if declared_sources.intersection(
+            item.get("source_id") for item in evidence if isinstance(item, dict)
+        ):
+            accepted = deepcopy(candidate)
+            accepted["ownership_status"] = "accepted_declared_address"
+            accepted_postal.append(accepted)
+    mechanical["accepted_postal_addresses"] = accepted_postal
+
+    resolutions: list[dict[str, Any]] = []
+    country_codes: set[str] = set()
+    if resolver is not None and isinstance(declared, dict):
+        outcome = resolver.resolve(declared["value"], level=ResolutionLevel.LOCALITY)
+        item: dict[str, Any] = {"subject": "declared_location", "value": declared["value"]}
+        if isinstance(outcome, Resolved):
+            item.update({
+                "status": "resolved",
+                "canonical_name": outcome.resolution.canonical_name,
+                "country_code": outcome.resolution.country_code,
+            })
+            country_codes.add(outcome.resolution.country_code)
+        elif isinstance(outcome, Ambiguous):
+            item["status"] = "ambiguous"
+            if outcome.common_resolution is not None:
+                item["country_code"] = outcome.common_resolution.country_code
+                country_codes.add(outcome.common_resolution.country_code)
+        else:
+            item["status"] = "unresolved"
+        resolutions.append(item)
+    mechanical["location_resolution"] = resolutions
+    phone_countries = {
+        phone["country_code"]
+        for phone in mechanical["phones"]
+        if isinstance(phone.get("country_code"), str)
+    }
+    all_countries = country_codes | phone_countries
+    mechanical["eu_status"] = (
+        {
+            "countries": sorted(all_countries),
+            "inside_eu": sorted(code for code in all_countries if code in EU_COUNTRY_CODES),
+            "outside_eu": sorted(code for code in all_countries if code not in EU_COUNTRY_CODES),
+            "informational_only": True,
+        }
+        if all_countries
+        else None
+    )
+    mechanical["comparisons"] = _direct_comparisons(country_codes, phone_countries)
+    return mechanical
+
+
+def _direct_comparisons(declared: set[str], phones: set[str]) -> list[dict[str, Any]]:
+    if not declared or not phones:
+        return []
+    return [{
+        "kind": "declared_location_phone_country",
+        "declared_country_codes": sorted(declared),
+        "phone_country_codes": sorted(phones),
+        "relationship": "same" if declared == phones else "different",
+        "decision_support_only": True,
+    }]
+
+
+def _overall_status(specialists: list[str], review: str) -> str:
+    if all(status in {"failed", "unavailable"} for status in specialists):
+        return "failed" if all(status == "failed" for status in specialists) else "unavailable"
+    if review != "completed" or any(status != "completed" for status in specialists):
+        return "partial"
+    return "completed"
+
+
+def _limitations(statuses: list[str], review: dict[str, Any]) -> list[str]:
+    limitations = [
+        "Decision support only; this analysis does not verify identity, residence, honesty, nationality, or work eligibility."
+    ]
+    if any(status != "completed" for status in statuses):
+        limitations.append("One or more specialist passes were unavailable or failed; supported results from other passes were retained.")
+    if review["coverage_gaps"]:
+        limitations.append("The reviewer identified source areas that could not be safely materialized as candidates.")
+    return limitations
+
+
+def _bounded_usage(usage: dict[str, Any]) -> dict[str, int]:
+    output: dict[str, int] = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int) and value >= 0:
+            output[key] = value
+    return output
+
+
+def _aggregate_usage(outcomes: list[_PassOutcome]) -> dict[str, int]:
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for outcome in outcomes:
+        for key, value in _bounded_usage(outcome.usage).items():
+            totals[key] += value
+    return totals

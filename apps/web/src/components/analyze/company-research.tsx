@@ -6,6 +6,7 @@ import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
+import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
@@ -56,6 +57,10 @@ export function CompanyResearchPanel({
     await getAutoResearchOrchestrator()?.runManual(report, settings, "company");
   }
 
+  async function refreshResearch() {
+    await getAutoResearchOrchestrator()?.runRefresh(report, settings, "company");
+  }
+
   return (
     <HoverDisclosure
       className="rounded-md border p-3"
@@ -63,12 +68,12 @@ export function CompanyResearchPanel({
       title={t("companyResearch")}
       collapsible={hasContent}
       contentClassName="space-y-3 pt-3"
-      action={completed ? undefined : (
+      action={(
         <ResearchAction
           busy={busy}
           disabled={!enabled || busy}
-          onClick={startResearch}
-          label={t("start")}
+          onClick={completed ? refreshResearch : startResearch}
+          label={completed ? (settings.uiLanguage === "pl" ? "Odśwież" : "Refresh") : t("start")}
           busyLabel={t("researching")}
           busyAriaLabel={t("companyResearchInProgress")}
           disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
@@ -76,11 +81,7 @@ export function CompanyResearchPanel({
       )}
     >
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
-      {visibleResearch?.cache?.status === "hit" ? (
-        <p className="text-xs text-muted-foreground">
-          {settings.uiLanguage === "pl" ? "Użyto wyniku z cache." : "Reused a cached research result."}
-        </p>
-      ) : null}
+      <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
 
       {visibleResearch ? (
         <div className="space-y-2">

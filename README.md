@@ -1,34 +1,33 @@
 # CV Analyzer
 
-CV Analyzer is being reset around one shared report contract and two isolated
-document-analysis experiments:
-
-- Docling plus GPT-5.6 Luna;
-- GPT-5.6 Luna with the original file input.
-
-The shared branch intentionally contains no installed analysis strategy.
-`POST /analyze` returns `analysis_strategy_unavailable` until one variant
-provides an `AnalysisStrategy`.
+This branch implements the Docling plus GPT-5.6 Luna analysis variant against
+the shared `base-analysis-v2` contract.
 
 The previous deterministic Document Understanding, Structural Audit, ESCO,
 national-ID redaction, score/band, file metadata, and live-link checker have
 been removed. They are not compatibility surfaces.
 
-## Shared architecture
+## Architecture
 
 ```text
 PDF or DOCX upload
-    -> AnalysisInput
-    -> variant AnalysisStrategy
+    -> Docling 2.124.0 native-text conversion (OCR disabled)
+    -> thin SourceDocument evidence projection
+    -> concurrent profile, employment, and education Luna specialists
+    -> field and relation validation plus mechanical candidates
+    -> sequential Luna reviewer with validated ID-based operations
     -> base-analysis-v2 validation
     -> persistence and UI
-    -> optional company, education, and LinkedIn research
+    -> automatic company, education, and LinkedIn research
 ```
 
-Both variants must return the same profile, employment, education, reviewer,
-mechanical, provenance, status, version, and usage contract. Every semantic
-value needs literal source evidence. A reviewer may add a missing candidate
+Every semantic value needs literal source evidence. A reviewer may add a missing candidate
 only when the same evidence and relation validation accepts it.
+
+The specialists use pinned `gpt-5.6-luna` with reasoning effort `none`; the
+reviewer uses `low`. Responses API storage is disabled and base analysis uses
+no tools. Without AI credentials the strategy still converts documents and
+returns an explicit unavailable/partial result instead of another parser.
 
 Mechanical code is limited to phones, e-mails, literal URLs, postal-pattern
 candidates, e-mail provider typos, geographic resolution, and informational EU
@@ -44,7 +43,7 @@ See:
 ## Development
 
 ```bash
-make dev ALLOW_DEGRADED=true  # shared base only
+make dev
 make dev-down
 cd apps/api && PYTHONPATH=src .venv/bin/pytest -q
 cd apps/web && npm test
@@ -52,10 +51,10 @@ cd apps/web && npm run typecheck
 cd apps/web && npm run build
 ```
 
-The web app is available at `http://127.0.0.1:3001/analyze` after the dev stack
-starts. On the shared branch health is intentionally degraded because no
-analysis strategy is installed, so the explicit `ALLOW_DEGRADED=true` is
-required. Variant branches should use plain `make dev` and must become ready.
+The isolated web app is available at `http://127.0.0.1:3021/analyze`. Compose
+uses project `cv-analyzer-docling-luna`, API database
+`/app/data/docling_luna.db`, and auth database
+`/app/data/docling_luna_auth.db`.
 
 ## Privacy and persistence
 
@@ -65,10 +64,19 @@ required. Variant branches should use plain `make dev` and must become ready.
 - Access tokens are hashed for ownership and are not written into audit JSON.
 - Private CV fixtures and evaluation outputs belong under ignored `data/`.
 - Old pilot reports are not migrated. The new default database is
-  `data/cv_analyzer_v2.db`; existing databases are never deleted implicitly.
+  `data/docling_luna.db`; existing databases are never deleted implicitly.
 
 ## Public research
 
 Company, education, and LinkedIn research remains optional. Subjects come only
-from accepted, evidence-supported base-analysis records. Reusable cache results
-carry hit/miss provenance and analysis-owned cache audit entries.
+from accepted, evidence-supported base-analysis records. Reusable cache entries
+are keyed per public subject, support partial hits, and carry hit/miss
+provenance, original research timestamps, refresh, and cache audit entries.
+
+## Supported documents and limitations
+
+Only text-bearing PDF and DOCX files are supported. Image-only or scan-only
+documents fail with `document_text_layer_unavailable`; OCR is never attempted.
+The minimal Docling runtime installs only PDF/DOCX conversion extras and sets
+offline flags, so it has no model assets to download at runtime. Results are
+recruiter decision support and never verify a candidate or their location.

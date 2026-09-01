@@ -6,8 +6,8 @@ from cv_validator.openai_config import OpenAISettings
 
 
 class FakeStrategy:
-    name = "luna-only"
-    version = "luna-only-test-v1"
+    name = "docling-luna"
+    version = "docling-luna-test-v1"
     ready = True
 
     def analyze(self, request):
@@ -18,7 +18,7 @@ class FakeStrategy:
         )
 
 
-def test_health_and_analyze_fail_clearly_without_strategy(tmp_path) -> None:
+def test_health_reports_docling_strategy_and_invalid_pdf_fails_clearly(tmp_path) -> None:
     client = TestClient(
         create_app(
             db_path=tmp_path / "reports.db",
@@ -32,9 +32,12 @@ def test_health_and_analyze_fail_clearly_without_strategy(tmp_path) -> None:
         files={"file": ("candidate.pdf", b"%PDF-1.7", "application/pdf")},
     )
 
-    assert health.json()["capabilities"]["base_analysis"]["ready"] is False
-    assert response.status_code == 503
-    assert response.json()["detail"] == "analysis_strategy_unavailable"
+    assert health.json()["capabilities"]["base_analysis"] == {
+        "ready": True,
+        "strategy": "docling-luna",
+    }
+    assert response.status_code == 422
+    assert response.json()["detail"] == "document_conversion_failed"
 
 
 def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
@@ -53,7 +56,7 @@ def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["contract_version"] == "base-analysis-v2"
-    assert payload["strategy"]["name"] == "luna-only"
+    assert payload["strategy"]["name"] == "docling-luna"
     assert "score" not in payload
     assert "document_understanding" not in payload
     loaded = client.get(

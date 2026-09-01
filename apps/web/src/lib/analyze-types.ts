@@ -55,7 +55,7 @@ export type CompanyResearch = {
   accessed_at: string;
   searches_performed: string[];
   search_limitations: string[];
-  cache?: { status: "hit" | "miss"; format_version: string };
+  cache?: ResearchCacheProvenance;
   organizations: Array<{
     query_subject: string;
     existence: "supported" | "conflicting" | "insufficient_evidence";
@@ -86,7 +86,7 @@ export type EducationResearch = {
   accessed_at: string;
   searches_performed: string[];
   search_limitations: string[];
-  cache?: { status: "hit" | "miss"; format_version: string };
+  cache?: ResearchCacheProvenance;
   credentials: Array<{
     institution: string | null;
     program: string | null;
@@ -111,6 +111,16 @@ export type EducationResearch = {
       confidence: string;
       uncertainty: string;
     }>;
+  }>;
+};
+
+export type ResearchCacheProvenance = {
+  status: "hit" | "partial_hit" | "miss";
+  format_version: string;
+  subjects?: Array<{
+    normalized_subject: string;
+    status: "hit" | "miss";
+    accessed_at: string | null;
   }>;
 };
 
@@ -151,12 +161,14 @@ export type AnalysisReport = {
     linkedin_research: boolean;
   };
   strategy: {
-    name: "docling-luna" | "luna-only";
+    name: "docling-luna";
     version: string;
   };
   source: {
     format: "pdf" | "docx";
     sha256: string;
+    identity: string;
+    block_count: number;
     conversion_status: "completed" | "partial" | "unsupported" | "failed";
   };
   base_analysis: {
@@ -169,6 +181,9 @@ export type AnalysisReport = {
       attempt_count: number;
       latency_ms: number | null;
       failure_reason?: string | null;
+      usage: Record<string, number>;
+      model: string | null;
+      reasoning_effort: "none" | "low";
     }>;
     review: {
       status: AnalysisStatus;
@@ -191,6 +206,7 @@ export type AnalysisReport = {
     email_findings: Array<Record<string, unknown>>;
     location_resolution: Array<Record<string, unknown>>;
     eu_status: Record<string, unknown> | null;
+    comparisons: Array<Record<string, unknown>>;
   };
   research: Record<string, unknown>;
   limitations: string[];

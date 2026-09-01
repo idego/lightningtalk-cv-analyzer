@@ -15,7 +15,7 @@ from cv_validator.research.education import PROMPT_VERSION as EDUCATION_PROMPT_V
 from cv_validator.research.education import RESEARCH_VERSION as EDUCATION_RESEARCH_VERSION
 from cv_validator.research.education import SCHEMA_VERSION as EDUCATION_SCHEMA_VERSION
 
-CACHE_FORMAT_VERSION = "public-research-cache-v1"
+CACHE_FORMAT_VERSION = "public-research-per-subject-cache-v2"
 MODEL_VERSION = "gpt-5.6-luna"
 SEARCH_POLICY_VERSION = "openai-web-search-low-max4-v1"
 CacheCategory = Literal["company", "education"]
@@ -39,12 +39,98 @@ def company_cache_descriptor(request: CompanyResearchRequest) -> CacheDescriptor
     return _descriptor("company", subjects, COMPANY_RESEARCH_VERSION, COMPANY_PROMPT_VERSION, COMPANY_SCHEMA_VERSION)
 
 
+def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheDescriptor, ...]:
+    return tuple(
+        _descriptor(
+            "company",
+            (_normalize(fact["organization"]),),
+            COMPANY_RESEARCH_VERSION,
+            COMPANY_PROMPT_VERSION,
+            COMPANY_SCHEMA_VERSION,
+        )
+        for fact in request.input_facts
+    )
+
+
 def education_cache_descriptor(request: EducationResearchRequest) -> CacheDescriptor:
     subjects = tuple(sorted(
         "|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program", "certificate"))
         for fact in request.input_facts
     ))
     return _descriptor("education", subjects, EDUCATION_RESEARCH_VERSION, EDUCATION_PROMPT_VERSION, EDUCATION_SCHEMA_VERSION)
+
+
+def education_subject_descriptors(request: EducationResearchRequest) -> tuple[CacheDescriptor, ...]:
+    return tuple(
+        _descriptor(
+            "education",
+            ("|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program", "certificate")),),
+            EDUCATION_RESEARCH_VERSION,
+            EDUCATION_PROMPT_VERSION,
+            EDUCATION_SCHEMA_VERSION,
+        )
+        for fact in request.input_facts
+    )
+
+
+def single_subject_result(category: CacheCategory, result: dict[str, Any], index: int) -> dict[str, Any]:
+    key = "organizations" if category == "company" else "credentials"
+    single = deepcopy(result)
+    single[key] = [deepcopy(result[key][index])]
+    if index > 0:
+        single["usage"] = {
+            name: 0
+            for name, value in result.get("usage", {}).items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+    return single
+
+
+def merge_subject_results(
+    category: CacheCategory,
+    results: list[dict[str, Any]],
+    descriptors: tuple[CacheDescriptor, ...],
+) -> dict[str, Any]:
+    if not results or len(results) != len(descriptors):
+        raise ValueError("research_subject_merge_incomplete")
+    key = "organizations" if category == "company" else "credentials"
+    statuses = [result.get("cache", {}).get("status", "miss") for result in results]
+    combined = deepcopy(results[0])
+    combined[key] = [deepcopy(result[key][0]) for result in results]
+    combined["searches_performed"] = list(dict.fromkeys(
+        query for result in results for query in result.get("searches_performed", [])
+    ))
+    combined["search_limitations"] = list(dict.fromkeys(
+        limit for result in results for limit in result.get("search_limitations", [])
+    ))
+    combined["usage"] = {
+        token: sum(
+            value
+            for result in results
+            for key_name, value in result.get("usage", {}).items()
+            if key_name == token and isinstance(value, int)
+        )
+        for token in ("input_tokens", "output_tokens", "total_tokens")
+    }
+    combined["usage"]["cached"] = all(status == "hit" for status in statuses)
+    aggregate_status = (
+        "hit" if all(status == "hit" for status in statuses)
+        else "miss" if all(status == "miss" for status in statuses)
+        else "partial_hit"
+    )
+    combined["cache"] = {
+        "status": aggregate_status,
+        "format_version": CACHE_FORMAT_VERSION,
+        "subjects": [
+            {
+                "normalized_subject": descriptor.normalized_subjects[0],
+                "status": status,
+                "accessed_at": result.get("accessed_at"),
+            }
+            for descriptor, status, result in zip(descriptors, statuses, results, strict=True)
+        ],
+    }
+    return combined
 
 
 def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[str, Any]:

@@ -19,8 +19,9 @@ from cv_validator.analysis import (
     AnalysisStrategy,
     AnalysisStrategyError,
     AnalysisStrategyUnavailable,
-    UnavailableAnalysisStrategy,
 )
+from cv_validator.analysis.docling_luna import DoclingLunaAnalysisStrategy
+from cv_validator.analysis.luna_client import OpenAIResponsesLunaClient
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.config import load_location_resolver
 from cv_validator.errors import (
@@ -34,10 +35,12 @@ from cv_validator.openai_config import OpenAISettings, load_openai_settings
 from cv_validator.operations import OperationsTelemetry, safe_log
 from cv_validator.pipeline import analyze_cv_bytes_result
 from cv_validator.research.cache import (
-    company_cache_descriptor,
-    education_cache_descriptor,
+    company_subject_descriptors,
+    education_subject_descriptors,
+    merge_subject_results,
     materialize_cache_hit,
     reusable_payload,
+    single_subject_result,
 )
 from cv_validator.research.company import (
     CompanyResearchService,
@@ -47,9 +50,11 @@ from cv_validator.research.domain import (
     CompanyResearchClientError,
     CompanyResearchInvalidResponse,
     CompanyResearchTimeout,
+    CompanyResearchRequest,
     EducationResearchClientError,
     EducationResearchInvalidResponse,
     EducationResearchTimeout,
+    EducationResearchRequest,
     LinkedInResearchClientError,
     LinkedInResearchInvalidResponse,
     LinkedInResearchTimeout,
@@ -72,7 +77,7 @@ from cv_validator.research.openai_client import (
 )
 from cv_validator.serialization import serialize_analysis_payload
 
-DEFAULT_DB = Path("data/cv_analyzer_v2.db")
+DEFAULT_DB = Path("data/docling_luna.db")
 DEFAULT_BATCH_MAX_FILES = 4
 DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
 
@@ -186,9 +191,19 @@ def create_app(
     require_location_resolver: bool = False,
 ) -> FastAPI:
     settings = openai_settings or load_openai_settings()
-    strategy = analysis_strategy or UnavailableAnalysisStrategy()
     resolver = location_resolver or load_location_resolver(
         required=require_location_resolver
+    )
+    strategy = analysis_strategy or DoclingLunaAnalysisStrategy(
+        client=(
+            OpenAIResponsesLunaClient(
+                api_key=settings.api_key,
+                timeout_seconds=settings.timeout_seconds,
+            )
+            if settings.enabled
+            else None
+        ),
+        location_resolver=resolver,
     )
 
     selected_company_researcher = company_researcher
@@ -542,6 +557,7 @@ def create_app(
         analysis_id: str,
         x_analysis_access_token: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
+        x_research_refresh: bool = Header(default=False),
     ) -> JSONResponse:
         require_research_enabled(x_ai_enabled)
         if selected_company_researcher is None:
@@ -551,25 +567,36 @@ def create_app(
             request = build_company_research_request(stored)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        descriptor = company_cache_descriptor(request)
-        with research_locks.acquire(f"cache:{descriptor.cache_key}"):
-            row = store.get_company_research(analysis_id)
+        descriptors = company_subject_descriptors(request)
+        lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
+        with research_locks.acquire(f"cache:company:{lock_key}"):
+            if x_research_refresh:
+                for descriptor in descriptors:
+                    store.invalidate_reusable_research(descriptor.cache_key)
+            row = None if x_research_refresh else store.get_company_research(analysis_id)
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
-                cached = store.get_reusable_research(descriptor)
-                if cached is not None:
-                    result = materialize_cache_hit(
-                        "company",
-                        cached,
-                        descriptor=descriptor,
-                    )
-                    cache_status = "hit"
-                else:
+                subject_results: list[dict[str, Any] | None] = [None] * len(descriptors)
+                missing: list[int] = []
+                for index, descriptor in enumerate(descriptors):
+                    cached = store.get_reusable_research(descriptor)
+                    if cached is None:
+                        missing.append(index)
+                    else:
+                        subject_results[index] = materialize_cache_hit(
+                            "company", cached, descriptor=descriptor
+                        )
+                if missing:
                     try:
-                        result = CompanyResearchService(
+                        fresh = CompanyResearchService(
                             selected_company_researcher
-                        ).run(stored)
+                        ).run(
+                            stored,
+                            request=CompanyResearchRequest(tuple(
+                                request.input_facts[index] for index in missing
+                            )),
+                        )
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     except CompanyResearchTimeout as exc:
@@ -602,29 +629,32 @@ def create_app(
                             "company_research_client_error",
                             exc,
                         )
-                    result["cache"] = {
-                        "status": "miss",
-                        "format_version": descriptor.cache_format_version,
-                    }
-                    store.persist_reusable_research(
-                        descriptor,
-                        reusable_payload("company", result),
-                    )
-                    cache_status = "miss"
+                    for fresh_index, request_index in enumerate(missing):
+                        descriptor = descriptors[request_index]
+                        subject = single_subject_result("company", fresh, fresh_index)
+                        subject["cache"] = {
+                            "status": "miss",
+                            "format_version": descriptor.cache_format_version,
+                        }
+                        store.persist_reusable_research(
+                            descriptor, reusable_payload("company", subject)
+                        )
+                        subject_results[request_index] = subject
+                complete_results = [item for item in subject_results if item is not None]
+                result = merge_subject_results("company", complete_results, descriptors)
                 try:
-                    store.record_cache_use(
-                        analysis_id,
-                        "company",
-                        descriptor.cache_key,
-                        cache_status,
-                    )
+                    for descriptor, subject in zip(descriptors, complete_results, strict=True):
+                        store.record_cache_use(
+                            analysis_id, "company", descriptor.cache_key,
+                            subject["cache"]["status"],
+                        )
                     store.persist_company_research(analysis_id, result)
                 except PersistenceError as exc:
                     _raise_research_persistence_error(exc)
                 telemetry.increment(
                     "research_cache_total",
                     category="company",
-                    outcome=cache_status,
+                    outcome=result["cache"]["status"],
                 )
         response = deepcopy(stored)
         response["company_research"] = result
@@ -635,6 +665,7 @@ def create_app(
         analysis_id: str,
         x_analysis_access_token: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
+        x_research_refresh: bool = Header(default=False),
     ) -> JSONResponse:
         require_research_enabled(x_ai_enabled)
         if selected_education_researcher is None:
@@ -644,27 +675,36 @@ def create_app(
             request = build_education_research_request(stored)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        descriptor = education_cache_descriptor(request)
-        with research_locks.acquire(f"cache:{descriptor.cache_key}"):
-            row = store.get_education_research(analysis_id)
+        descriptors = education_subject_descriptors(request)
+        lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
+        with research_locks.acquire(f"cache:education:{lock_key}"):
+            if x_research_refresh:
+                for descriptor in descriptors:
+                    store.invalidate_reusable_research(descriptor.cache_key)
+            row = None if x_research_refresh else store.get_education_research(analysis_id)
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
-                cached = store.get_reusable_research(descriptor)
-                if cached is not None:
-                    public_result = normalize_public_education_result(
-                        materialize_cache_hit(
-                            "education",
-                            cached,
-                            descriptor=descriptor,
+                subject_results: list[dict[str, Any] | None] = [None] * len(descriptors)
+                missing: list[int] = []
+                for index, descriptor in enumerate(descriptors):
+                    cached = store.get_reusable_research(descriptor)
+                    if cached is None:
+                        missing.append(index)
+                    else:
+                        subject_results[index] = normalize_public_education_result(
+                            materialize_cache_hit("education", cached, descriptor=descriptor)
                         )
-                    )
-                    cache_status = "hit"
-                else:
+                if missing:
                     try:
-                        public_result = EducationResearchService(
+                        fresh = EducationResearchService(
                             selected_education_researcher
-                        ).run(stored)
+                        ).run(
+                            stored,
+                            request=EducationResearchRequest(tuple(
+                                request.input_facts[index] for index in missing
+                            )),
+                        )
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     except EducationResearchTimeout as exc:
@@ -697,34 +737,37 @@ def create_app(
                             "education_research_client_error",
                             exc,
                         )
-                    public_result["cache"] = {
-                        "status": "miss",
-                        "format_version": descriptor.cache_format_version,
-                    }
-                    store.persist_reusable_research(
-                        descriptor,
-                        reusable_payload("education", public_result),
-                    )
-                    cache_status = "miss"
+                    for fresh_index, request_index in enumerate(missing):
+                        descriptor = descriptors[request_index]
+                        subject = single_subject_result("education", fresh, fresh_index)
+                        subject["cache"] = {
+                            "status": "miss",
+                            "format_version": descriptor.cache_format_version,
+                        }
+                        store.persist_reusable_research(
+                            descriptor, reusable_payload("education", subject)
+                        )
+                        subject_results[request_index] = subject
+                complete_results = [item for item in subject_results if item is not None]
+                public_result = merge_subject_results("education", complete_results, descriptors)
                 result = apply_owner_scoped_education_context(
                     public_result,
                     stored,
                     location_resolver=resolver,
                 )
                 try:
-                    store.record_cache_use(
-                        analysis_id,
-                        "education",
-                        descriptor.cache_key,
-                        cache_status,
-                    )
+                    for descriptor, subject in zip(descriptors, complete_results, strict=True):
+                        store.record_cache_use(
+                            analysis_id, "education", descriptor.cache_key,
+                            subject["cache"]["status"],
+                        )
                     store.persist_education_research(analysis_id, result)
                 except PersistenceError as exc:
                     _raise_research_persistence_error(exc)
                 telemetry.increment(
                     "research_cache_total",
                     category="education",
-                    outcome=cache_status,
+                    outcome=result["cache"]["status"],
                 )
         response = deepcopy(stored)
         response["education_research"] = result

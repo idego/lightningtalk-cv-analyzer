@@ -54,6 +54,28 @@ function RecordState({ record }: { record: AnalysisRecord }) {
   );
 }
 
+function DeclaredLocationView({ report }: { report: AnalysisReport }) {
+  const field = report.base_analysis.profile.declared_location;
+  if (!field) return null;
+  const resolution = report.mechanical.location_resolution.find(
+    (item) => item.subject === "declared_location",
+  );
+  const resolved = [resolution?.canonical_name, resolution?.country_code]
+    .filter((item): item is string => typeof item === "string" && item.length > 0)
+    .join(" · ");
+  return (
+    <HoverDisclosure
+      className="rounded-md border bg-muted/15 p-3"
+      allowHover
+      title={<span className="text-sm"><span className="text-muted-foreground">Declared location: </span><strong>{field.value}</strong></span>}
+      contentClassName="space-y-1 pt-2"
+    >
+      <p className="text-xs text-muted-foreground">{resolved ? `Resolved: ${resolved}` : "Geographic resolution unavailable"}</p>
+      <p className="text-xs text-muted-foreground">{field.evidence[0]?.excerpt ? `Evidence: „${field.evidence[0].excerpt}”` : "No evidence excerpt"}</p>
+    </HoverDisclosure>
+  );
+}
+
 function EmploymentView({ record }: { record: EmploymentRecord }) {
   const title = [value(record.role), value(record.organization)].filter(Boolean).join(" · ") || "Employment entry";
   const detail = [
@@ -93,6 +115,9 @@ function MechanicalView({ report }: { report: AnalysisReport }) {
     ["E-mails", report.mechanical.emails],
     ["Literal links", report.mechanical.literal_links],
     ["Postal candidates", report.mechanical.postal_candidates],
+    ["Accepted postal addresses", report.mechanical.accepted_postal_addresses],
+    ["E-mail findings", report.mechanical.email_findings],
+    ["Direct comparisons", report.mechanical.comparisons],
   ] as const;
   const present = groups.filter(([, items]) => items.length);
   if (!present.length) return null;
@@ -109,7 +134,7 @@ function MechanicalView({ report }: { report: AnalysisReport }) {
           <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
             {items.map((item, index) => (
               <li key={index}>
-                {String(item.value ?? item.normalized_url ?? item.country_code ?? "candidate")}
+                {String(item.value ?? item.normalized_url ?? item.kind ?? item.relationship ?? item.country_code ?? "candidate")}
               </li>
             ))}
           </ul>
@@ -136,7 +161,7 @@ function AnalysisContent({
         <div className="grid gap-2 md:grid-cols-2">
           <FieldView label="Name" field={profile.candidate_name} />
           <FieldView label="Headline" field={profile.headline} />
-          <FieldView label="Declared location" field={profile.declared_location} />
+          <DeclaredLocationView report={report} />
           <FieldView label="Summary" field={profile.summary} />
         </div>
         {profile.skills.length ? <p className="text-sm"><span className="text-muted-foreground">Skills: </span>{profile.skills.map((item) => item.value).join(", ")}</p> : null}
@@ -168,7 +193,19 @@ function AnalysisContent({
           {review.added_candidate_ids.length ? <p>Added missing candidates: {review.added_candidate_ids.length}</p> : null}
           {review.conflicts.length ? <p>Conflicts: {review.conflicts.length}</p> : null}
           {review.coverage_gaps.length ? <p>Coverage gaps: {review.coverage_gaps.length}</p> : null}
+          {review.rejected.length ? <p>Rejected candidates or fields: {review.rejected.length}</p> : null}
         </HoverDisclosure>
+      ) : null}
+
+      {Object.values(report.base_analysis.pass_statuses).some((pass) => pass.status !== "completed") ? (
+        <div className="rounded-md border border-amber-500/30 p-3 text-sm">
+          <p className="font-medium">Incomplete analysis passes</p>
+          <ul className="mt-1 space-y-1 text-muted-foreground">
+            {Object.entries(report.base_analysis.pass_statuses)
+              .filter(([, pass]) => pass.status !== "completed")
+              .map(([name, pass]) => <li key={name}>{name}: {pass.status}{pass.failure_reason ? ` (${pass.failure_reason})` : ""}</li>)}
+          </ul>
+        </div>
       ) : null}
 
       <MechanicalView report={report} />

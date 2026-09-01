@@ -21,7 +21,7 @@ def valid_report(
     sha256: str = "0" * 64,
     *,
     source_format: str = "pdf",
-    strategy_name: str = "luna-only",
+    strategy_name: str = "docling-luna",
 ) -> dict:
     return {
         "contract_version": "base-analysis-v2",
@@ -32,6 +32,8 @@ def valid_report(
         "source": {
             "format": source_format,
             "sha256": sha256,
+            "identity": sha256,
+            "block_count": 1,
             "conversion_status": "completed",
         },
         "base_analysis": {
@@ -75,6 +77,9 @@ def valid_report(
                     "attempt_count": 1,
                     "latency_ms": 10,
                     "failure_reason": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                    "model": "gpt-5.6-luna",
+                    "reasoning_effort": "none",
                 }
             },
             "review": {
@@ -98,6 +103,7 @@ def valid_report(
             "email_findings": [],
             "location_resolution": [],
             "eu_status": None,
+            "comparisons": [],
         },
         "research": {},
         "limitations": [],

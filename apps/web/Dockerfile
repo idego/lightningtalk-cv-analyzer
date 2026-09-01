@@ -6,7 +6,7 @@ ENV CI=true
 RUN corepack enable
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN apk add --no-cache python3 make g++ \
   && pnpm install --frozen-lockfile --config.minimumReleaseAge=0 --config.strictDepBuilds=false \
   && pnpm approve-builds --all \

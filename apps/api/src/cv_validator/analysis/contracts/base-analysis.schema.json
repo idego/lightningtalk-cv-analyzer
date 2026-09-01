@@ -35,17 +35,19 @@
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
-        "name": { "enum": ["docling-luna", "luna-only"] },
+        "name": { "const": "docling-luna" },
         "version": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["format", "sha256", "conversion_status"],
+      "required": ["format", "sha256", "identity", "conversion_status", "block_count"],
       "properties": {
         "format": { "enum": ["pdf", "docx"] },
         "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "identity": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "block_count": { "type": "integer", "minimum": 1 },
         "conversion_status": { "enum": ["completed", "partial", "unsupported", "failed"] }
       }
     },
@@ -98,12 +100,18 @@
     "passStatus": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "attempt_count", "latency_ms"],
+      "required": ["status", "attempt_count", "latency_ms", "usage", "model", "reasoning_effort"],
       "properties": {
         "status": { "$ref": "#/$defs/status" },
         "attempt_count": { "type": "integer", "minimum": 0, "maximum": 10 },
         "latency_ms": { "type": ["integer", "null"], "minimum": 0 },
-        "failure_reason": { "type": ["string", "null"], "maxLength": 128 }
+        "failure_reason": { "type": ["string", "null"], "maxLength": 128 },
+        "usage": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "model": { "type": ["string", "null"], "maxLength": 128 },
+        "reasoning_effort": { "enum": ["none", "low"] }
       }
     },
     "evidence": {
@@ -230,7 +238,7 @@
     "mechanical": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phones", "emails", "literal_links", "postal_candidates", "accepted_postal_addresses", "email_findings", "location_resolution", "eu_status"],
+      "required": ["phones", "emails", "literal_links", "postal_candidates", "accepted_postal_addresses", "email_findings", "location_resolution", "eu_status", "comparisons"],
       "properties": {
         "phones": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
         "emails": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
@@ -239,7 +247,8 @@
         "accepted_postal_addresses": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
         "email_findings": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
         "location_resolution": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
-        "eu_status": { "type": ["object", "null"] }
+        "eu_status": { "type": ["object", "null"] },
+        "comparisons": { "type": "array", "items": { "type": "object" }, "maxItems": 100 }
       }
     }
   }

@@ -2,10 +2,8 @@
 
 ## Runtime
 
-- The shared cleanup branch intentionally reports degraded health because no
-  base-analysis strategy is installed.
-- Each experiment must install exactly one strategy and expose its name and
-  version through health and every report.
+- This branch installs exactly one `docling-luna` strategy and exposes its name
+  and version through health and every report.
 - `OPENAI_API_KEY` is required when public research or a Luna strategy is
   enabled. Never commit the key.
 - Mount the validated GeoNames index and manifest; runtime analysis never
@@ -21,13 +19,13 @@ research. It does not disable the selected base-analysis strategy.
 ## Canonical commands
 
 ```bash
-cp .env.example .env.local
-make dev ALLOW_DEGRADED=true  # shared base only
+make dev
 make dev-down
 ```
 
-Variant branches must use plain `make dev`; degraded readiness is not accepted
-once a concrete strategy is installed.
+The command uses Compose project `cv-analyzer-docling-luna`, loopback web port
+3021, API database `/app/data/docling_luna.db`, and auth database
+`/app/data/docling_luna_auth.db`.
 
 Production deploys an exact reviewed SHA:
 
@@ -46,7 +44,8 @@ research capabilities remain visible individually.
 - Audit JSON contains the validated report, not the ownership token.
 - Logs may contain identifiers, status, duration, and safe error codes only.
 - Never log CV text, evidence excerpts, model output, secrets, or local paths.
-- Research cache audit records must expose hit/miss provenance to the owner.
+- Research cache audit records expose hit, partial-hit, miss, refresh, and
+  per-subject provenance to the owner.
 - Back up SQLite using an online backup or while the stack is stopped.
 - Restore rehearsals use a separate Compose project, ports, volumes, and
   database paths.
@@ -57,5 +56,5 @@ A strategy failure returns a bounded per-document error. It must not silently
 fall back to a different strategy or the removed deterministic pipeline.
 
 For application rollback, deploy the previously recorded reviewed SHA. Named
-volumes remain intact. The reset uses `cv_analyzer_v2.db` and does not migrate
+volumes remain intact. This variant uses `docling_luna.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.

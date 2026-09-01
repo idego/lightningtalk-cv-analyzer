@@ -28,7 +28,7 @@ def test_persistence_uses_strategy_contract_without_score_or_access_token(tmp_pa
     assert "band" not in stored
     assert "analysis_access_token" not in stored
     assert "secret-token" not in store.get_audit_entries()[0]["output_json"]
-    assert store.list_analyses("secret-token")[0]["strategy"] == "luna-only"
+    assert store.list_analyses("secret-token")[0]["strategy"] == "docling-luna"
 
 
 def test_legacy_report_database_is_rejected_instead_of_mutated(tmp_path) -> None:

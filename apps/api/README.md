@@ -1,11 +1,11 @@
-# CV Analyzer API
+# CV Analyzer API — Docling + Luna
 
-The API is a strategy-neutral host for the `base-analysis-v2` contract.
-
-A variant implements `AnalysisStrategy`, receives the original PDF or DOCX,
-and returns a validated report. The shared checkout uses
-`UnavailableAnalysisStrategy`, so analysis fails clearly until a variant is
-installed.
+This variant installs `DoclingLunaAnalysisStrategy` as the default producer of
+the `base-analysis-v2` contract. It accepts text-layer PDF and DOCX uploads,
+projects a real Docling document into evidence blocks, runs three parallel Luna
+specialists, validates their candidates, and applies a sequential reviewer
+before deterministic report assembly. With AI disabled, conversion and
+mechanical extraction still run and the unavailable Luna passes are explicit.
 
 Run tests:
 

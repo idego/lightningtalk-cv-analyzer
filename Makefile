@@ -2,20 +2,23 @@
 
 DOCKER_CONTEXT ?= default
 ALLOW_DEGRADED ?= false
+COMPOSE_PROJECT_NAME ?= cv-analyzer-docling-luna
+WEB_PORT ?= 3021
 
 dev:
 	@./scripts/runtime-preflight.sh dev .env.local
 	LOCAL_DEV_AUTH_BYPASS=true \
 	WEB_HOST=127.0.0.1 \
-	WEB_PORT=3001 \
-	BASE_URL=http://localhost:3001 \
-	BETTER_AUTH_URL=http://localhost:3001 \
+	WEB_PORT=$(WEB_PORT) \
+	BASE_URL=http://localhost:$(WEB_PORT) \
+	BETTER_AUTH_URL=http://localhost:$(WEB_PORT) \
+	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) \
 	docker --context $(DOCKER_CONTEXT) compose --env-file .env.local up --build -d --wait
-	@./scripts/verify-stack.sh http://127.0.0.1:3001 $(ALLOW_DEGRADED)
-	@echo "CV Analyzer: http://127.0.0.1:3001/analyze"
+	@./scripts/verify-stack.sh http://127.0.0.1:$(WEB_PORT) $(ALLOW_DEGRADED)
+	@echo "CV Analyzer: http://127.0.0.1:$(WEB_PORT)/analyze"
 
 dev-down:
-	docker --context $(DOCKER_CONTEXT) compose --env-file .env.local down
+	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker --context $(DOCKER_CONTEXT) compose --env-file .env.local down
 
 deploy-check:
 	@./scripts/runtime-preflight.sh production .env

@@ -30,8 +30,13 @@ class CompanyResearcher(Protocol):
 class CompanyResearchService:
     researcher: CompanyResearcher
 
-    def run(self, stored_report: dict[str, Any]) -> dict[str, Any]:
-        request = build_company_research_request(stored_report)
+    def run(
+        self,
+        stored_report: dict[str, Any],
+        *,
+        request: CompanyResearchRequest | None = None,
+    ) -> dict[str, Any]:
+        request = request or build_company_research_request(stored_report)
         payload, response_model, usage = self.researcher.research(request)
         validate_company_research(payload, request=request)
         result = deepcopy(payload)

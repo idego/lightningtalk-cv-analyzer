@@ -7,7 +7,7 @@ from cv_validator.analysis.strategy import (
     UnavailableAnalysisStrategy,
 )
 from cv_validator.analysis.validation import validate_analysis_report
-from cv_validator.analysis.source import TextSegment
+from cv_validator.analysis.source import SourceBlock, SourceDocument, TextSegment
 
 __all__ = [
     "AnalysisInput",
@@ -15,6 +15,8 @@ __all__ = [
     "AnalysisStrategyError",
     "AnalysisStrategyUnavailable",
     "SourceFormat",
+    "SourceBlock",
+    "SourceDocument",
     "TextSegment",
     "UnavailableAnalysisStrategy",
     "validate_analysis_report",

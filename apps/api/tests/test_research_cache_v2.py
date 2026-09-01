@@ -22,6 +22,21 @@ class FakeResearcher:
         }
 
 
+class AdaptiveCompanyResearcher:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def research(self, request):
+        self.calls.append(request)
+        base = company_result()
+        template = base["organizations"][0]
+        base["organizations"] = [
+            {**deepcopy(template), "query_subject": fact["organization"]}
+            for fact in request.input_facts
+        ]
+        return base, "gpt-5.6-luna", {"input_tokens": 10, "output_tokens": 20}
+
+
 def company_result() -> dict:
     return {
         "schema_version": "company-research-schema-v1",
@@ -120,6 +135,8 @@ def test_company_research_reuses_public_cache_across_analyses(tmp_path) -> None:
     assert first.status_code == second.status_code == 200
     assert first.json()["company_research"]["cache"]["status"] == "miss"
     assert second.json()["company_research"]["cache"]["status"] == "hit"
+    assert second.json()["company_research"]["usage"]["input_tokens"] == 0
+    assert second.json()["company_research"]["usage"]["output_tokens"] == 0
     assert len(researcher.calls) == 1
     assert app.state.store.get_cache_audit("analysis-2")[0]["outcome"] == "hit"
 
@@ -142,3 +159,83 @@ def test_education_research_reuses_public_cache_across_analyses(tmp_path) -> Non
     assert second.json()["education_research"]["cache"]["status"] == "hit"
     assert len(researcher.calls) == 1
     assert app.state.store.get_cache_audit("analysis-2")[0]["outcome"] == "hit"
+
+
+def test_company_research_combines_subject_hit_with_miss(tmp_path) -> None:
+    researcher = AdaptiveCompanyResearcher()
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=researcher,
+    )
+    first = valid_report(sha256="1" * 64)
+    first["analysis_id"] = "analysis-1"
+    second = valid_report(sha256="2" * 64)
+    second["analysis_id"] = "analysis-2"
+    extra = deepcopy(second["base_analysis"]["employment"][0])
+    extra["id"] = "employment-2"
+    extra["organization"]["value"] = "Another Systems"
+    extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
+    second["base_analysis"]["employment"].append(extra)
+    second["base_analysis"]["review"]["accepted_ids"].append("employment-2")
+    app.state.store.persist_analysis_payload_for_test(first)
+    app.state.store.persist_analysis_payload_for_test(second)
+    client = client_for(app)
+
+    assert client.post("/analyses/analysis-1/research/company").status_code == 200
+    mixed = client.post("/analyses/analysis-2/research/company")
+
+    assert mixed.status_code == 200
+    research = mixed.json()["company_research"]
+    assert research["cache"]["status"] == "partial_hit"
+    assert [item["status"] for item in research["cache"]["subjects"]] == ["hit", "miss"]
+    assert len(researcher.calls) == 2
+    assert researcher.calls[1].input_facts == ({"organization": "Another Systems"},)
+
+
+def test_company_refresh_bypasses_and_replaces_cached_result(tmp_path) -> None:
+    researcher = FakeResearcher(company_result())
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=researcher,
+    )
+    report = valid_report()
+    report["analysis_id"] = "analysis-refresh"
+    app.state.store.persist_analysis_payload_for_test(report)
+    client = client_for(app)
+
+    assert client.post("/analyses/analysis-refresh/research/company").status_code == 200
+    refreshed = client.post(
+        "/analyses/analysis-refresh/research/company",
+        headers={"X-Research-Refresh": "true"},
+    )
+
+    assert refreshed.status_code == 200
+    assert refreshed.json()["company_research"]["cache"]["status"] == "miss"
+    assert len(researcher.calls) == 2
+
+
+def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
+    researcher = AdaptiveCompanyResearcher()
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=researcher,
+    )
+    report = valid_report()
+    report["analysis_id"] = "analysis-multiple"
+    extra = deepcopy(report["base_analysis"]["employment"][0])
+    extra["id"] = "employment-2"
+    extra["organization"]["value"] = "Another Systems"
+    extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
+    report["base_analysis"]["employment"].append(extra)
+    report["base_analysis"]["review"]["accepted_ids"].append("employment-2")
+    app.state.store.persist_analysis_payload_for_test(report)
+
+    response = client_for(app).post("/analyses/analysis-multiple/research/company")
+
+    assert response.status_code == 200
+    usage = response.json()["company_research"]["usage"]
+    assert usage["input_tokens"] == 10
+    assert usage["output_tokens"] == 20

@@ -7,6 +7,7 @@ import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
+import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy, type CopyKey } from "@/lib/app-settings";
@@ -65,28 +66,28 @@ export function EducationResearchPanel({
     await getAutoResearchOrchestrator()?.runManual(report, settings, "education");
   }
 
+  async function refreshResearch() {
+    await getAutoResearchOrchestrator()?.runRefresh(report, settings, "education");
+  }
+
   return <HoverDisclosure
     className="rounded-md border p-3"
     triggerClassName="font-medium"
     title={t("educationResearch")}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
-    action={completed ? undefined : <ResearchAction
+    action={<ResearchAction
       busy={busy}
       disabled={!enabled || busy}
-      onClick={startResearch}
-      label={t("start")}
+      onClick={completed ? refreshResearch : startResearch}
+      label={completed ? (settings.uiLanguage === "pl" ? "Odśwież" : "Refresh") : t("start")}
       busyLabel={t("researching")}
       busyAriaLabel={t("educationResearchInProgress")}
       disabledReason={!enabled ? t("noEducationEntries") : undefined}
     />}
   >
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
-    {visibleResearch?.cache?.status === "hit" ? (
-      <p className="text-xs text-muted-foreground">
-        {settings.uiLanguage === "pl" ? "Użyto wyniku z cache." : "Reused a cached research result."}
-      </p>
-    ) : null}
+    <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
     {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <HoverDisclosure
       key={`${credential.institution}:${credential.program ?? ""}`}
       className="rounded-md border bg-muted/20 p-3 text-sm"
