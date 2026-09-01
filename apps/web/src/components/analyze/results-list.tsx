@@ -1,258 +1,168 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type {
-  AnalysisRecord,
-  AnalysisReport,
-  AnalyzeItemResult,
-  EducationRecord,
-  EmploymentRecord,
-  SupportedField,
-} from "@/lib/analyze-types";
-import { Badge } from "@/components/ui/badge";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { BriefcaseBusiness, Globe2, GraduationCap, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
+import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
+import { adaptReportInterface } from "@/lib/report-interface-adapter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { useCopy } from "@/lib/app-settings";
 
-function value(field: SupportedField | null | undefined) {
-  return field?.value ?? null;
-}
-
-function FieldView({
-  label,
-  field,
-}: {
-  label: string;
-  field: SupportedField | null;
-}) {
-  if (!field) return null;
+function FlagList({ flags }: { flags: ReportFinding[] }) {
+  const { t } = useCopy();
   return (
-    <HoverDisclosure
-      className="rounded-md border bg-muted/15 p-3"
-      allowHover
-      title={<span className="text-sm"><span className="text-muted-foreground">{label}: </span><strong>{field.value}</strong></span>}
-      contentClassName="pt-2"
-    >
-      <p className="text-xs text-muted-foreground">
-        {field.status === "ambiguous" ? "Ambiguous · " : ""}
-        {field.evidence[0]?.excerpt ? `Evidence: „${field.evidence[0].excerpt}”` : "No evidence excerpt"}
-      </p>
-    </HoverDisclosure>
-  );
-}
-
-function RecordState({ record }: { record: AnalysisRecord }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      <Badge variant="outline">{record.status}</Badge>
-      {record.relation_status === "ambiguous" ? <Badge variant="outline">ambiguous relation</Badge> : null}
-      {record.added_by_reviewer ? <Badge variant="secondary">added by reviewer</Badge> : null}
+    <div className="space-y-2">
+      {flags.map((flag) => (
+        <HoverDisclosure
+          key={flag.id}
+          className="rounded-md border bg-muted/15 p-3 text-sm"
+          allowHover
+          title={<span className="block font-medium leading-snug">{flag.whatWeFound}</span>}
+          contentClassName="pt-3"
+        >
+          <dl className="space-y-3 border-t pt-3">
+            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whyItMatters")}</dt><dd className="mt-1 leading-relaxed">{flag.whyItMatters}</dd></div>
+            <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whatToCheck")}</dt><dd className="mt-1 leading-relaxed">{flag.whatToCheck}</dd></div>
+          </dl>
+          {flag.evidence.length ? (
+            <p className="mt-3 border-l-2 pl-2 text-xs text-muted-foreground">
+              {t("evidence")}: „{flag.evidence[0].excerpt}”
+            </p>
+          ) : null}
+        </HoverDisclosure>
+      ))}
     </div>
   );
 }
 
-function DeclaredLocationView({ report }: { report: AnalysisReport }) {
-  const field = report.base_analysis.profile.declared_location;
-  if (!field) return null;
-  const resolution = report.mechanical.location_resolution.find(
-    (item) => item.subject === "declared_location",
-  );
-  const resolved = [resolution?.canonical_name, resolution?.country_code]
-    .filter((item): item is string => typeof item === "string" && item.length > 0)
-    .join(" · ");
+function OverviewIcon({ label, tone, children }: { label: string; tone: string; children: ReactNode }) {
   return (
-    <HoverDisclosure
-      className="rounded-md border bg-muted/15 p-3"
-      allowHover
-      title={<span className="text-sm"><span className="text-muted-foreground">Declared location: </span><strong>{field.value}</strong></span>}
-      contentClassName="space-y-1 pt-2"
-    >
-      <p className="text-xs text-muted-foreground">{resolved ? `Resolved: ${resolved}` : "Geographic resolution unavailable"}</p>
-      <p className="text-xs text-muted-foreground">{field.evidence[0]?.excerpt ? `Evidence: „${field.evidence[0].excerpt}”` : "No evidence excerpt"}</p>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            aria-label={label}
+            className={`flex size-8 shrink-0 items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`}
+          >
+            {children}
+          </span>
+        }
+      />
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function OverviewRow({
+  icon,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  detail?: ReactNode;
+  tone: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 py-1.5">
+      <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
+      <div className="min-w-0 pt-0.5">
+        <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>
+        {detail ? <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{detail}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function displayCountry(countryCode: string, language: "en" | "pl") {
+  const code = countryCode.toUpperCase();
+  const name = new Intl.DisplayNames([language], { type: "region" }).of(code);
+  return name && name !== code ? `${name} (${code})` : code;
+}
+
+function StructuredFacts({ overview }: { overview: ReportOverview }) {
+  const { settings, t } = useCopy();
+  const hasContact = Boolean(overview.candidateName || overview.phone);
+  const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.euStatus);
+  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.employment.length > 0;
+  const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
+  const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
+  const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
+
+  return (
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} contentClassName="pt-4">
+      {hasFacts ? (
+        <div className="space-y-5">
+          {hasContact || hasLocation ? <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
+            {hasContact ? <section aria-labelledby="overview-contact">
+              <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">{t("contact")}</h4>
+              <div className="space-y-1">
+                {overview.candidateName ? <OverviewRow icon={<UserRound className="size-4" />} label={t("candidateName")} value={overview.candidateName} tone={contactTone} /> : null}
+                {overview.phone ? <OverviewRow icon={<Phone className="size-4" />} label={t("phoneNumber")} value={overview.phone} detail={overview.phoneCountry ? displayCountry(overview.phoneCountry, settings.uiLanguage) : null} tone={contactTone} /> : null}
+              </div>
+            </section> : null}
+
+            {hasLocation ? <section aria-labelledby="overview-location">
+              <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
+              <div className="space-y-1">
+                {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} tone={locationTone} /> : null}
+                {overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
+                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} tone={locationTone} /> : null}
+                {overview.postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(overview.postalCountry, settings.uiLanguage)} tone={locationTone} /> : null}
+                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
+              </div>
+            </section> : null}
+          </div> : null}
+
+          {overview.education.length ? <section aria-labelledby="overview-education" className="border-t pt-4">
+            <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+              {overview.education.map((item) => <OverviewRow key={item.id} icon={<GraduationCap className="size-4" />} label={t("educationEntry")} value={item.value} detail={item.detail} tone={educationTone} />)}
+            </div>
+          </section> : null}
+
+          {overview.employment.length ? <section aria-labelledby="overview-employment" className="border-t pt-4">
+            <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+              {overview.employment.map((item) => <OverviewRow key={item.id} icon={<BriefcaseBusiness className="size-4" />} label={t("employmentEntry")} value={item.value} detail={item.detail} tone={employmentTone} />)}
+            </div>
+          </section> : null}
+        </div>
+      ) : <p className="text-sm text-muted-foreground">{t("noCvDetails")}</p>}
     </HoverDisclosure>
   );
 }
 
-function EmploymentView({ record }: { record: EmploymentRecord }) {
-  const title = [value(record.role), value(record.organization)].filter(Boolean).join(" · ") || "Employment entry";
-  const detail = [
-    [value(record.start_date), value(record.end_date)].filter(Boolean).join(" – "),
-    value(record.location),
-    value(record.relationship_type),
-  ].filter(Boolean).join(" · ");
-  return (
-    <article className="rounded-md border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><h4 className="font-medium">{title}</h4>{detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}</div>
-        <RecordState record={record} />
-      </div>
-    </article>
-  );
-}
-
-function EducationView({ record }: { record: EducationRecord }) {
-  const title = [value(record.institution), value(record.program), value(record.degree), value(record.certificate)].filter(Boolean).join(" · ") || "Education entry";
-  const detail = [
-    [value(record.start_date), value(record.end_date)].filter(Boolean).join(" – "),
-    value(record.location),
-  ].filter(Boolean).join(" · ");
-  return (
-    <article className="rounded-md border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><h4 className="font-medium">{title}</h4>{detail ? <p className="mt-1 text-xs text-muted-foreground">{detail}</p> : null}</div>
-        <RecordState record={record} />
-      </div>
-    </article>
-  );
-}
-
-function MechanicalView({ report }: { report: AnalysisReport }) {
-  const groups = [
-    ["Phones", report.mechanical.phones],
-    ["E-mails", report.mechanical.emails],
-    ["Literal links", report.mechanical.literal_links],
-    ["Postal candidates", report.mechanical.postal_candidates],
-    ["Accepted postal addresses", report.mechanical.accepted_postal_addresses],
-    ["E-mail findings", report.mechanical.email_findings],
-    ["Direct comparisons", report.mechanical.comparisons],
-  ] as const;
-  const present = groups.filter(([, items]) => items.length);
-  if (!present.length) return null;
-  return (
-    <HoverDisclosure
-      className="rounded-md border p-3"
-      triggerClassName="text-sm font-medium"
-      title="Mechanical facts"
-      contentClassName="space-y-3 pt-3"
-    >
-      {present.map(([label, items]) => (
-        <div key={label}>
-          <h4 className="text-xs font-semibold">{label}</h4>
-          <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-            {items.map((item, index) => (
-              <li key={index}>
-                {String(item.value ?? item.normalized_url ?? item.kind ?? item.relationship ?? item.country_code ?? "candidate")}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </HoverDisclosure>
-  );
-}
-
-function AnalysisContent({
-  report,
-  onChange,
-}: {
-  report: AnalysisReport;
-  onChange: (patch: Partial<Pick<AnalysisReport, "company_research" | "education_research" | "linkedin_discovery">>) => void;
-}) {
-  const { settings } = useCopy();
-  const profile = report.base_analysis.profile;
-  const review = report.base_analysis.review;
-  return (
-    <CardContent className="space-y-3">
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Profile</h3>
-        <div className="grid gap-2 md:grid-cols-2">
-          <FieldView label="Name" field={profile.candidate_name} />
-          <FieldView label="Headline" field={profile.headline} />
-          <DeclaredLocationView report={report} />
-          <FieldView label="Summary" field={profile.summary} />
-        </div>
-        {profile.skills.length ? <p className="text-sm"><span className="text-muted-foreground">Skills: </span>{profile.skills.map((item) => item.value).join(", ")}</p> : null}
-        {profile.languages.length ? <p className="text-sm"><span className="text-muted-foreground">Languages: </span>{profile.languages.map((item) => item.value).join(", ")}</p> : null}
-      </section>
-
-      <section className="space-y-2 border-t pt-3">
-        <h3 className="text-sm font-semibold">Employment ({report.base_analysis.employment.length})</h3>
-        {report.base_analysis.employment.length
-          ? report.base_analysis.employment.map((record) => <EmploymentView key={record.id} record={record} />)
-          : <p className="text-sm text-muted-foreground">No employment entries extracted.</p>}
-      </section>
-
-      <section className="space-y-2 border-t pt-3">
-        <h3 className="text-sm font-semibold">Education ({report.base_analysis.education.length})</h3>
-        {report.base_analysis.education.length
-          ? report.base_analysis.education.map((record) => <EducationView key={record.id} record={record} />)
-          : <p className="text-sm text-muted-foreground">No education entries extracted.</p>}
-      </section>
-
-      {review.added_profile_fields.length || review.added_candidate_ids.length || review.conflicts.length || review.coverage_gaps.length ? (
-        <HoverDisclosure
-          className="rounded-md border border-amber-500/30 p-3"
-          triggerClassName="text-sm font-medium"
-          title="Reviewer changes and gaps"
-          contentClassName="space-y-1 pt-3 text-sm text-muted-foreground"
-        >
-          {review.added_profile_fields.length ? <p>Added missing profile fields: {review.added_profile_fields.join(", ")}</p> : null}
-          {review.added_candidate_ids.length ? <p>Added missing candidates: {review.added_candidate_ids.length}</p> : null}
-          {review.conflicts.length ? <p>Conflicts: {review.conflicts.length}</p> : null}
-          {review.coverage_gaps.length ? <p>Coverage gaps: {review.coverage_gaps.length}</p> : null}
-          {review.rejected.length ? <p>Rejected candidates or fields: {review.rejected.length}</p> : null}
-        </HoverDisclosure>
-      ) : null}
-
-      {Object.values(report.base_analysis.pass_statuses).some((pass) => pass.status !== "completed") ? (
-        <div className="rounded-md border border-amber-500/30 p-3 text-sm">
-          <p className="font-medium">Incomplete analysis passes</p>
-          <ul className="mt-1 space-y-1 text-muted-foreground">
-            {Object.entries(report.base_analysis.pass_statuses)
-              .filter(([, pass]) => pass.status !== "completed")
-              .map(([name, pass]) => <li key={name}>{name}: {pass.status}{pass.failure_reason ? ` (${pass.failure_reason})` : ""}</li>)}
-          </ul>
-        </div>
-      ) : null}
-
-      <MechanicalView report={report} />
-
-      {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? (
-        <CompanyResearchPanel report={report} onResearchChange={(company_research) => onChange({ company_research })} />
-      ) : null}
-      {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? (
-        <EducationResearchPanel report={report} onResearchChange={(education_research) => onChange({ education_research })} />
-      ) : null}
-      {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? (
-        <LinkedInResearchPanel report={report} onDiscoveryChange={(linkedin_discovery) => onChange({ linkedin_discovery })} />
-      ) : null}
-
-      {report.limitations.length ? (
-        <HoverDisclosure
-          className="rounded-md border p-3"
-          triggerClassName="text-sm font-medium"
-          title={`Limitations (${report.limitations.length})`}
-          contentClassName="pt-3"
-        >
-          <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-            {report.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
-          </ul>
-        </HoverDisclosure>
-      ) : null}
-    </CardContent>
-  );
-}
-
-export function ResultsList({
-  items,
-  onActiveIndex,
-}: {
-  items: AnalyzeItemResult[];
-  onActiveIndex?: (index: number) => void;
-}) {
+export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void }) {
+  const { settings, t } = useCopy();
   const reportRefs = useRef<Array<HTMLElement | null>>([]);
-  const [overrides, setOverrides] = useState<Record<string, AnalysisReport>>({});
+  const [reportOverrides, setReportOverrides] = useState<Record<string, AnalysisReport>>({});
+
+  function updateCompletedResearch(
+    report: AnalysisReport,
+    patch: Partial<Pick<AnalysisReport, "company_research" | "education_research" | "linkedin_discovery">>,
+  ) {
+    setReportOverrides((previous) => {
+      const current = previous[report.analysis_id] ?? report;
+      return { ...previous, [report.analysis_id]: { ...current, ...patch } };
+    });
+  }
 
   useEffect(() => {
     if (!onActiveIndex) return;
     const ratios = new Map<Element, number>();
     const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
-      }
+      for (const entry of entries) ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0);
       let bestIndex = 0;
       let bestRatio = -1;
       reportRefs.current.forEach((element, index) => {
@@ -263,23 +173,19 @@ export function ResultsList({
         }
       });
       if (bestRatio > 0) onActiveIndex(bestIndex);
-    }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
-    reportRefs.current.forEach((element) => {
-      if (element) observer.observe(element);
-    });
+    }, { threshold: [0, 0.2, 0.4, 0.6, 0.8, 1] });
+    reportRefs.current.forEach((element) => { if (element) observer.observe(element); });
     return () => observer.disconnect();
   }, [items, onActiveIndex]);
 
+  if (!items.length) return null;
+
   return (
     <div className="space-y-4">
-      {items.map((item, index) => {
+      {items.map((item, itemIndex) => {
         if (item.status === "error") {
           return (
-            <Card
-              key={`${item.filename}-${index}`}
-              ref={(node) => { reportRefs.current[index] = node; }}
-              className="border-destructive/40"
-            >
+            <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 border-destructive/40">
               <CardHeader>
                 <CardTitle className="text-base">{item.filename}</CardTitle>
                 <CardDescription className="text-destructive">{item.error}</CardDescription>
@@ -287,29 +193,33 @@ export function ResultsList({
             </Card>
           );
         }
-        const report = overrides[item.report.analysis_id] ?? item.report;
-        const update = (patch: Partial<Pick<AnalysisReport, "company_research" | "education_research" | "linkedin_discovery">>) => {
-          setOverrides((current) => ({
-            ...current,
-            [report.analysis_id]: { ...report, ...patch },
-          }));
-        };
+
+        const report = reportOverrides[item.report.analysis_id] ?? item.report;
+        const presentation = adaptReportInterface(report, settings.uiLanguage);
         return (
-          <Card
-            key={report.analysis_id}
-            ref={(node) => { reportRefs.current[index] = node; }}
-            className="scroll-mt-20"
-          >
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-base">{item.filename}</CardTitle>
-                  <CardDescription>{report.strategy.name} · {report.strategy.version}</CardDescription>
-                </div>
-                <Badge variant="outline">{report.base_analysis.status}</Badge>
-              </div>
+          <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20">
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">{item.filename}</CardTitle>
             </CardHeader>
-            <AnalysisContent report={report} onChange={update} />
+            <CardContent className="space-y-3">
+              {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
+                <FlagList flags={presentation.attention} />
+              </HoverDisclosure> : null}
+
+              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("worthKnowing")} (${presentation.worthKnowing.length})`} contentClassName="pt-3">
+                <FlagList flags={presentation.worthKnowing} />
+              </HoverDisclosure> : null}
+
+              <StructuredFacts overview={presentation.overview} />
+
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
+
+              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={`${t("remaining")} (${presentation.remaining.length})`} contentClassName="pt-3">
+                <FlagList flags={presentation.remaining} />
+              </HoverDisclosure> : null}
+            </CardContent>
           </Card>
         );
       })}

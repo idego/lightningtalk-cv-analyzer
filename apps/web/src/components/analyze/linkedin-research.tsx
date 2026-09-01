@@ -58,23 +58,11 @@ function LinkedInProfileCard({
             }
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {profile.photo_visible === "true" ? <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">{t("photoVisible")}</Badge> : null}
-          {profile.photo_visible === "false" ? <Badge variant="outline" className="border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200">{t("noPublicPhoto")}</Badge> : null}
-          {profile.photo_visible === "unknown" ? <Badge variant="outline" className="border-muted-foreground/30 bg-muted text-muted-foreground">{t("photoUnknown")}</Badge> : null}
-          {profile.connection_completeness_flag
-            ? <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200">{t("lowConnectionCount")}{profile.connection_count.display ? `: ${profile.connection_count.display}` : ""}</Badge>
-            : profile.connection_count.display
-              ? <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">{t("connections", { count: profile.connection_count.display })}</Badge>
-              : <Badge variant="outline" className="border-muted-foreground/30 bg-muted text-muted-foreground">{t("connectionsUnknown")}</Badge>}
-        </div>
         {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
         <ResearchSources
           urls={[
             profile.profile_url,
             ...profile.source_urls,
-            profile.photo_source_url,
-            profile.connection_count.source_url,
           ]}
         />
       </HoverDisclosure>
