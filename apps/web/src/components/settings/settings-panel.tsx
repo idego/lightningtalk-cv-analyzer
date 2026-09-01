@@ -10,8 +10,8 @@ type Health = { status: string; ready: boolean; capabilities: Record<string, Cap
 type RefreshFeedback = "idle" | "refreshing" | "updated";
 
 const capabilityLabels: Record<string, CopyKey> = {
-  database: "database", geonames: "geoNamesResolver", document_ai: "aiDocumentAnalysis",
-  company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch", link_checks: "linkChecks",
+  database: "database", geonames: "geoNamesResolver", base_analysis: "baseAnalysis",
+  company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch",
 };
 
 export function SettingsPanel() {
@@ -111,7 +111,6 @@ export function SettingsPanel() {
       <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-primary" />
     </label>
   );
-  const serverAiAvailable = health?.capabilities.document_ai?.ready === true;
   const companyResearchAvailable = health?.capabilities.company_research?.ready === true;
   const educationResearchAvailable = health?.capabilities.education_research?.ready === true;
   const linkedinResearchAvailable = health?.capabilities.linkedin_research?.ready === true;
@@ -126,10 +125,10 @@ export function SettingsPanel() {
       <h3 className="font-medium">{t("analysisSettings")}</h3>
       <p className="mt-1 text-sm text-muted-foreground">{t("analysisSettingsDescription")}</p>
       <div className="mt-3 divide-y">
-        {toggle("ai-enabled", t("useAiFeatures"), settings.aiEnabled && serverAiAvailable, aiEnabled => updateAppSettings({ aiEnabled }), !serverAiAvailable, serverAiAvailable ? t("useAiFeaturesDescription") : t("aiUnavailable"))}
+        {toggle("ai-enabled", t("useAiFeatures"), settings.aiEnabled && anyResearchAvailable, aiEnabled => updateAppSettings({ aiEnabled }), !anyResearchAvailable, anyResearchAvailable ? t("useAiFeaturesDescription") : t("aiUnavailable"))}
         {toggle("preview-findings-on-hover", t("previewFindingsOnHover"), settings.previewFindingsOnHover, previewFindingsOnHover => updateAppSettings({ previewFindingsOnHover }))}
         {toggle("expand-sections-by-default", t("expandSectionsByDefault"), settings.expandSectionsByDefault, expandSectionsByDefault => updateAppSettings({ expandSectionsByDefault }))}
-        {settings.aiEnabled && serverAiAvailable ? <>
+        {settings.aiEnabled && anyResearchAvailable ? <>
         {toggle("auto-research", t("runResearchAutomatically"), settings.autoResearchEnabled && anyResearchAvailable, autoResearchEnabled => updateAppSettings({ autoResearchEnabled }), !anyResearchAvailable)}
         <div className="pl-4">
           {toggle("auto-company", t("companyResearch"), settings.autoCompanyResearch && companyResearchAvailable, autoCompanyResearch => updateAppSettings({ autoCompanyResearch }), !settings.autoResearchEnabled || !companyResearchAvailable)}
@@ -138,7 +137,7 @@ export function SettingsPanel() {
         </div>
         </> : null}
       </div>
-      {settings.aiEnabled && serverAiAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
+      {settings.aiEnabled && anyResearchAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
     </section>
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>

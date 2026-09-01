@@ -4,10 +4,9 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CV_VALIDATOR_DB_PATH=/app/data/cv_validator.db \
-    CV_VALIDATOR_WEIGHTS_PATH=/app/weights.yaml
+    CV_VALIDATOR_DB_PATH=/app/data/cv_analyzer_v2.db
 
-COPY pyproject.toml README.md weights.yaml ./
+COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN pip install --no-cache-dir --upgrade pip \

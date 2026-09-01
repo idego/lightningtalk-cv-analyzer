@@ -4,32 +4,15 @@ import json
 import sqlite3
 import hashlib
 import hmac
-import re
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from cv_validator.domain import (
-    LinkAssociation,
-    LinkReasonCode,
-    LinkRole,
-    LinkSource,
-    Report,
-)
+from cv_validator.analysis import validate_analysis_report
 from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
-from cv_validator.file_links.normalization import URLNormalizationError, normalize_url
-from cv_validator.ingestion import RedactedDocumentIdentity
-from cv_validator.ingestion.redaction import MASK_CHARACTER
-from cv_validator.serialization import deserialize_analysis_payload, serialize_report_payload
-
-
-_SAFE_NATIONAL_ID_TYPES = frozenset(
-    {"LABELED_NATIONAL_ID", "PL_PESEL", "UK_NINO", "US_SSN"}
-)
-_URL_TOKEN_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"']+")
+from cv_validator.serialization import deserialize_analysis_payload
 
 
 @dataclass
@@ -75,44 +58,28 @@ class PersistenceStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            _require_current_report_schema(conn)
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS reports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     input_hash TEXT NOT NULL,
-                    ruleset_version TEXT NOT NULL,
-                    score INTEGER NOT NULL,
-                    band TEXT NOT NULL,
-                    findings_json TEXT NOT NULL,
+                    contract_version TEXT NOT NULL,
+                    strategy_name TEXT NOT NULL,
+                    strategy_version TEXT NOT NULL,
+                    status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    analysis_id TEXT,
+                    analysis_id TEXT NOT NULL,
                     access_token_hash TEXT,
-                    source_filename TEXT,
-                    file_details_json TEXT,
-                    link_inspection_json TEXT
+                    source_filename TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     input_hash TEXT NOT NULL,
-                    ruleset_version TEXT NOT NULL,
+                    contract_version TEXT NOT NULL,
                     output_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    analysis_id TEXT
-                );
-                CREATE TABLE IF NOT EXISTS ai_analyses (
-                    analysis_id TEXT PRIMARY KEY,
-                    input_hash TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    authority TEXT NOT NULL,
-                    prompt_version TEXT NOT NULL,
-                    schema_version TEXT NOT NULL,
-                    input_contract_version TEXT NOT NULL,
-                    deterministic_observations_version TEXT NOT NULL,
-                    configured_model TEXT NOT NULL,
-                    response_model TEXT,
-                    usage_json TEXT,
-                    result_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    analysis_id TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS company_research (
                     analysis_id TEXT NOT NULL,
@@ -180,47 +147,28 @@ class PersistenceStore:
                 );
                 """
             )
-            _ensure_column(conn, "reports", "analysis_id", "TEXT")
-            _ensure_column(conn, "reports", "access_token_hash", "TEXT")
-            _ensure_column(conn, "reports", "source_filename", "TEXT")
-            _ensure_column(conn, "reports", "file_details_json", "TEXT")
-            _ensure_column(conn, "reports", "link_inspection_json", "TEXT")
-            _ensure_column(conn, "audit_log", "analysis_id", "TEXT")
-            # Child tables reference reports(analysis_id), so the parent key
-            # must be unique before foreign-key enforcement can validate the
-            # legacy NULL backfill below.
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS reports_analysis_id ON reports(analysis_id)"
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
             )
-            conn.execute(
-                "UPDATE reports SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
-            )
-            conn.execute(
-                "UPDATE audit_log SET analysis_id = 'legacy-' || id WHERE analysis_id IS NULL"
-            )
 
     def persist_report(
         self,
-        identity: RedactedDocumentIdentity,
-        report: Report,
+        input_hash: str,
+        report_payload: dict[str, Any],
         *,
-        report_payload: dict[str, Any] | None = None,
         analysis_id: str | None = None,
-        ai_analysis: dict[str, Any] | None = None,
         access_token: str | None = None,
         source_filename: str | None = None,
     ) -> str:
         selected_analysis_id = analysis_id or str(uuid4())
-        payload = (
-            serialize_report_payload(report)
-            if report_payload is None
-            else report_payload
-        )
-        findings = _sanitize_findings(payload)
-        input_hash = identity.digest
+        payload = validate_analysis_report(report_payload)
+        stored_payload = dict(payload)
+        stored_payload.pop("analysis_access_token", None)
+        strategy = payload["strategy"]
+        status = payload["base_analysis"]["status"]
         now = _utc_now()
         try:
             self.purge_expired()
@@ -228,50 +176,40 @@ class PersistenceStore:
                 conn.execute(
                     """
                     INSERT INTO reports (
-                        input_hash, ruleset_version, score, band, findings_json,
-                        created_at, analysis_id, access_token_hash, source_filename,
-                        file_details_json, link_inspection_json
+                        input_hash, contract_version, strategy_name,
+                        strategy_version, status, created_at, analysis_id,
+                        access_token_hash, source_filename
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
-                        report.ruleset_version.audit_identity,
-                        report.score,
-                        report.band.value,
-                        json.dumps(findings["findings"]),
+                        payload["contract_version"],
+                        strategy["name"],
+                        strategy["version"],
+                        status,
                         now,
                         selected_analysis_id,
                         _token_hash(access_token) if access_token else None,
                         source_filename,
-                        _json_or_none(findings.get("file_details")),
-                        _json_or_none(findings.get("link_inspection")),
                     ),
                 )
                 conn.execute(
                     """
                     INSERT INTO audit_log (
-                        input_hash, ruleset_version, output_json, created_at,
+                        input_hash, contract_version, output_json, created_at,
                         analysis_id
                     )
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
-                        report.ruleset_version.audit_identity,
-                        json.dumps(findings),
+                        payload["contract_version"],
+                        json.dumps(stored_payload),
                         now,
                         selected_analysis_id,
                     ),
                 )
-                if ai_analysis is not None:
-                    _insert_ai_analysis(
-                        conn,
-                        analysis_id=selected_analysis_id,
-                        input_hash=input_hash,
-                        ai_analysis=ai_analysis,
-                        created_at=now,
-                    )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("report persistence failed") from exc
         return selected_analysis_id
@@ -280,14 +218,6 @@ class PersistenceStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY id").fetchall()
         return [dict(row) for row in rows]
-
-    def get_ai_analysis(self, analysis_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM ai_analyses WHERE analysis_id = ?",
-                (analysis_id,),
-            ).fetchone()
-        return None if row is None else dict(row)
 
     def get_analysis_payload(self, analysis_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -299,65 +229,13 @@ class PersistenceStore:
             json.loads(row["output_json"])
         )
 
-    def replace_ai_analysis(
-        self,
-        analysis_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        ai_analysis = payload["ai_analysis"]
-        now = _utc_now()
-        try:
-            with self._connect() as conn:
-                report = conn.execute(
-                    "SELECT input_hash FROM reports WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-                if report is None:
-                    raise PersistenceError("analysis not found")
-                existing_row = conn.execute(
-                    "SELECT output_json FROM audit_log WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-                if existing_row is not None:
-                    existing_payload = json.loads(existing_row["output_json"])
-                    payload = deepcopy(payload)
-                    payload["structural_audits"] = existing_payload.get(
-                        "structural_audits"
-                    )
-                    payload["document_understanding"] = existing_payload.get(
-                        "document_understanding"
-                    )
-                conn.execute(
-                    "UPDATE audit_log SET output_json = ? WHERE analysis_id = ?",
-                    (json.dumps(_sanitize_findings(payload)), analysis_id),
-                )
-                sanitized = _sanitize_findings(payload)
-                conn.execute(
-                    "UPDATE reports SET file_details_json = ?, link_inspection_json = ? WHERE analysis_id = ?",
-                    (
-                        _json_or_none(sanitized.get("file_details")),
-                        _json_or_none(sanitized.get("link_inspection")),
-                        analysis_id,
-                    ),
-                )
-                conn.execute("DELETE FROM ai_analyses WHERE analysis_id = ?", (analysis_id,))
-                _insert_ai_analysis(
-                    conn,
-                    analysis_id=analysis_id,
-                    input_hash=report["input_hash"],
-                    ai_analysis=ai_analysis,
-                    created_at=now,
-                )
-        except (OSError, sqlite3.Error) as exc:
-            raise PersistenceError("AI analysis persistence failed") from exc
-
     def list_analyses(self, access_token: str | None) -> list[dict[str, Any]]:
         if not access_token:
             return []
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT reports.analysis_id, reports.source_filename,
-                          reports.band, reports.created_at, audit_log.output_json
+                          reports.status, reports.created_at, audit_log.output_json
                    FROM reports
                    JOIN audit_log USING (analysis_id)
                    WHERE reports.access_token_hash = ?
@@ -372,8 +250,8 @@ class PersistenceStore:
                     "analysis_id": row["analysis_id"],
                     "filename": row["source_filename"] or "CV",
                     "candidate_name": _candidate_name(payload),
-                    "band": row["band"],
-                    "summary": payload.get("summary", ""),
+                    "status": row["status"],
+                    "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
                 }
             )
@@ -413,7 +291,6 @@ class PersistenceStore:
         with self._connect() as conn:
             for table in (
                 "research_cache_audit",
-                "ai_analyses",
                 "company_research",
                 "education_research",
                 "linkedin_discovery",
@@ -653,14 +530,35 @@ class PersistenceStore:
         """Seed an anonymous stored payload without constructing an uploaded CV."""
         now = _utc_now()
         analysis_id = payload["analysis_id"]
+        validated = validate_analysis_report(payload)
+        strategy = validated["strategy"]
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO reports (input_hash, ruleset_version, score, band, findings_json, created_at, analysis_id, access_token_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                ("test-redacted-hash", "test-rules", payload["score"], payload["band"], "[]", now, analysis_id, _token_hash("test-access-token")),
+                """INSERT INTO reports (
+                    input_hash, contract_version, strategy_name,
+                    strategy_version, status, created_at, analysis_id,
+                    access_token_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    validated["source"]["sha256"],
+                    validated["contract_version"],
+                    strategy["name"],
+                    strategy["version"],
+                    validated["base_analysis"]["status"],
+                    now,
+                    analysis_id,
+                    _token_hash("test-access-token"),
+                ),
             )
             conn.execute(
-                "INSERT INTO audit_log (input_hash, ruleset_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
-                ("test-redacted-hash", "test-rules", json.dumps(payload), now, analysis_id),
+                "INSERT INTO audit_log (input_hash, contract_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
+                (
+                    validated["source"]["sha256"],
+                    validated["contract_version"],
+                    json.dumps(validated),
+                    now,
+                    analysis_id,
+                ),
             )
 
     def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
@@ -672,7 +570,6 @@ class PersistenceStore:
             for table, column in (
                 ("reports", "created_at"),
                 ("research_cache_audit", "created_at"),
-                ("ai_analyses", "created_at"),
                 ("company_research", "created_at"),
                 ("education_research", "created_at"),
                 ("linkedin_discovery", "created_at"),
@@ -691,7 +588,7 @@ class PersistenceStore:
             expired_ids = sorted(expired_ids_set)
             if expired_ids:
                 placeholders = ",".join("?" for _ in expired_ids)
-                for table in ("research_cache_audit", "ai_analyses", "company_research", "education_research",
+                for table in ("research_cache_audit", "company_research", "education_research",
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation", "audit_log"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
@@ -711,356 +608,36 @@ def _token_hash(token: str) -> str:
 
 
 def _candidate_name(payload: dict[str, Any]) -> str | None:
-    contact = payload.get("ai_analysis", {}).get("facts", {}).get("contact", [])
-    for fact in contact:
-        if fact.get("kind") == "candidate_name" and isinstance(fact.get("value"), str):
-            value = fact["value"].strip()
-            if value:
-                return value
-    return None
+    profile = payload.get("base_analysis", {}).get("profile")
+    if not isinstance(profile, dict):
+        return None
+    candidate_name = profile.get("candidate_name")
+    if not isinstance(candidate_name, dict):
+        return None
+    if candidate_name.get("status") != "supported":
+        return None
+    value = candidate_name.get("value")
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
-def _ensure_column(
-    conn: sqlite3.Connection,
-    table: str,
-    column: str,
-    declaration: str,
-) -> None:
+def _require_current_report_schema(conn: sqlite3.Connection) -> None:
     columns = {
         row["name"]
-        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        for row in conn.execute("PRAGMA table_info(reports)").fetchall()
     }
-    if column not in columns:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
-
-
-def _insert_ai_analysis(
-    conn: sqlite3.Connection,
-    *,
-    analysis_id: str,
-    input_hash: str,
-    ai_analysis: dict[str, Any],
-    created_at: str,
-) -> None:
-    versions = ai_analysis["versions"]
-    model = ai_analysis["model"]
-    conn.execute(
-        """
-        INSERT INTO ai_analyses (
-            analysis_id, input_hash, status, authority, prompt_version,
-            schema_version, input_contract_version,
-            deterministic_observations_version, configured_model,
-            response_model, usage_json, result_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            analysis_id,
-            input_hash,
-            ai_analysis["status"],
-            ai_analysis["authority"],
-            versions["prompt"],
-            versions["schema"],
-            versions["input_contract"],
-            versions["deterministic_observations"],
-            model["configured"],
-            model["response"],
-            json.dumps(ai_analysis["usage"]),
-            json.dumps(ai_analysis),
-            created_at,
-        ),
-    )
-
-
-def _sanitize_findings(report_dict: dict[str, Any]) -> dict[str, Any]:
-    from cv_validator.structural.sanitize import sanitize_structural_audits
-
-    sanitized = deepcopy(report_dict)
-    sanitized["structural_audits"] = sanitize_structural_audits(
-        sanitized.get("structural_audits")
-    )
-    from cv_validator.document_understanding.contract import (
-        UnderstandingContractError, sanitize_understanding,
-    )
-    try:
-        structural = sanitized.get("structural_audits")
-        timeline_ids = {
-            item["id"] for item in (structural or {}).get("timeline", {}).get("entries", [])
-            if isinstance(item, dict) and isinstance(item.get("id"), str)
-        } if isinstance(structural, dict) else set()
-        sanitized["document_understanding"] = sanitize_understanding(
-            sanitized.get("document_understanding"), timeline_entry_ids=timeline_ids
-        )
-    except (AttributeError, KeyError, TypeError, UnderstandingContractError):
-        sanitized["document_understanding"] = None
-    for finding in sanitized.get("findings", []):
-        if not isinstance(finding, dict):
-            continue
-        if finding.get("signal") == "national_id":
-            if not _is_safe_national_id_metadata(finding.get("observed")):
-                finding["observed"] = "present:REDACTED"
-            finding["claimed"] = None
-            for evidence in finding.get("evidence", []):
-                excerpt = evidence.get("excerpt")
-                if not _is_masked_excerpt(excerpt):
-                    evidence["excerpt"] = (
-                        MASK_CHARACTER * len(excerpt)
-                        if isinstance(excerpt, str)
-                        else ""
-                    )
-    if "file_details" in sanitized:
-        sanitized["file_details"] = _sanitize_file_details(sanitized["file_details"])
-    if "link_inspection" in sanitized:
-        sanitized["link_inspection"] = _sanitize_link_inspection(
-            sanitized["link_inspection"]
-        )
-    return sanitized
-
-
-def _sanitize_file_details(value: Any) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        return None
-    allowed_fields = {
-        "author",
-        "creator",
-        "producer",
-        "title",
-        "subject",
-        "creation_time",
-        "modification_time",
-        "created",
-        "modified",
-        "last_modifier",
-        "revision",
+    required = {
+        "input_hash",
+        "contract_version",
+        "strategy_name",
+        "strategy_version",
+        "status",
+        "created_at",
+        "analysis_id",
+        "access_token_hash",
+        "source_filename",
     }
-    fields = value.get("fields")
-    if not isinstance(fields, dict):
-        return None
-    clean_fields: dict[str, Any] = {}
-    for field_name, field in fields.items():
-        if field_name not in allowed_fields or not isinstance(field, dict):
-            continue
-        status = field.get("status")
-        raw_value = field.get("value")
-        if status == "available" and isinstance(raw_value, str):
-            clean_value = _safe_text(raw_value, limit=1024)
-            if clean_value:
-                clean_fields[field_name] = {
-                    "value": clean_value,
-                    "status": "available",
-                    "source_format": _safe_text(field.get("source_format"), limit=32),
-                    "extractor_version": _safe_version(field.get("extractor_version")),
-                }
-                continue
-        clean_fields[field_name] = {
-            "value": None,
-            "status": "unavailable",
-            "source_format": _safe_text(field.get("source_format"), limit=32),
-            "extractor_version": _safe_version(field.get("extractor_version")),
-        }
-    return {
-        "contract_version": "file-details-v1",
-        "source_format": _safe_text(value.get("source_format"), limit=16),
-        "extractor_version": _safe_version(value.get("extractor_version")),
-        "fields": clean_fields,
-    }
-
-
-def _sanitize_link_inspection(value: Any) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        return None
-    links = value.get("links", [])
-    if not isinstance(links, list):
-        return None
-    clean_links: list[dict[str, Any]] = []
-    for index, link in enumerate(links):
-        if not isinstance(link, dict):
-            continue
-        link_id = _safe_text(link.get("link_id"), limit=256)
-        if not link_id:
-            link_id = f"link:invalid:{index:04d}"
-        sanitized_target = _sanitize_url(link.get("sanitized_target"))
-        displayed_value = _sanitize_display_value(link.get("displayed_value"))
-        source_evidence = []
-        for evidence in link.get("source_evidence", []):
-            if not isinstance(evidence, dict):
-                continue
-            excerpt = _sanitize_evidence_excerpt(evidence.get("excerpt"))
-            start_offset = _safe_int(evidence.get("start_offset"))
-            end_offset = _safe_int(evidence.get("end_offset"))
-            if start_offset is None or end_offset is None or end_offset < start_offset:
-                continue
-            source_evidence.append(
-                {
-                    "page_id": _safe_text(evidence.get("page_id"), limit=128),
-                    "page_number": _safe_int(evidence.get("page_number")),
-                    "start_offset": start_offset,
-                    "end_offset": end_offset,
-                    "excerpt": excerpt,
-                }
-            )
-        status = link.get("status")
-        reason_code = link.get("reason_code")
-        if status not in {"REACHABLE", "SUSPICIOUS", "UNAVAILABLE", "NOT_CHECKED"}:
-            status = "UNAVAILABLE"
-        if reason_code not in {reason.value for reason in LinkReasonCode}:
-            reason_code = "invalid_link_target"
-        source = link.get("source")
-        if source not in {item.value for item in LinkSource}:
-            source = LinkSource.EMBEDDED_HYPERLINK.value
-        association = link.get("association")
-        if association not in {item.value for item in LinkAssociation}:
-            association = LinkAssociation.UNKNOWN.value
-        role = link.get("role")
-        if role not in {item.value for item in LinkRole}:
-            role = LinkRole.GENERIC.value
-        clean_links.append(
-            {
-                "link_id": link_id,
-                "status": status,
-                "displayed_value": displayed_value,
-                "sanitized_target": sanitized_target,
-                "source": source,
-                "association": association,
-                "role": role,
-                "source_page": _safe_int(link.get("source_page")),
-                "source_location": _safe_text(link.get("source_location"), limit=32),
-                "source_evidence": source_evidence,
-                "reason_code": reason_code,
-                "terminal_status": _safe_http_status(link.get("terminal_status")),
-                "terminal_registrable_domain": _safe_domain(
-                    link.get("terminal_registrable_domain")
-                ),
-                "checked_at": _safe_text(link.get("checked_at"), limit=64),
-                "configuration_version": _safe_text(
-                    link.get("configuration_version"), limit=64
-                ),
-                "title": _safe_text(link.get("title"), limit=256),
-            }
-        )
-    return {
-        "contract_version": "link-inspection-v1",
-        "checked_at": _safe_text(value.get("checked_at"), limit=64),
-        "configuration_version": _safe_text(
-            value.get("configuration_version"), limit=64
-        ),
-        "links": clean_links,
-    }
-
-
-def _sanitize_url(value: Any) -> str | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        return normalize_url(value, allowed_ports=tuple(range(1, 65536))).sanitized_url
-    except URLNormalizationError:
-        return None
-
-
-def _sanitize_display_value(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if any(ord(character) < 32 for character in value):
-        return None
-    stripped = value.strip()
-    if stripped.lower().startswith(("http://", "https://")):
-        return _sanitize_url(stripped)
-    if stripped.lower().startswith("www."):
-        sanitized = _sanitize_url(stripped)
-        return sanitized.removeprefix("https://") if sanitized else None
-    return _sanitize_url_tokens(value, limit=2048)
-
-
-def _sanitize_evidence_excerpt(value: Any) -> str:
-    if not isinstance(value, str):
-        return ""
-    stripped = value.strip()
-    if stripped.lower().startswith(("http://", "https://")):
-        return _sanitize_url(stripped) or ""
-    if stripped.lower().startswith("www."):
-        sanitized = _sanitize_url(stripped)
-        return sanitized.removeprefix("https://") if sanitized else ""
-    return _sanitize_url_tokens(value, limit=512)
-
-
-def _sanitize_url_tokens(value: str, *, limit: int) -> str:
-    """Remove query/fragment data from URLs embedded in reviewer evidence."""
-
-    def replace_token(match: re.Match[str]) -> str:
-        token = match.group(0)
-        trailing = ""
-        while token and token[-1] in ".,;:!?)]}":
-            trailing = token[-1] + trailing
-            token = token[:-1]
-        sanitized = _sanitize_url(token)
-        if sanitized is None:
-            return "[invalid-link]" + trailing
-        if token.lower().startswith("www."):
-            sanitized = sanitized.removeprefix("https://")
-        return sanitized + trailing
-
-    return _safe_text(_URL_TOKEN_RE.sub(replace_token, value), limit=limit)
-
-
-def _safe_version(value: Any) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    name = _safe_text(value.get("name"), limit=64)
-    version = _safe_text(value.get("version"), limit=64)
-    if not name or not version:
-        return None
-    return {"name": name, "version": version}
-
-
-def _safe_text(value: Any, *, limit: int) -> str:
-    if not isinstance(value, str):
-        return ""
-    if any(ord(character) < 32 for character in value):
-        return ""
-    return value.strip()[:limit]
-
-
-def _safe_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
-
-
-def _safe_http_status(value: Any) -> int | None:
-    return value if isinstance(value, int) and 100 <= value <= 599 else None
-
-
-def _safe_domain(value: Any) -> str | None:
-    if not isinstance(value, str) or any(ord(character) < 33 for character in value):
-        return None
-    domain = value.strip().lower().rstrip(".")
-    if not domain or any(character in domain for character in "/?#@[]:"):
-        return None
-    try:
-        return normalize_url(f"https://{domain}").registrable_domain
-    except URLNormalizationError:
-        return None
-
-
-def _json_or_none(value: Any) -> str | None:
-    return None if value is None else json.dumps(value, ensure_ascii=False)
-
-
-def _is_safe_national_id_metadata(value: Any) -> bool:
-    if not isinstance(value, str) or not value.startswith("present:"):
-        return False
-    type_names = value.removeprefix("present:").split("+")
-    return (
-        bool(type_names)
-        and type_names == sorted(set(type_names))
-        and set(type_names) <= _SAFE_NATIONAL_ID_TYPES
-    )
-
-
-def _is_masked_excerpt(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and bool(value)
-        and set(value) == {MASK_CHARACTER}
-    )
+    if columns and not required.issubset(columns):
+        raise PersistenceError("legacy_database_reset_required")

@@ -1,137 +1,118 @@
-# ai-assisted-research Specification
+# AI-assisted research Specification
 
 ## Purpose
-Defines recruiter-selected web research with citations. Each category runs through a normal synchronous request in the existing FastAPI service.
+
+Defines optional cited public-web research after a validated base analysis.
 
 ## Requirements
 
-### Requirement: User-controlled synchronous research
-The system SHALL let the recruiter start company, education/certification, and LinkedIn research separately after the base report is ready. Each selected category SHALL complete or fail within its own API request.
+### Requirement: Research only accepted base-analysis subjects
 
-#### Scenario: No research selected
-- **WHEN** the recruiter does not select a category
-- **THEN** the system does not call Web Search for that category
+Company research SHALL use accepted employment records with a supported named
+organization. Education research SHALL use accepted education records with a
+supported institution or certificate. LinkedIn discovery SHALL require a
+supported candidate name and may use accepted organization and role fields as
+search hints.
 
-#### Scenario: Research category selected
-- **WHEN** the recruiter starts one category
-- **THEN** the API performs only that category and returns its completed result or error
+Ambiguous records, ambiguous fields, self-employment labels, skills, raw
+extractor candidates, reviewer-rejected candidates, and unvalidated model
+output MUST NOT become research subjects.
 
-#### Scenario: Research request retried
-- **WHEN** the same analysis, category, and research version are requested again
-- **THEN** the system reuses a completed compatible result or safely replaces the category result without duplicates
+#### Scenario: Reviewer adds a missing supported employer
+
+- **WHEN** the reviewer adds an employment record and the shared evidence and
+  relation validator accepts it
+- **THEN** the employer can become a company-research subject
+
+#### Scenario: Technology resembles an employer
+
+- **WHEN** a technology name is ambiguous or lacks an accepted employment
+  relation
+- **THEN** company research omits it
+
+### Requirement: Automatic and manual category starts
+
+After base analysis completes, the client SHALL start each enabled eligible
+research category automatically. Company, education, and LinkedIn categories
+run independently and remain available as manual actions after a failed or
+disabled automatic attempt.
+
+#### Scenario: Eligible categories exist
+
+- **WHEN** automatic research is enabled and accepted subjects exist
+- **THEN** eligible categories start without waiting for another analysis pass
+
+#### Scenario: Research is disabled
+
+- **WHEN** the user or deployment disables public research
+- **THEN** no automatic or manual research request is made
 
 ### Requirement: Cited read-only public-web research
-Research SHALL use OpenAI Web Search in read-only mode. Each result SHALL include source URLs, access times, evidence, confidence, and an `insufficient_evidence` outcome when needed.
 
-#### Scenario: Relevant public evidence found
-- **WHEN** research finds evidence about a CV claim
-- **THEN** the result cites the source and explains how it relates to the claim
+Research SHALL use OpenAI Web Search in read-only mode. Each result SHALL
+include source URLs, access times, confidence, searches performed, limitations,
+and an `insufficient_evidence` outcome when appropriate.
 
-#### Scenario: Evidence cannot be found
-- **WHEN** research finds too little reliable evidence
-- **THEN** the result records the missing evidence and the searches performed
+Research is decision support. It MUST NOT claim that a candidate is dishonest,
+fraudulent, physically located somewhere, or eligible to work. It MUST NOT
+trigger a hiring decision or mutate the accepted base analysis.
 
-### Requirement: Requested company-presence checks
-Company research SHALL check whether organizations exist, what they do, where and when they operated, their official websites, public company pages, available registries, and employer/client/project relations. It SHALL flag limited or missing detectable online presence without claiming that the company is fraudulent or a shell company.
+#### Scenario: Public evidence is insufficient
 
-#### Scenario: Company has a public footprint
-- **WHEN** research finds reliable public evidence for a company
-- **THEN** the result shows the evidence, company activity, dates, and location
+- **WHEN** allowed searches do not support a public claim
+- **THEN** the result records insufficient evidence, searches, and limitations
 
-#### Scenario: Company has little detectable public presence
-- **WHEN** the allowed searches find no reliable website, company page, or registry record
-- **THEN** the result includes a visible limited-online-presence flag, the searches performed, and the limits of that conclusion
+### Requirement: Company research
 
-### Requirement: Requested education checks
-Education research SHALL check whether institutions, programs, degrees, and certificates exist and identify relevant dates, city, country, and accreditation when available. It SHALL highlight for manual review when the researched institution country differs from the candidate's current code-owned stated-location country. This is an attention signal only: the difference MUST NOT be described as proof of dishonesty, fraud, nationality, residence, or work permission and MUST NOT affect score or band.
+Company research SHALL check public evidence for organization existence,
+activity, operating dates, location, official pages, and registries. Missing
+public evidence SHALL remain inconclusive and MUST NOT be described as proof
+that an organization is fake.
 
-#### Scenario: Institution or credential researched
-- **WHEN** research checks an institution, program, degree, or certificate
-- **THEN** the result separates supporting, conflicting, and missing evidence
+#### Scenario: Company has limited public evidence
 
-#### Scenario: Institution country differs from current stated location
-- **WHEN** cited evidence places the institution in a country different from the candidate's current code-owned stated-location country
-- **THEN** the result shows the location difference and its evidence for recruiter review
-- **AND** states that the difference alone does not prove a false claim
+- **WHEN** no reliable official page or registry result is found
+- **THEN** the result remains inconclusive and explains the search limits
 
-### Requirement: Requested LinkedIn discovery and completeness checks
-LinkedIn discovery SHALL search by candidate name and may use company or role from the CV only as search hints. It MUST NOT claim identity or compare a possible profile with the CV. For possible public profiles it SHALL report the public profile URL, cited source evidence, discovery confidence, whether a photo is visible, and whether a public connection or follower count is visible. Missing photo data or a visible count below the configured threshold SHALL produce the requested profile-completeness flag.
-The V1 connection-count threshold SHALL default to 500 and SHALL be configurable. It SHALL apply only to an explicitly public visible minimum count with a cited source; an unknown count SHALL NOT produce a negative count-completeness flag.
-The V1 possible-profile limit SHALL default to three and SHALL be configurable from 1 to 20. When a valid provider response contains more profiles, code SHALL sort them deterministically and retain only the configured maximum instead of rejecting the complete discovery result.
+### Requirement: Education research
 
-#### Scenario: Potential profiles found
-- **WHEN** LinkedIn discovery finds plausible profiles
-- **THEN** the system shows each possible profile as a separate manual-review link with cited evidence and discovery confidence
-- **AND** the system does not offer confirmation or automated profile-to-CV comparison
+Education research SHALL check public evidence for institutions, programs,
+degrees, certificates, dates, location, and accreditation when available.
+A cited institution-country difference MAY be shown for manual review but is
+not evidence of a false CV claim.
 
-#### Scenario: Discovery returns more profiles than the configured limit
-- **WHEN** a valid discovery response contains more possible profiles than the configured maximum
-- **THEN** code retains a deterministic subset up to that maximum and keeps the discovery result usable
+#### Scenario: Institution country differs
 
-#### Scenario: Completeness data is visible
-- **WHEN** a possible public profile exposes photo or connection information
-- **THEN** the result records the presence or absence of those elements without analyzing appearance
-- **AND** shows the requested completeness flag when the configured criteria are not met
+- **WHEN** cited sources place an institution in another country
+- **THEN** the difference is shown for review without a dishonesty claim
 
-#### Scenario: Completeness data is unavailable
-- **WHEN** the public result does not expose a photo or connection count reliably
-- **THEN** the corresponding value is unknown and the system does not guess it
+### Requirement: LinkedIn discovery
 
-#### Scenario: No plausible profile found
-- **WHEN** the allowed searches find no plausible profile
-- **THEN** the report includes the requested `linkedin_not_found` flag and states that search failure does not prove the profile does not exist
+LinkedIn discovery SHALL return possible public profile links with citations,
+confidence, visible photo status, and visible connection-count status. It MUST
+NOT claim identity, compare appearance, or automatically match a person.
+Unknown public data remains unknown.
 
-### Requirement: Research outside the verdict path
-Research results MUST NOT change the deterministic score or band. They MUST NOT trigger a hiring decision.
+The default possible-profile limit is three and is configurable from 1 to 20.
+The default visible connection-count threshold is 500.
 
-#### Scenario: Research conflicts with a CV claim
-- **WHEN** cited research conflicts with the CV
-- **THEN** the system shows the conflict for human review without changing the band
+#### Scenario: Profile data is unavailable
 
-### Requirement: SQLite research persistence and cache
-The system SHALL store completed category results in the existing SQLite persistence layer. It SHALL cache reusable company, institution, program, and certificate research without mixing candidate data.
+- **WHEN** photo or connection-count data is not publicly supported
+- **THEN** the result keeps that field unknown
 
-#### Scenario: Reusable entity research exists
-- **WHEN** a current compatible SQLite cache entry exists for the same normalized public entity
-- **THEN** the system can reuse it and records the cache use
+### Requirement: Persistence and reusable cache
 
-#### Scenario: Reusable education research is applied to a candidate
-- **WHEN** public institution research is loaded from a reusable cache entry
-- **THEN** candidate-specific location comparison is calculated after the cache read and stored only on that candidate's analysis
-- **AND** the reusable entry contains no candidate location or candidate-specific consistency conclusion
+Completed category results SHALL be stored under the owning analysis. Reusable
+public-entity cache entries MUST exclude candidate-specific data. Every cache
+hit or miss SHALL be recorded for the owning analysis, and responses SHALL
+disclose whether a result came from cache.
 
-#### Scenario: LinkedIn discovery performed
-- **WHEN** the system stores LinkedIn discovery
-- **THEN** the result stays within the candidate analysis that requested it
+A repeated compatible request SHALL return the stored completed result without
+another provider call. Cache failures in one category MUST NOT block unrelated
+categories.
 
-### Requirement: Source research eligibility from the validated subject projection
+#### Scenario: Compatible reusable result exists
 
-Company and education research requests SHALL consume a derived bounded request projection produced from immutable code-owned research subjects followed by independently validated AI additions. They MUST NOT require a successful document-analysis outcome when public research remains enabled and the requested public entity is already supported by code-owned source evidence. They MUST remain unavailable when the user or deployment disables the overall AI/public-research feature. Document-AI failure or omission and AI/public-research authorization are separate states.
-
-The persisted document-understanding contract SHALL contain only immutable `code_research_subjects`. Each request SHALL derive its union without modifying that contract, allocate the category limit to code-owned subjects first in stable source order, then add deduplicated AI subjects up to the remaining capacity, and use exact dedupe keys of category plus Unicode-normalized, whitespace-collapsed, case-folded subject. AI retry MAY change only the derived request union; it MUST NOT change or reorder persisted code subjects. Reusable-cache isolation, candidate-PII exclusion, and existing category limits SHALL apply to the derived request.
-
-LinkedIn discovery SHALL retain its existing candidate-scoped behavior and MUST NOT be generated from skill, education, or organization section extraction alone.
-
-#### Scenario: Code supplies all education subjects after document-AI failure
-- **WHEN** code-owned understanding extracts supported institution entries, public research remains enabled, and document AI is unsuccessful
-- **THEN** the recruiter can start education research for the bounded code-owned subjects
-
-#### Scenario: User disables AI and public research
-- **WHEN** the user or deployment disables the overall AI/public-research feature
-- **THEN** company, education, and LinkedIn research remain unavailable even when code-owned subjects exist
-
-#### Scenario: Code supplies a named employer
-- **WHEN** code-owned understanding extracts a supported named organization from employment
-- **THEN** company research can use that organization without requiring an AI-generated research candidate
-
-#### Scenario: Generic relationship label is present
-- **WHEN** an entry contains only a self-employed or freelance relationship label
-- **THEN** the subject projection and company research request omit that label
-
-#### Scenario: AI adds a distinct supported subject
-- **WHEN** independently validated AI field evidence supports a distinct public entity omitted by code
-- **THEN** the bounded request may include that AI-derived subject with its authority preserved
-
-#### Scenario: Subject limit is reached
-- **WHEN** the number of code-owned and AI-derived subjects exceeds the existing category limit
-- **THEN** code-owned subjects consume the limit first in stable source order and AI additions cannot displace them
+- **WHEN** a current public-entity cache entry matches the request
+- **THEN** the API reuses it and records a cache hit for the owning analysis

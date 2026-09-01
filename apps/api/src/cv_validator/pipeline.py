@@ -1,302 +1,85 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from cv_validator.ai.application import DocumentAnalyzer, run_document_analysis
-from cv_validator.ai.config import AISettings
-from cv_validator.ai.domain import (
-    AIAnalysisStatus,
-    AIDocumentAnalysisOutcome,
+from cv_validator.analysis import (
+    AnalysisInput,
+    AnalysisStrategy,
+    UnavailableAnalysisStrategy,
+    validate_analysis_report,
 )
-from cv_validator.config import (
-    IngestionConfig,
-    WeightsConfig,
-    load_link_check_config,
-    load_ingestion_config,
-    load_small_locality_population_max,
-    load_weights,
-)
-from cv_validator.domain import DeterministicAnalysisResult, Report
-from cv_validator.file_links.checker import (
-    DNSResolver,
-    LinkCheckConfig,
-    LinkHTTPClient,
-    LinkInspector,
-    inspect_document_links,
-)
-from cv_validator.document_understanding.service import understand_document, understanding_to_payload
-from cv_validator.ingestion import (
-    RawDocument,
-    RedactedDocument,
-    RedactedDocumentIdentity,
-    SourcePage,
-)
-from cv_validator.ingestion.redaction import redact_national_ids
-from cv_validator.ingestion.router import ingest_cv
-from cv_validator.ingestion.text import validate_text_sufficiency
-from cv_validator.scoring.engine import score_deterministic
-from cv_validator.location import LocationResolver
 
 
 @dataclass(frozen=True)
 class PipelineResult:
-    report: Report
-    deterministic: DeterministicAnalysisResult
-    document_identity: RedactedDocumentIdentity
-    ai_outcome: AIDocumentAnalysisOutcome
-    report_language: str = "en"
-    redacted_document: RedactedDocument | None = None
+    report: dict[str, Any]
+    input_hash: str
+    source_filename: str
+    report_language: str
 
 
-def analyze_cv_text(
-    text: str,
-    weights: WeightsConfig | None = None,
-    ingestion_config: IngestionConfig | None = None,
+def analyze_cv_bytes_result(
+    content: bytes,
+    filename: str,
     *,
-    location_resolver: LocationResolver | None = None,
-    ai_settings: AISettings | None = None,
-    document_analyzer: DocumentAnalyzer | None = None,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
-) -> Report:
-    return analyze_cv_text_result(
-        text,
-        weights,
-        ingestion_config,
-        location_resolver=location_resolver,
-        ai_settings=ai_settings,
-        document_analyzer=document_analyzer,
-        link_check_config=link_check_config,
-        link_inspector=link_inspector,
-        link_dns_resolver=link_dns_resolver,
-        link_http_client=link_http_client,
-        link_metrics=link_metrics,
-    ).report
-
-
-def analyze_cv_text_result(
-    text: str,
-    weights: WeightsConfig | None = None,
-    ingestion_config: IngestionConfig | None = None,
-    *,
-    location_resolver: LocationResolver | None = None,
-    ai_settings: AISettings | None = None,
-    document_analyzer: DocumentAnalyzer | None = None,
+    strategy: AnalysisStrategy | None = None,
     report_language: str = "en",
-    defer_ai: bool = False,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
 ) -> PipelineResult:
-    cfg = weights or load_weights()
-    parsed = RawDocument(
-        pages=(SourcePage(page_id="page-0001", page_number=1, text=text),),
-        source_format="text",
-    )
-    validate_text_sufficiency(parsed, ingestion_config or load_ingestion_config())
-    return _analyze_raw(
-        parsed,
-        cfg,
-        location_resolver,
-        ai_settings,
-        document_analyzer,
-        report_language,
-        defer_ai,
-        link_check_config,
-        link_inspector,
-        link_dns_resolver,
-        link_http_client,
-        link_metrics,
+    request = AnalysisInput.from_upload(content, filename, report_language)
+    selected_strategy = strategy or UnavailableAnalysisStrategy()
+    payload = selected_strategy.analyze(request)
+    _require_strategy_identity(payload, selected_strategy, request)
+    return PipelineResult(
+        report=validate_analysis_report(payload),
+        input_hash=request.sha256,
+        source_filename=filename,
+        report_language=report_language,
     )
 
 
 def analyze_cv_bytes(
     content: bytes,
     filename: str,
-    weights: WeightsConfig | None = None,
-    ingestion_config: IngestionConfig | None = None,
     *,
-    location_resolver: LocationResolver | None = None,
-    ai_settings: AISettings | None = None,
-    document_analyzer: DocumentAnalyzer | None = None,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
-) -> Report:
+    strategy: AnalysisStrategy | None = None,
+    report_language: str = "en",
+) -> dict[str, Any]:
     return analyze_cv_bytes_result(
         content,
         filename,
-        weights,
-        ingestion_config,
-        location_resolver=location_resolver,
-        ai_settings=ai_settings,
-        document_analyzer=document_analyzer,
-        link_check_config=link_check_config,
-        link_inspector=link_inspector,
-        link_dns_resolver=link_dns_resolver,
-        link_http_client=link_http_client,
-        link_metrics=link_metrics,
+        strategy=strategy,
+        report_language=report_language,
     ).report
-
-
-def analyze_cv_bytes_result(
-    content: bytes,
-    filename: str,
-    weights: WeightsConfig | None = None,
-    ingestion_config: IngestionConfig | None = None,
-    *,
-    location_resolver: LocationResolver | None = None,
-    ai_settings: AISettings | None = None,
-    document_analyzer: DocumentAnalyzer | None = None,
-    report_language: str = "en",
-    defer_ai: bool = False,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
-) -> PipelineResult:
-    cfg = weights or load_weights()
-    parsed = ingest_cv(content, filename=filename, config=ingestion_config)
-    return _analyze_raw(
-        parsed,
-        cfg,
-        location_resolver,
-        ai_settings,
-        document_analyzer,
-        report_language,
-        defer_ai,
-        link_check_config,
-        link_inspector,
-        link_dns_resolver,
-        link_http_client,
-        link_metrics,
-    )
 
 
 def analyze_cv_file(
     path: Path,
-    weights: WeightsConfig | None = None,
-    ingestion_config: IngestionConfig | None = None,
     *,
-    location_resolver: LocationResolver | None = None,
-    ai_settings: AISettings | None = None,
-    document_analyzer: DocumentAnalyzer | None = None,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
-) -> Report:
-    content = path.read_bytes()
-    return analyze_cv_bytes(
-        content,
-        filename=path.name,
-        weights=weights,
-        ingestion_config=ingestion_config,
-        location_resolver=location_resolver,
-        ai_settings=ai_settings,
-        document_analyzer=document_analyzer,
-        link_check_config=link_check_config,
-        link_inspector=link_inspector,
-        link_dns_resolver=link_dns_resolver,
-        link_http_client=link_http_client,
-        link_metrics=link_metrics,
-    )
-
-
-def _analyze_raw(
-    parsed: RawDocument,
-    weights: WeightsConfig,
-    location_resolver: LocationResolver | None,
-    ai_settings: AISettings | None,
-    document_analyzer: DocumentAnalyzer | None,
+    strategy: AnalysisStrategy | None = None,
     report_language: str = "en",
-    defer_ai: bool = False,
-    link_check_config: LinkCheckConfig | None = None,
-    link_inspector: LinkInspector | None = None,
-    link_dns_resolver: DNSResolver | None = None,
-    link_http_client: LinkHTTPClient | None = None,
-    link_metrics: Any | None = None,
-) -> PipelineResult:
-    file_details = parsed.file_details
-    if file_details is not None and not any(
-        field.status.value == "available" for field in file_details.fields
-    ) and not parsed.document_links:
-        # Keep the legacy payload shape for ordinary documents with no file
-        # details while the nullable contract remains available to new reports.
-        file_details = None
-    link_inspection = None
-    if parsed.document_links:
-        selected_link_config = link_check_config or load_link_check_config()
-        if link_inspector is not None:
-            link_inspection = link_inspector.inspect(parsed.document_links)
-        else:
-            link_inspection = inspect_document_links(
-                parsed.document_links,
-                selected_link_config,
-                dns_resolver=link_dns_resolver,
-                http_client=link_http_client,
-                metrics=link_metrics,
-            )
-    redacted = redact_national_ids(parsed)
-    understanding = understand_document(
-        redacted,
-        weights.version,
-        location_resolver=location_resolver,
-        small_locality_population_max=load_small_locality_population_max(),
-    )
-    structural_audits = understanding.structural_audits
-    deterministic = understanding.deterministic
-    report = score_deterministic(deterministic, weights)
-    report = replace(
-        report,
-        file_details=file_details,
-        link_inspection=link_inspection,
-        structural_audits=structural_audits,
-        document_understanding=understanding_to_payload(understanding),
-    )
-    selected_ai_settings = ai_settings or AISettings()
-    if selected_ai_settings.enabled and defer_ai:
-        ai_outcome = AIDocumentAnalysisOutcome(
-            status=AIAnalysisStatus.PENDING
-        )
-    elif selected_ai_settings.enabled:
-        if document_analyzer is None:
-            from cv_validator.ai.openai_client import (
-                OpenAIResponsesDocumentAnalyzer,
-            )
-
-            document_analyzer = OpenAIResponsesDocumentAnalyzer(
-                selected_ai_settings
-            )
-        ai_outcome = run_document_analysis(
-            selected_ai_settings,
-            document_analyzer,
-            redacted,
-            deterministic,
-            report_language=report_language,
-            exclusion_intervals=understanding.annotation_index.exclusion_intervals,
-            understanding_context=report.document_understanding,
-        )
-    else:
-        ai_outcome = AIDocumentAnalysisOutcome(
-            status=AIAnalysisStatus.DISABLED
-        )
-    return PipelineResult(
-        report=report,
-        deterministic=deterministic,
-        document_identity=redacted.identity,
-        ai_outcome=ai_outcome,
+) -> dict[str, Any]:
+    return analyze_cv_bytes(
+        path.read_bytes(),
+        path.name,
+        strategy=strategy,
         report_language=report_language,
-        redacted_document=redacted,
     )
+
+
+def _require_strategy_identity(
+    payload: dict[str, Any],
+    strategy: AnalysisStrategy,
+    request: AnalysisInput,
+) -> None:
+    strategy_payload = payload.get("strategy")
+    source_payload = payload.get("source")
+    if strategy_payload != {"name": strategy.name, "version": strategy.version}:
+        raise ValueError("analysis strategy returned a mismatched identity")
+    if not isinstance(source_payload, dict):
+        raise ValueError("analysis strategy omitted source identity")
+    if source_payload.get("format") != request.source_format.value:
+        raise ValueError("analysis strategy returned a mismatched source format")
+    if source_payload.get("sha256") != request.sha256:
+        raise ValueError("analysis strategy returned a mismatched input hash")

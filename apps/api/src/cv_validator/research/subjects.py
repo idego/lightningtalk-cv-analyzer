@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import Any, Callable
+from typing import Any
 
 
 def subject_key(category: str, subject: str) -> tuple[str, str]:
@@ -9,35 +9,42 @@ def subject_key(category: str, subject: str) -> tuple[str, str]:
     return category, " ".join(normalized.split())
 
 
-def derive_subject_union(stored_report: dict[str, Any], category: str, *, ai_category: str, limit: int, safe: Callable[[str], bool]) -> tuple[dict[str, str], ...]:
-    result: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    understanding = stored_report.get("document_understanding")
-    if isinstance(understanding, dict):
-        for item in understanding.get("code_research_subjects", []):
-            if not isinstance(item, dict) or item.get("category") != category:
-                continue
-            subject = item.get("subject")
-            if not isinstance(subject, str) or not safe(subject):
-                continue
-            key = subject_key(category, subject)
-            if key in seen:
-                continue
-            seen.add(key); result.append({"subject": subject.strip(), "authority": "code", "record_id": str(item.get("record_id") or "")})
-            if len(result) == limit:
-                return tuple(result)
-    ai = stored_report.get("ai_analysis") or {}
-    candidates = ai.get("research_candidates") or []
-    for item in candidates:
-        if not isinstance(item, dict) or item.get("category") != ai_category:
-            continue
-        subject = item.get("query_subject")
-        if not isinstance(subject, str) or not safe(subject):
-            continue
-        key = subject_key(category, subject)
-        if key in seen:
-            continue
-        seen.add(key); result.append({"subject": subject.strip(), "authority": "ai"})
-        if len(result) == limit:
-            break
-    return tuple(result)
+def supported_field(record: Any, name: str) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    field = record.get(name)
+    if not isinstance(field, dict) or field.get("status") != "supported":
+        return None
+    value = field.get("value")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def accepted_records(
+    stored_report: dict[str, Any],
+    category: str,
+) -> tuple[dict[str, Any], ...]:
+    base_analysis = stored_report.get("base_analysis")
+    if not isinstance(base_analysis, dict):
+        return ()
+    records = base_analysis.get(category)
+    if not isinstance(records, list):
+        return ()
+    return tuple(
+        record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("status") == "accepted"
+        and record.get("relation_status") == "supported"
+    )
+
+
+def supported_profile_field(
+    stored_report: dict[str, Any],
+    name: str,
+) -> str | None:
+    base_analysis = stored_report.get("base_analysis")
+    if not isinstance(base_analysis, dict):
+        return None
+    return supported_field(base_analysis.get("profile"), name)

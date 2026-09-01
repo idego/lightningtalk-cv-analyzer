@@ -11,7 +11,6 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
-import { enrichThenScheduleResearch } from "@/lib/analysis-flow";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -48,31 +47,12 @@ export function UploadPanel() {
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("files", file, file.name);
-    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-AI-Enabled": String(settings.aiEnabled) } });
+    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage } });
     const payload = await response.json().catch(() => ({})) as AnalyzeBatchResponse & { error?: string };
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
     const result = payload.results?.[0];
     if (!result) return { filename: file.name, status: "error", error: t("noResult") };
     return result.status === "error" ? { ...result, error: t("analysisFailed") } : result;
-  }
-
-  async function enrichWithAi(
-    result: Extract<AnalyzeItemResult, { status: "ok" }>,
-  ): Promise<Extract<AnalyzeItemResult, { status: "ok" }>> {
-    if (result.report.ai_analysis.status !== "pending") return result;
-    const response = await fetch(
-      `/api/analyses/${encodeURIComponent(result.report.analysis_id)}/ai/retry`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aiEnabled: settings.aiEnabled }),
-      },
-    );
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(t("analysisFailed"));
-    }
-    return { ...result, report: payload };
   }
 
   async function submit() {
@@ -83,21 +63,7 @@ export function UploadPanel() {
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       setEntries((previous) => [...previous, { file, result }]);
       if (result.status === "ok") {
-        const outcome = await enrichThenScheduleResearch(
-          result,
-          settings,
-          enrichWithAi,
-          (report, currentSettings) => { void getAutoResearchOrchestrator()?.schedule(report, currentSettings); },
-        );
-        const completedResult = outcome.result;
-        result = completedResult;
-        setEntries((previous) => previous.map((entry) =>
-          entry.result.status === "ok"
-            && entry.result.report.analysis_id === completedResult.report.analysis_id
-            ? { ...entry, result: completedResult }
-            : entry,
-        ));
-        if (outcome.error) setError(outcome.error instanceof Error ? outcome.error.message : t("analysisFailed"));
+        void getAutoResearchOrchestrator()?.schedule(result.report, settings);
       }
     }
     setCompletionPhase("complete");

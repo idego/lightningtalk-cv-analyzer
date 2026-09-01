@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from cv_validator.location import Ambiguous, LocationResolver, Resolved, ResolutionLevel
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
-from cv_validator.research.subjects import derive_subject_union
+from cv_validator.research.subjects import accepted_records, supported_field
 
 RESEARCH_VERSION = "education-research-v2"
 PROMPT_VERSION = "education-research-prompt-v2"
@@ -60,13 +60,13 @@ def apply_owner_scoped_education_context(
     public_result: dict[str, Any],
     stored_report: dict[str, Any],
     *,
-    location_resolver: LocationResolver,
+    location_resolver: LocationResolver | None,
 ) -> dict[str, Any]:
     """Compare cited institution countries with the owner's code-owned location."""
     result = normalize_public_education_result(public_result)
-    claimed_country = str(
-        (stored_report.get("claimed_location") or {}).get("country_code") or ""
-    ).strip().upper()
+    if location_resolver is None:
+        return result
+    claimed_country = _declared_country_code(stored_report)
     if not claimed_country:
         return result
 
@@ -128,51 +128,30 @@ def apply_owner_scoped_education_context(
 
 
 def build_education_research_request(stored_report: dict[str, Any]) -> EducationResearchRequest:
-    ai = stored_report.get("ai_analysis") or {}
-    education = ai.get("facts", {}).get("education", [])
-    union = derive_subject_union(stored_report, "education", ai_category="education_or_certification", limit=MAX_CREDENTIALS, safe=_safe_subject)
     facts: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    understanding = stored_report.get("document_understanding") or {}
-    records = {item.get("id"): item for item in understanding.get("records", []) if isinstance(item, dict)} if isinstance(understanding, dict) else {}
-    for candidate in union:
-        if candidate["authority"] != "code":
+    seen: set[tuple[str, str, str]] = set()
+    for record in accepted_records(stored_report, "education"):
+        institution = supported_field(record, "institution")
+        program = supported_field(record, "program")
+        certificate = supported_field(record, "certificate")
+        if institution is not None and not _safe_subject(institution):
             continue
-        subject = candidate["subject"]
-        record = records.get(candidate.get("record_id"), {})
-        fields = {field.get("name"): field.get("value") for field in record.get("fields", []) if isinstance(field, dict) and field.get("status") == "supported"}
-        fact = {"institution": subject}
-        if isinstance(fields.get("program"), str): fact["program"] = fields["program"][:200]
-        facts.append(fact); seen.add(_key(fact)[:2])
-    allowed = {item["subject"].strip().casefold(): item["subject"] for item in union if item["authority"] == "ai"}
-    for item in education:
-        if not isinstance(item, dict):
+        if certificate is not None and not _safe_subject(certificate):
+            certificate = None
+        if institution is None and certificate is None:
             continue
-        institution = item.get("institution")
-        program = item.get("program")
-        if not isinstance(institution, str) or not _safe_subject(institution):
-            continue
-        matching_subjects = {institution.strip().casefold()}
-        if isinstance(program, str) and _safe_subject(program):
-            matching_subjects.add(program.strip().casefold())
-        if not (matching_subjects & set(allowed)):
-            continue
-        key = (institution.strip().casefold(), program.strip().casefold() if isinstance(program, str) else "")
+        fact: dict[str, Any] = {}
+        if institution is not None:
+            fact["institution"] = institution
+        if program is not None and _safe_subject(program):
+            fact["program"] = program[:200]
+        if certificate is not None:
+            fact["certificate"] = certificate
+        key = _key(fact)
         if key in seen:
             continue
         seen.add(key)
-        fact: dict[str, Any] = {"institution": institution.strip()}
-        if isinstance(program, str) and program.strip():
-            fact["program"] = program.strip()[:200]
-        # CV dates and evidence are never inputs to reusable public research.
         facts.append(fact)
-        if len(facts) == MAX_CREDENTIALS:
-            break
-    matched = {_key(fact) for fact in facts}
-    for normalized, subject in allowed.items():
-        if any(normalized in key for key in matched):
-            continue
-        facts.append({"certificate": subject})
         if len(facts) == MAX_CREDENTIALS:
             break
     if not facts:
@@ -214,3 +193,19 @@ def _safe_subject(value: str) -> bool:
     if "@" in stripped or re.search(r"(?:https?://|www\.)|\+?\d[\d\s().-]{6,}\d", stripped, re.I):
         return False
     return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2
+
+
+def _declared_country_code(stored_report: dict[str, Any]) -> str:
+    mechanical = stored_report.get("mechanical")
+    if not isinstance(mechanical, dict):
+        return ""
+    resolutions = mechanical.get("location_resolution")
+    if not isinstance(resolutions, list):
+        return ""
+    for item in resolutions:
+        if not isinstance(item, dict) or item.get("subject") != "declared_location":
+            continue
+        country_code = item.get("country_code")
+        if isinstance(country_code, str) and country_code.strip():
+            return country_code.strip().upper()
+    return ""

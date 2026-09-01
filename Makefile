@@ -1,6 +1,7 @@
 .PHONY: dev dev-down deploy-check deploy
 
 DOCKER_CONTEXT ?= default
+ALLOW_DEGRADED ?= false
 
 dev:
 	@./scripts/runtime-preflight.sh dev .env.local
@@ -10,7 +11,7 @@ dev:
 	BASE_URL=http://localhost:3001 \
 	BETTER_AUTH_URL=http://localhost:3001 \
 	docker --context $(DOCKER_CONTEXT) compose --env-file .env.local up --build -d --wait
-	@./scripts/verify-stack.sh http://127.0.0.1:3001
+	@./scripts/verify-stack.sh http://127.0.0.1:3001 $(ALLOW_DEGRADED)
 	@echo "CV Analyzer: http://127.0.0.1:3001/analyze"
 
 dev-down:

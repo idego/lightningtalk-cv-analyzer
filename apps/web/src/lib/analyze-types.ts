@@ -1,228 +1,52 @@
-export type Band = "green" | "amber" | "red" | "gray";
-
-export type ComponentVersion = {
-  name: string;
-  version: string;
-  source_url?: string;
-};
+export type AnalysisStatus = "completed" | "partial" | "failed" | "unavailable";
 
 export type Evidence = {
-  page_id: string;
-  page_number: number;
-  start_offset: number;
-  end_offset: number;
+  source_id: string;
   excerpt: string;
+  page_number?: number | null;
+  start_offset?: number | null;
+  end_offset?: number | null;
 };
 
-export type FileDetailField =
-  | "author"
-  | "creator"
-  | "producer"
-  | "title"
-  | "subject"
-  | "creation_time"
-  | "modification_time"
-  | "created"
-  | "modified"
-  | "last_modifier"
-  | "revision";
-
-export type FileDetail = {
-  value: string | null;
-  status: "available" | "unavailable";
-  source_format: "pdf" | "docx" | string;
-  extractor_version: ComponentVersion | null;
-};
-
-export type FileDetails = {
-  contract_version: "file-details-v1";
-  source_format: "pdf" | "docx" | string;
-  extractor_version: ComponentVersion;
-  fields: Partial<Record<FileDetailField, FileDetail>>;
-};
-
-export type LinkSource = "visible_url" | "embedded_hyperlink" | "visible_and_embedded";
-export type LinkAssociation = "visible_only" | "embedded_only" | "matched" | "mismatched" | "unknown";
-export type LinkRole = "profile" | "portfolio" | "project" | "publication" | "credential" | "cv_claim" | "generic";
-export type LinkOutcomeStatus = "REACHABLE" | "SUSPICIOUS" | "UNAVAILABLE" | "NOT_CHECKED";
-export type LinkReasonCode =
-  | "reachable"
-  | "hyperlink_target_mismatch"
-  | "service_domain_lookalike"
-  | "unsafe_scheme"
-  | "embedded_credentials"
-  | "invalid_host"
-  | "disallowed_port"
-  | "unsafe_destination"
-  | "unsafe_redirect"
-  | "unrelated_cross_domain_redirect"
-  | "declared_link_not_found"
-  | "invalid_link_target"
-  | "inspection_disabled"
-  | "dns_failure"
-  | "connection_failure"
-  | "timeout"
-  | "tls_failure"
-  | "response_limit"
-  | "redirect_limit"
-  | "http_forbidden"
-  | "rate_limited"
-  | "anti_bot"
-  | "request_budget_exceeded"
-  | "method_not_allowed"
-  | "http_status_unavailable"
-  | "redirect_without_location";
-
-export type LinkCheckResult = {
-  link_id: string;
-  status: LinkOutcomeStatus;
-  displayed_value: string | null;
-  sanitized_target: string | null;
-  source: LinkSource;
-  association: LinkAssociation;
-  role: LinkRole;
-  source_page: number | null;
-  source_evidence: Evidence[];
-  source_location: "body" | "header" | "footer" | string;
-  reason_code: LinkReasonCode;
-  terminal_status: number | null;
-  terminal_registrable_domain: string | null;
-  checked_at: string | null;
-  configuration_version: string;
-  title: string;
-};
-
-export type LinkInspection = {
-  contract_version: "link-inspection-v1";
-  checked_at: string;
-  configuration_version: string;
-  links: LinkCheckResult[];
-};
-
-export type ReviewEvidence = {
-  page_id: string;
-  page_number?: number;
-  line_id?: string;
-  start_offset?: number;
-  end_offset?: number;
-  excerpt: string;
-};
-
-export type ReviewImportance = "attention" | "worth_knowing" | "remaining";
-
-export type ReviewFlag = {
-  id: string;
-  source: "code" | "ai" | "research";
-  authority: "code" | "ai";
-  category: string;
-  status: string;
-  importance: ReviewImportance;
-  confidence: string;
-  observation: string;
-  reason: string;
-  limitation: string | null;
-  evidence: ReviewEvidence[];
-  presentation_context?: {
-    observed: string | null;
-    claimed: string | null;
-    direction: string;
-  };
-};
-
-export type ChecklistId =
-  | "contact"
-  | "education"
-  | "employment"
-  | "timeline"
-  | "duration_claims"
-  | "relationships"
-  | "document_quality"
-  | "protected_boundaries";
-
-type AICompositeFactBase = {
-  status: "present" | "ambiguous";
-  authority: "ai";
-  source: "document_analyzer";
-};
-
-export type AIContactFact = AICompositeFactBase & {
-  kind: "candidate_name" | "phone" | "stated_location";
+export type SupportedField = {
   value: string;
-  evidence: ReviewEvidence[];
+  status: "supported" | "ambiguous";
+  evidence: Evidence[];
 };
 
-export type AIEducationFact = AICompositeFactBase & {
-  kind: "education";
-  institution: string;
-  program: string | null;
-  study_dates: string | null;
-  field_evidence: {
-    institution: ReviewEvidence[];
-    program: ReviewEvidence[];
-    study_dates: ReviewEvidence[];
-  };
+export type Profile = {
+  candidate_name: SupportedField | null;
+  declared_location: SupportedField | null;
+  headline: SupportedField | null;
+  summary: SupportedField | null;
+  skills: SupportedField[];
+  languages: SupportedField[];
 };
 
-export type AIEmploymentFact = AICompositeFactBase & {
-  kind: "employment";
-  organization: string;
-  role: string;
-  employment_dates: string | null;
-  location: string | null;
-  relationship_type: string | null;
-  field_evidence: {
-    organization: ReviewEvidence[];
-    role: ReviewEvidence[];
-    employment_dates: ReviewEvidence[];
-    location: ReviewEvidence[];
-    relationship_type: ReviewEvidence[];
-  };
+export type AnalysisRecord = {
+  id: string;
+  status: "accepted" | "ambiguous";
+  relation_status: "supported" | "ambiguous";
+  added_by_reviewer: boolean;
 };
 
-export type AIAnalysis = {
-  status: "pending" | "disabled" | "succeeded" | "failed";
-  failure_reason: "timeout" | "refusal" | "invalid_response" | "client_error" | null;
-  failure: {
-    stage: string | null;
-    retryable: boolean | null;
-    http_status_class: string | null;
-    provider_request_id: string | null;
-    attempt_count: number;
-    latency_ms: number | null;
-  } | null;
-  manual_retry_available: boolean;
-  attempt_count: number;
-  latency_ms: number | null;
-  authority: "ai";
-  source: "document_analyzer";
-  report_language: "en" | "pl";
-  model: {
-    provider: "openai";
-    configured: string;
-    response: string | null;
-    reasoning_effort: string;
-  };
-  versions: {
-    prompt: string;
-    schema: string;
-    input_contract: string;
-    deterministic_observations: string;
-  };
-  usage: Record<string, unknown> | null;
-  facts: {
-    contact: AIContactFact[];
-    education: AIEducationFact[];
-    employment: AIEmploymentFact[];
-  };
-  findings: unknown[];
-  unknowns: unknown[];
-  research_candidates: Array<{
-    category: "company" | "education_or_certification" | "linkedin";
-    query_subject: string;
-  }>;
-  checklist: Record<ChecklistId, { checked: boolean; issue_count: number }>;
-  analysis_limitations: string[];
-  validation_warnings: string[];
+export type EmploymentRecord = AnalysisRecord & {
+  organization: SupportedField | null;
+  role: SupportedField | null;
+  start_date: SupportedField | null;
+  end_date: SupportedField | null;
+  location: SupportedField | null;
+  relationship_type: SupportedField | null;
+};
+
+export type EducationRecord = AnalysisRecord & {
+  institution: SupportedField | null;
+  program: SupportedField | null;
+  degree: SupportedField | null;
+  certificate: SupportedField | null;
+  start_date: SupportedField | null;
+  end_date: SupportedField | null;
+  location: SupportedField | null;
 };
 
 export type CompanyResearch = {
@@ -231,6 +55,7 @@ export type CompanyResearch = {
   accessed_at: string;
   searches_performed: string[];
   search_limitations: string[];
+  cache?: { status: "hit" | "miss"; format_version: string };
   organizations: Array<{
     query_subject: string;
     existence: "supported" | "conflicting" | "insufficient_evidence";
@@ -261,6 +86,7 @@ export type EducationResearch = {
   accessed_at: string;
   searches_performed: string[];
   search_limitations: string[];
+  cache?: { status: "hit" | "miss"; format_version: string };
   credentials: Array<{
     institution: string | null;
     program: string | null;
@@ -278,117 +104,45 @@ export type EducationResearch = {
     location_difference_for_review: string | null;
     confidence: "low" | "medium" | "high";
     uncertainty: string;
-    findings: Array<{ kind: string; summary: string; source_urls: string[]; confidence: string; uncertainty: string }>;
+    findings: Array<{
+      kind: string;
+      summary: string;
+      source_urls: string[];
+      confidence: string;
+      uncertainty: string;
+    }>;
   }>;
 };
 
 export type LinkedInDiscovery = {
-  status: "completed"; outcome: "completed" | "ambiguous" | "insufficient_evidence";
-  linkedin_not_found: boolean; not_found_caveat: string; searches_performed: string[]; search_limitations: string[];
-  possible_profiles: Array<{ profile_url: string; source_urls: string[]; confidence: "low" | "medium" | "high"; uncertainty: string;
-    photo_visible: "true" | "false" | "unknown"; photo_source_url: string | null;
-    connection_count: { visibility: "visible" | "unknown"; minimum: number | null; maximum: number | null; display: string | null; source_url: string | null };
-    connection_completeness_flag: boolean }>;
-};
-
-type ProvenanceFields = {
-  authority: "code";
-  evidence: Evidence[];
-  extractor_version: ComponentVersion;
-  reference_data_version: ComponentVersion | null;
-};
-
-export type Finding = {
-  signal: string;
-  strength: string;
-  observed: string;
-  claimed: string | null;
-  direction: string;
-  weight: number;
-  rationale: string;
-  authority: "code" | null;
-  evidence: Evidence[];
-  extractor_version: ComponentVersion | null;
-  reference_data_version: ComponentVersion | null;
-  rule_id: string | null;
-  score_impact: "weighted" | "none" | null;
-  supporting_fact_ids: string[];
-};
-
-export type DeterministicCandidate = ProvenanceFields & {
-  id: string;
-  kind: string;
-  value: string;
-  subject: string;
-  relation: string | null;
-  source_context: string | null;
-  label: string | null;
-  relation_evidence: Evidence[];
-  value_evidence: Evidence[];
-};
-
-export type DeterministicFact = DeterministicCandidate & {
-  subject: string;
-  source_candidate_ids: string[];
-  resolved_level: string | null;
-  resolved_name: string | null;
-  resolved_record_ids: string[];
-  resolved_population: number | null;
-};
-
-export type DeterministicObservation = ProvenanceFields & {
-  id: string;
-  kind: string;
-  status: string;
-  subject_ids: string[];
-  values: string[];
-  reason: string;
-  relation: string | null;
-  source_context: string | null;
-  label: string | null;
-  relation_evidence: Evidence[];
-  value_evidence: Evidence[];
-};
-
-export type DeterministicScoringSignal = ProvenanceFields & {
-  id: string;
-  kind: string;
-  value: string;
-  supporting_fact_ids: string[];
-  rule_id: string;
-  ruleset_version: string;
-  relation: string | null;
-  source_context: string | null;
-  label: string | null;
-};
-
-export type StructuralSourceLocation = { page_id: string; page_number: number; line_id: string | null; line_number: number | null; start_offset: number | null; end_offset: number | null; paragraph_path: string | null; bbox: { x0: number; y0: number; x1: number; y1: number } | null; association: "exact" | "partial" | "unmapped" };
-export type StructuralTimelineEvidence = { location: StructuralSourceLocation; excerpt: string };
-export type StructuralTimelineEntry = { id: string; category: "employment" | "education" | "unknown"; status: "valid" | "invalid" | "unresolved"; start_text: string | null; end_text: string | null; start_month: string | null; end_month: string | null; start_precision: string; end_precision: string; source_location: StructuralSourceLocation; evidence: StructuralTimelineEvidence[] };
-export type StructuralTimelineObservation = { id: string; kind: "invalid_period" | "definite_overlap" | "possible_overlap"; status: "needs_review" | "informational"; entry_ids: string[]; overlap_months: number | null; precision: "exact" | "coarse" | null; reason_code: string; evidence: StructuralTimelineEvidence[] };
-export type StructuralVisibilityObservation = { id: string; kind: "hidden_text" | "near_zero_text" | "zero_opacity_text" | "low_contrast_text"; status: "needs_review"; confidence: "high" | "medium"; source_location: StructuralSourceLocation; trigger_codes: string[]; character_count: number; word_count: number; redaction: { present: boolean; type_hints: string[] } | null; threshold_version: string };
-export type StructuralAudits = { contract_version: "structural-audits-v1"; status: "completed" | "partial" | "unavailable" | "not_applicable"; snapshot_month: string | null; coverage: { status: string; source_format: string; audited_parts: string[]; omitted_parts: string[] }; timeline: { status: string; parser_version: string; entries: StructuralTimelineEntry[]; summaries: Array<{ category: string; entry_count: number; earliest_month: string | null; latest_month: string | null; non_overlapping_months: number }>; observations: StructuralTimelineObservation[]; reported_entry_count: number; additional_entry_count: number; truncated: boolean }; visibility: { status: string; detector_version: string; threshold_version: string; observations: StructuralVisibilityObservation[]; reported_observation_count: number; additional_observation_count: number; truncated: boolean } };
-
-export type UnderstandingEvidence = { page_id: string; page_number: number; line_id: string | null; start_offset: number | null; end_offset: number | null; association: "exact" | "partial"; excerpt: string | null };
-export type UnderstandingField = { name: string; status: "supported" | "unknown" | "ambiguous"; value: string | null; authority: "code"; confidence: "high" | "medium" | "low"; evidence: UnderstandingEvidence[] };
-export type UnderstandingRecord = { id: string; kind: "education" | "employment"; section_id: string; confidence: "high" | "medium" | "low"; fields: UnderstandingField[]; date_range_ids: string[] };
-export type UnderstandingSkill = { id: string; canonical_id: string; display_label: string; taxonomy: "esco"; taxonomy_version: string; confidence: "high" | "medium" | "low"; evidence: UnderstandingEvidence[] };
-export type DocumentUnderstanding = {
-  contract_version: "document-understanding-v1";
-  status: "completed" | "partial" | "unavailable" | "not_applicable";
-  parser_version: string; ruleset_version: string; snapshot_month: string;
-  coverage: { status: string; source_format: string; audited_parts: string[]; omitted_parts: string[] };
-  sections: Array<{ id: string; kind: string; confidence: string; heading: string; start_line_id: string; end_line_id: string; evidence: UnderstandingEvidence[] }>;
-  date_ranges: Array<{ id: string; source_literal: string; start_month: string | null; end_month: string | null; start_precision: string; end_precision: string; status: string; snapshot_month: string; evidence: UnderstandingEvidence[] }>;
-  records: UnderstandingRecord[]; skills: UnderstandingSkill[];
-  ambiguous_spans: Array<{ id: string; category: string; reason_code: string; evidence: UnderstandingEvidence[] }>;
-  timeline_record_links: Array<{ timeline_entry_id: string; record_id: string }>;
-  code_research_subjects: Array<{ id: string; category: "company" | "education"; subject: string; record_id: string; field_name: "organization" | "institution" }>;
-  truncation: Record<string, { reported_count: number; additional_count: number; truncated: boolean }>;
+  status: "completed";
+  outcome: "completed" | "ambiguous" | "insufficient_evidence";
+  linkedin_not_found: boolean;
+  not_found_caveat: string;
+  searches_performed: string[];
+  search_limitations: string[];
+  possible_profiles: Array<{
+    profile_url: string;
+    source_urls: string[];
+    confidence: "low" | "medium" | "high";
+    uncertainty: string;
+    photo_visible: "true" | "false" | "unknown";
+    photo_source_url: string | null;
+    connection_count: {
+      visibility: "visible" | "unknown";
+      minimum: number | null;
+      maximum: number | null;
+      display: string | null;
+      source_url: string | null;
+    };
+    connection_completeness_flag: boolean;
+  }>;
 };
 
 export type AnalysisReport = {
+  contract_version: "base-analysis-v2";
   analysis_id: string;
+  analysis_access_token?: string;
   ai_features_enabled?: boolean;
   ai_capabilities?: {
     document_analysis: boolean;
@@ -396,42 +150,52 @@ export type AnalysisReport = {
     education_research: boolean;
     linkedin_research: boolean;
   };
-  analysis_access_token?: string;
-  score: number;
-  band: Band;
-  claimed_location: {
-    raw: string | null;
-    country_code: string | null;
-    region: string | null;
-    confidence: string;
-  };
-  findings: Finding[];
-  ruleset_version: {
+  strategy: {
+    name: "docling-luna" | "luna-only";
     version: string;
-    weights_path: string;
-    scoring_policy_version: string;
   };
-  summary: string;
-  disclaimer: string;
-  signal_count: number;
-  supporting_count: number;
-  conflicting_count: number;
-  file_details?: FileDetails | null;
-  link_inspection?: LinkInspection | null;
-  structural_audits?: StructuralAudits | null;
-  document_understanding?: DocumentUnderstanding | null;
-  deterministic: {
-    ruleset_version: string;
-    candidates: DeterministicCandidate[];
-    facts: DeterministicFact[];
-    observations: DeterministicObservation[];
-    scoring_signals: DeterministicScoringSignal[];
+  source: {
+    format: "pdf" | "docx";
+    sha256: string;
+    conversion_status: "completed" | "partial" | "unsupported" | "failed";
   };
-  ai_analysis: AIAnalysis;
-  checklist: {
-    checks: Record<ChecklistId, { checked: boolean; issue_count: number }>;
-    flags: ReviewFlag[];
+  base_analysis: {
+    status: AnalysisStatus;
+    profile: Profile;
+    employment: EmploymentRecord[];
+    education: EducationRecord[];
+    pass_statuses: Record<string, {
+      status: AnalysisStatus;
+      attempt_count: number;
+      latency_ms: number | null;
+      failure_reason?: string | null;
+    }>;
+    review: {
+      status: AnalysisStatus;
+      accepted_ids: string[];
+      rejected: Array<Record<string, unknown>>;
+      merged_ids: string[][];
+      relation_corrections: Array<Record<string, unknown>>;
+      added_profile_fields: Array<"candidate_name" | "declared_location" | "headline" | "summary" | "skills" | "languages">;
+      added_candidate_ids: string[];
+      conflicts: Array<Record<string, unknown>>;
+      coverage_gaps: Array<Record<string, unknown>>;
+    };
   };
+  mechanical: {
+    phones: Array<Record<string, unknown>>;
+    emails: Array<Record<string, unknown>>;
+    literal_links: Array<Record<string, unknown>>;
+    postal_candidates: Array<Record<string, unknown>>;
+    accepted_postal_addresses: Array<Record<string, unknown>>;
+    email_findings: Array<Record<string, unknown>>;
+    location_resolution: Array<Record<string, unknown>>;
+    eu_status: Record<string, unknown> | null;
+  };
+  research: Record<string, unknown>;
+  limitations: string[];
+  versions: Record<string, string>;
+  usage: Record<string, string | number | boolean | null>;
   company_research?: CompanyResearch;
   education_research?: EducationResearch;
   linkedin_discovery?: LinkedInDiscovery;
@@ -450,6 +214,7 @@ export type AnalyzeItemResult =
     };
 
 export type AnalyzeBatchResponse = {
+  analysis_access_token?: string;
   results: AnalyzeItemResult[];
 };
 
@@ -457,7 +222,7 @@ export type AnalysisHistoryItem = {
   analysis_id: string;
   filename: string;
   candidate_name: string | null;
-  band: Band;
-  summary: string;
+  status: AnalysisStatus;
+  strategy: AnalysisReport["strategy"]["name"] | null;
   created_at: string;
 };

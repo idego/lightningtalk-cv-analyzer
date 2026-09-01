@@ -14,8 +14,7 @@ from cv_validator.research.domain import (
     CompanyResearchInvalidResponse,
     CompanyResearchRequest,
 )
-from cv_validator.research.subjects import derive_subject_union
-from cv_validator.document_understanding.relationships import is_self_employment_label
+from cv_validator.research.subjects import accepted_records, subject_key, supported_field
 
 RESEARCH_VERSION = "company-research-v1"
 PROMPT_VERSION = "company-research-prompt-v2"
@@ -49,19 +48,19 @@ class CompanyResearchService:
 
 
 def build_company_research_request(stored_report: dict[str, Any]) -> CompanyResearchRequest:
-    ai = stored_report.get("ai_analysis") or {}
-    employment = ai.get("facts", {}).get("employment", [])
     facts: list[dict[str, Any]] = []
-    union = derive_subject_union(stored_report, "company", ai_category="company", limit=MAX_ORGANIZATIONS, safe=_safe_organization_subject)
-    for candidate in union:
-        subject = candidate["subject"]
-        normalized = subject.strip().casefold()
-        match = next((item for item in employment if isinstance(item, dict) and str(item.get("organization", "")).strip().casefold() == normalized), None)
-        if candidate["authority"] == "ai" and match is None:
+    seen: set[tuple[str, str]] = set()
+    for record in accepted_records(stored_report, "employment"):
+        subject = supported_field(record, "organization")
+        if subject is None or not _safe_organization_subject(subject):
             continue
-        # Reusable public-web research receives only the public organization
-        # subject. Candidate dates, locations and relations stay owner-scoped.
-        facts.append({"organization": subject.strip()})
+        key = subject_key("company", subject)
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append({"organization": subject})
+        if len(facts) == MAX_ORGANIZATIONS:
+            break
     if not facts:
         raise ValueError("no_company_research_candidates")
     return CompanyResearchRequest(tuple(facts))
@@ -103,6 +102,17 @@ def _safe_organization_subject(value: str) -> bool:
         return False
     if re.search(r"\+?\d[\d\s().-]{6,}\d", stripped):
         return False
-    if is_self_employment_label(value):
+    if _is_self_employment_label(value):
         return False
     return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2
+
+
+def _is_self_employment_label(value: str) -> bool:
+    normalized = " ".join(value.casefold().replace("-", " ").split())
+    return normalized in {
+        "freelance",
+        "freelancer",
+        "self employed",
+        "self employment",
+        "independent contractor",
+    }

@@ -31,8 +31,7 @@ actual_manifest=$(sha256sum "$reference_dir/locations.manifest.json" | awk '{pri
 [ "$actual_manifest" = "$expected_manifest" ] || fail "GeoNames manifest checksum mismatch"
 
 if [ "$mode" = dev ]; then
-  is_true CV_VALIDATOR_AI_ENABLED || fail "full dev stack requires CV_VALIDATOR_AI_ENABLED=true"
-  has_key OPENAI_API_KEY || fail "OPENAI_API_KEY is required for full dev stack"
+  if is_true CV_VALIDATOR_AI_ENABLED; then has_key OPENAI_API_KEY || fail "OPENAI_API_KEY is required when AI is enabled"; fi
 elif [ "$mode" = production ]; then
   [ -z "$(git status --porcelain)" ] || fail "production deploy requires a clean worktree"
   grep -Eq '^[[:space:]]*LOCAL_DEV_AUTH_BYPASS=false[[:space:]]*$' "$env_file" || fail "LOCAL_DEV_AUTH_BYPASS must be false"

@@ -12,6 +12,7 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
+import { researchEligibility } from "@/lib/auto-research";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -92,7 +93,7 @@ export function LinkedInResearchPanel({
   const automatic = useAutoResearchState(report.analysis_id, "linkedin");
   const notifiedAutomatic = useRef<LinkedInDiscovery | null>(null);
   const onDiscoveryChangeRef = useRef(onDiscoveryChange);
-  const enabled = report.ai_analysis.status === "succeeded" && report.ai_analysis.research_candidates.some((item) => item.category === "linkedin");
+  const enabled = settings.aiEnabled && researchEligibility(report).linkedin;
   const visibleDiscovery = report.linkedin_discovery ?? automatic?.result as LinkedInDiscovery | undefined;
   const discoveryBusy = automatic?.status === "pending" || automatic?.status === "running";
   const discoveryCompleted = Boolean(report.linkedin_discovery) || automatic?.status === "succeeded";

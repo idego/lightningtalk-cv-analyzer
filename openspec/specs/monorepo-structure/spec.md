@@ -9,7 +9,7 @@ The repository SHALL organize each deployable service under `apps/<service>`: th
 
 #### Scenario: Backend located under apps/api
 - **WHEN** the repository is inspected after the change
-- **THEN** the backend package, tests, fixtures, `weights.yaml`, `pyproject.toml`, and `Dockerfile` reside under `apps/api/`
+- **THEN** the backend package, tests, fixtures, `pyproject.toml`, and `Dockerfile` reside under `apps/api/`
 - **AND** no backend source remains at the repository root
 
 #### Scenario: Frontend service present
@@ -17,7 +17,8 @@ The repository SHALL organize each deployable service under `apps/<service>`: th
 - **THEN** the frontend service resides under `apps/web/`
 
 ### Requirement: Backend behavior preserved after relocation
-Relocating the backend MUST NOT change its behavior, scoring, weights, or HTTP contract. The existing test suite SHALL pass from the new location.
+Relocating the backend MUST NOT change its behavior or HTTP contract. The
+existing test suite SHALL pass from the new location.
 
 #### Scenario: Test suite passes from new location
 - **WHEN** the backend test suite is run from `apps/api` (`cd apps/api && PYTHONPATH=src pytest`)

@@ -9,7 +9,7 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
-import { researchEligibility } from "@/lib/understanding-selectors";
+import { researchEligibility } from "@/lib/auto-research";
 import { isSelfEmploymentLabel } from "@/lib/relationship-labels";
 
 function isResearchableCompany(value: string) {
@@ -76,6 +76,11 @@ export function CompanyResearchPanel({
       )}
     >
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
+      {visibleResearch?.cache?.status === "hit" ? (
+        <p className="text-xs text-muted-foreground">
+          {settings.uiLanguage === "pl" ? "Użyto wyniku z cache." : "Reused a cached research result."}
+        </p>
+      ) : null}
 
       {visibleResearch ? (
         <div className="space-y-2">

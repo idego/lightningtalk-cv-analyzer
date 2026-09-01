@@ -160,7 +160,7 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
         <Button variant="ghost" size="icon" className="size-8" onClick={onHide} aria-label={t("hideCvPreview")}><X className="size-4" /></Button>
       </div>
       {isPdf && url ? (
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={`${t("fileDetails")}: ${file.name}`} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={file.name} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
       ) : (
         <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
           {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80"><LoaderCircle className="size-6 animate-spin" /></div> : null}

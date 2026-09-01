@@ -1,13 +1,8 @@
 import json
 import os
-import io
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-from docx import Document
-
-from cv_validator.api.app import create_app
 from cv_validator.config import LocationConfigurationError, load_location_resolver
 from cv_validator.location import ResolutionLevel, SQLiteLocationResolver
 from cv_validator.location.index import SourceSpec, build_location_index
@@ -38,15 +33,6 @@ def _build_pair(directory: Path) -> tuple[Path, Path]:
 def _clear_location_env(monkeypatch) -> None:
     monkeypatch.delenv(INDEX_ENV, raising=False)
     monkeypatch.delenv(MANIFEST_ENV, raising=False)
-
-
-def _docx_bytes(text: str) -> bytes:
-    document = Document()
-    for line in text.splitlines():
-        document.add_paragraph(line)
-    output = io.BytesIO()
-    document.save(output)
-    return output.getvalue()
 
 
 def test_no_location_paths_disables_the_runtime_resolver(monkeypatch) -> None:
@@ -99,52 +85,6 @@ def test_invalid_pair_fails_during_configuration(monkeypatch, tmp_path) -> None:
         match="configured location reference-data pair is invalid",
     ):
         load_location_resolver()
-
-
-def test_app_reuses_one_resolver_and_closes_it_on_shutdown(monkeypatch, tmp_path) -> None:
-    index_path, manifest_path = _build_pair(tmp_path)
-    monkeypatch.setenv(INDEX_ENV, str(index_path))
-    monkeypatch.setenv(MANIFEST_ENV, str(manifest_path))
-    app = create_app(db_path=tmp_path / "audit.db")
-    resolver = app.state.location_resolver
-
-    with TestClient(app) as client:
-        assert client.app.state.location_resolver is resolver
-        assert client.get("/health").status_code == 200
-        assert resolver.resolve("Berlin", level=ResolutionLevel.LOCALITY).matches
-
-    with pytest.raises(RuntimeError, match="closed"):
-        resolver.resolve("Berlin", level=ResolutionLevel.LOCALITY)
-
-
-def test_api_and_audit_expose_version_but_not_host_paths(monkeypatch, tmp_path) -> None:
-    index_path, manifest_path = _build_pair(tmp_path)
-    monkeypatch.setenv(INDEX_ENV, str(index_path))
-    monkeypatch.setenv(MANIFEST_ENV, str(manifest_path))
-    app = create_app(db_path=tmp_path / "audit.db")
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/analyze",
-            files={
-                "file": (
-                    "cv.docx",
-                    _docx_bytes(
-                        "Jane Example\nCurrent location: Berlin, Germany\n"
-                        "Software engineer profile"
-                    ),
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-            },
-        )
-        audit_json = client.app.state.store.get_audit_entries()[0]["output_json"]
-
-    payload_text = response.text
-    assert response.status_code == 200
-    assert "geonames-sqlite" in payload_text
-    assert "geonames-sqlite" in audit_json
-    assert str(tmp_path) not in payload_text
-    assert str(tmp_path) not in audit_json
 
 
 def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:

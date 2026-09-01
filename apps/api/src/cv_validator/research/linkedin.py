@@ -15,6 +15,11 @@ from cv_validator.research.domain import (
     LinkedInDiscoveryRequest,
     LinkedInResearchInvalidResponse,
 )
+from cv_validator.research.subjects import (
+    accepted_records,
+    supported_field,
+    supported_profile_field,
+)
 
 DISCOVERY_VERSION = "linkedin-discovery-v2"
 COMPARISON_VERSION = "linkedin-comparison-v2"
@@ -54,19 +59,19 @@ class LinkedInDiscoveryService:
 
 
 def build_discovery_request(stored_report: dict[str, Any]) -> LinkedInDiscoveryRequest:
-    ai = stored_report.get("ai_analysis") or {}
-    names = [c.get("query_subject", "").strip() for c in ai.get("research_candidates") or []
-             if c.get("category") == "linkedin" and isinstance(c.get("query_subject"), str)]
-    names = [name for name in names if _safe_text(name, 160)]
-    if len({name.casefold() for name in names}) != 1:
+    name = supported_profile_field(stored_report, "candidate_name")
+    if name is None or not _safe_text(name, 160):
         raise ValueError("no_unambiguous_linkedin_candidate")
-    candidate: dict[str, Any] = {"name": names[0]}
+    candidate: dict[str, Any] = {"name": name}
     search_hints = []
-    for item in (ai.get("facts") or {}).get("employment", [])[:4]:
-        if not isinstance(item, dict): continue
-        hint = {key: item[key].strip() for key in ("organization", "role")
-                if isinstance(item.get(key), str) and _safe_text(item[key], 200)}
-        if hint: search_hints.append(hint)
+    for record in accepted_records(stored_report, "employment")[:4]:
+        hint: dict[str, str] = {}
+        for key in ("organization", "role"):
+            value = supported_field(record, key)
+            if value is not None and _safe_text(value, 200):
+                hint[key] = value
+        if hint:
+            search_hints.append(hint)
     if search_hints:
         candidate["search_hints"] = search_hints
     return LinkedInDiscoveryRequest(candidate)

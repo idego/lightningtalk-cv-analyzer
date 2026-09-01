@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "base-analysis-v2",
+  "title": "CV Analyzer base analysis report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "strategy",
+    "source",
+    "base_analysis",
+    "mechanical",
+    "limitations",
+    "versions",
+    "usage"
+  ],
+  "properties": {
+    "contract_version": { "const": "base-analysis-v2" },
+    "analysis_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "analysis_access_token": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "ai_features_enabled": { "type": "boolean" },
+    "ai_capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_analysis", "company_research", "education_research", "linkedin_research"],
+      "properties": {
+        "document_analysis": { "type": "boolean" },
+        "company_research": { "type": "boolean" },
+        "education_research": { "type": "boolean" },
+        "linkedin_research": { "type": "boolean" }
+      }
+    },
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "enum": ["docling-luna", "luna-only"] },
+        "version": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "sha256", "conversion_status"],
+      "properties": {
+        "format": { "enum": ["pdf", "docx"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "conversion_status": { "enum": ["completed", "partial", "unsupported", "failed"] }
+      }
+    },
+    "base_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "profile", "employment", "education", "pass_statuses", "review"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "profile": { "$ref": "#/$defs/profile" },
+        "employment": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/employment" }
+        },
+        "education": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/education" }
+        },
+        "pass_statuses": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/passStatus" }
+        },
+        "review": { "$ref": "#/$defs/review" }
+      }
+    },
+    "mechanical": { "$ref": "#/$defs/mechanical" },
+    "research": { "type": "object" },
+    "limitations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "maxLength": 1000 }
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 128 }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "enum": ["completed", "partial", "failed", "unavailable"]
+    },
+    "passStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "attempt_count", "latency_ms"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "attempt_count": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "latency_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "failure_reason": { "type": ["string", "null"], "maxLength": 128 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "excerpt"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "excerpt": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "page_number": { "type": ["integer", "null"], "minimum": 1 },
+        "start_offset": { "type": ["integer", "null"], "minimum": 0 },
+        "end_offset": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "status", "evidence"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "status": { "enum": ["supported", "ambiguous"] },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "nullableField": {
+      "anyOf": [
+        { "$ref": "#/$defs/field" },
+        { "type": "null" }
+      ]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_name", "declared_location", "headline", "summary", "skills", "languages"],
+      "properties": {
+        "candidate_name": { "$ref": "#/$defs/nullableField" },
+        "declared_location": { "$ref": "#/$defs/nullableField" },
+        "headline": { "$ref": "#/$defs/nullableField" },
+        "summary": { "$ref": "#/$defs/nullableField" },
+        "skills": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "#/$defs/field" }
+        },
+        "languages": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/field" }
+        }
+      }
+    },
+    "recordBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "relation_status", "added_by_reviewer"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "status": { "enum": ["accepted", "ambiguous"] },
+        "relation_status": { "enum": ["supported", "ambiguous"] },
+        "added_by_reviewer": { "type": "boolean" }
+      }
+    },
+    "employment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "relation_status", "added_by_reviewer", "organization", "role", "start_date", "end_date", "location", "relationship_type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "status": { "enum": ["accepted", "ambiguous"] },
+        "relation_status": { "enum": ["supported", "ambiguous"] },
+        "added_by_reviewer": { "type": "boolean" },
+        "organization": { "$ref": "#/$defs/nullableField" },
+        "role": { "$ref": "#/$defs/nullableField" },
+        "start_date": { "$ref": "#/$defs/nullableField" },
+        "end_date": { "$ref": "#/$defs/nullableField" },
+        "location": { "$ref": "#/$defs/nullableField" },
+        "relationship_type": { "$ref": "#/$defs/nullableField" }
+      }
+    },
+    "education": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "relation_status", "added_by_reviewer", "institution", "program", "degree", "certificate", "start_date", "end_date", "location"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "status": { "enum": ["accepted", "ambiguous"] },
+        "relation_status": { "enum": ["supported", "ambiguous"] },
+        "added_by_reviewer": { "type": "boolean" },
+        "institution": { "$ref": "#/$defs/nullableField" },
+        "program": { "$ref": "#/$defs/nullableField" },
+        "degree": { "$ref": "#/$defs/nullableField" },
+        "certificate": { "$ref": "#/$defs/nullableField" },
+        "start_date": { "$ref": "#/$defs/nullableField" },
+        "end_date": { "$ref": "#/$defs/nullableField" },
+        "location": { "$ref": "#/$defs/nullableField" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "accepted_ids", "rejected", "merged_ids", "relation_corrections", "added_profile_fields", "added_candidate_ids", "conflicts", "coverage_gaps"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "accepted_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 300 },
+        "rejected": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
+        "merged_ids": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "maxItems": 300 },
+        "relation_corrections": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
+        "added_profile_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["candidate_name", "declared_location", "headline", "summary", "skills", "languages"] },
+          "maxItems": 6
+        },
+        "added_candidate_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 300 },
+        "conflicts": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
+        "coverage_gaps": { "type": "array", "items": { "type": "object" }, "maxItems": 300 }
+      }
+    },
+    "mechanical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phones", "emails", "literal_links", "postal_candidates", "accepted_postal_addresses", "email_findings", "location_resolution", "eu_status"],
+      "properties": {
+        "phones": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "emails": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "literal_links": { "type": "array", "items": { "type": "object" }, "maxItems": 200 },
+        "postal_candidates": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "accepted_postal_addresses": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "email_findings": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "location_resolution": { "type": "array", "items": { "type": "object" }, "maxItems": 100 },
+        "eu_status": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

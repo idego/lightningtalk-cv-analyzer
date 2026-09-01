@@ -6,7 +6,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-MEASUREMENT_SCHEMA_VERSION = "v1-hardening-measurement-v1"
+MEASUREMENT_SCHEMA_VERSION = "analysis-comparison-measurement-v1"
 
 
 def summarize_measurements(records: list[dict[str, Any]]) -> dict[str, Any]:

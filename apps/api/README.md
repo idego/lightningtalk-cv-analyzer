@@ -1,32 +1,27 @@
-## CV Validator API
+# CV Analyzer API
 
-Backend service for CV location-consistency analysis.
+The API is a strategy-neutral host for the `base-analysis-v2` contract.
 
-Run tests from this directory:
+A variant implements `AnalysisStrategy`, receives the original PDF or DOCX,
+and returns a validated report. The shared checkout uses
+`UnavailableAnalysisStrategy`, so analysis fails clearly until a variant is
+installed.
+
+Run tests:
 
 ```bash
-PYTHONPATH=src pytest
+PYTHONPATH=src .venv/bin/pytest -q
 ```
 
-Reports optionally include `file_details` and `link_inspection`. File details
-are a bounded allowlist of PDF/DOCX metadata for neutral reviewer context.
-Link inspection inventories visible HTTP(S) URLs and embedded hyperlink targets,
-then records deterministic `REACHABLE`, `SUSPICIOUS`, `UNAVAILABLE`, or
-`NOT_CHECKED` outcomes. Suspicious outcomes are document-review prompts, not
-proof of lying, fraud, identity, or physical location; unavailable outcomes
-are inconclusive and remain neutral. Link checks use no AI or paid service and
-never persist response bodies, cookies, request headers, credentials, or URL
-query/fragment material.
+The retained shared capabilities are:
 
-The legacy numeric score and band remain in the API for compatibility. The
-recruiter UI does not present them as an overall CV or candidate assessment.
+- upload and batch boundaries;
+- report schema validation;
+- SQLite ownership, audit, retention, and deletion;
+- phone, e-mail, literal URL, postal-candidate, and e-mail typo primitives;
+- GeoNames resolution infrastructure;
+- company, education, and LinkedIn research with reusable cache provenance.
 
-Document understanding runs after mandatory national-ID redaction and before
-optional AI enrichment. Its public DTO is closed and bounded; persistence, reload,
-retry replacement, and API serialization all use the same sanitizer. AI receives
-a same-length masked visible-source projection and bounded code-owned context, and
-cannot overwrite deterministic/code-owned fields or influence score/band output.
-
-Reference-data operations are build-time only. See the repository README for the
-pinned ESCO index rebuild command. Do not add runtime taxonomy downloads or send CV
-content to a taxonomy provider.
+There is no score, band, Document Understanding, Structural Audit, ESCO,
+national-ID redaction, file metadata, live link inspection, or manual retry of
+the deleted monolithic analysis pass.

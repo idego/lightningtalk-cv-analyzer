@@ -9,6 +9,26 @@ export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
 
+function supported(field: { value: string; status: string } | null | undefined) {
+  return field?.status === "supported" && field.value.trim().length > 0;
+}
+
+export function researchEligibility(report: AnalysisReport) {
+  const employment = report.base_analysis.employment.some(
+    (record) => record.status === "accepted" && supported(record.organization),
+  );
+  const education = report.base_analysis.education.some(
+    (record) => record.status === "accepted"
+      && (supported(record.institution) || supported(record.certificate)),
+  );
+  const linkedin = supported(report.base_analysis.profile.candidate_name);
+  return {
+    company: report.ai_capabilities?.company_research !== false && employment,
+    education: report.ai_capabilities?.education_research !== false && education,
+    linkedin: report.ai_capabilities?.linkedin_research !== false && linkedin,
+  };
+}
+
 export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnabled" | "autoResearchEnabled" | "autoCompanyResearch" | "autoEducationResearch" | "autoLinkedinDiscovery">): AutoResearchKind[] {
   if (settings.aiEnabled === false || !settings.autoResearchEnabled) return [];
   return [settings.autoCompanyResearch && "company", settings.autoEducationResearch && "education", settings.autoLinkedinDiscovery && "linkedin"].filter(Boolean) as AutoResearchKind[];
@@ -16,12 +36,11 @@ export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnable
 
 export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResearchKind> {
   if (!report.analysis_access_token || report.ai_features_enabled === false) return new Set();
-  const categories = new Set(report.ai_analysis.research_candidates.map((item) => item.category));
-  const codeCategories = new Set(report.document_understanding?.code_research_subjects.map((item) => item.category) ?? []);
+  const eligible = researchEligibility(report);
   return new Set([
-    report.ai_capabilities?.company_research !== false && (categories.has("company") || codeCategories.has("company")) && "company",
-    report.ai_capabilities?.education_research !== false && (categories.has("education_or_certification") || codeCategories.has("education")) && "education",
-    report.ai_capabilities?.linkedin_research !== false && report.ai_analysis.status === "succeeded" && categories.has("linkedin") && "linkedin",
+    eligible.company && "company",
+    eligible.education && "education",
+    eligible.linkedin && "linkedin",
   ].filter(Boolean) as AutoResearchKind[]);
 }
 
