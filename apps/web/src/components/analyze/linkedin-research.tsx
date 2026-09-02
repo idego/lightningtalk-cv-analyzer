@@ -15,8 +15,7 @@ import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
-import { linkedinPeopleSearchUrl } from "@/lib/google-search";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { linkedinPeopleKeyword, linkedinPeopleSearchUrl } from "@/lib/google-search";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -118,14 +117,14 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="flex items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref && searchKeyword ? <Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-sm" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedInFor", { subject: searchKeyword })}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}</span>}
+    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Button variant="outline" size="sm" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer"><Search aria-hidden data-icon="inline-start" />{t("searchLinkedIn")}<ExternalLink aria-hidden data-icon="inline-end" /></a>} /> : null}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     action={discoveryCompleted ? undefined : <ResearchAction
       busy={discoveryBusy}
       disabled={!enabled || discoveryBusy}
       onClick={discover}
-      label={t("startDiscovery")}
+      label={t("start")}
       busyLabel={t("discovering")}
       busyAriaLabel={t("linkedinDiscoveryInProgress")}
       disabledReason={!enabled ? t("noCandidateDetails") : undefined}
@@ -155,7 +154,6 @@ function fieldValue(field: { value?: string } | null | undefined): string | null
 
 export function linkedinSearchKeyword(report: AnalysisReport): string | null {
   const name = fieldValue(report.base_analysis.profile.candidate_name);
-  if (!name) return null;
   const employment = report.base_analysis.employment.find((record) => record.status === "accepted");
-  return [name, fieldValue(employment?.organization), fieldValue(employment?.role)].filter(Boolean).join(" ");
+  return linkedinPeopleKeyword({ candidateName: name, organization: fieldValue(employment?.organization) });
 }

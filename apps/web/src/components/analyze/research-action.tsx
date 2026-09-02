@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Play } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -29,7 +30,7 @@ export function ResearchAction({
           <ThinkingOrb state="working" size={20} theme="auto" aria-label={busyAriaLabel} />
           {busyLabel}
         </span>
-      ) : label}
+      ) : <><Play aria-hidden data-icon="inline-start" />{label}</>}
     </Button>
   );
 

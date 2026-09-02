@@ -147,7 +147,7 @@ function CompanyResult({ organization, feedback }: { organization: Organization;
       action={
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
-          {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} variant="labeled" /> : null}
+          {searchHref ? <GoogleSearchAction href={searchHref} /> : null}
           {feedback}
         </div>
       }

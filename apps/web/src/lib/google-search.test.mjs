@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   companyGoogleSearchUrl,
   educationGoogleSearchUrl,
+  linkedinPeopleKeyword,
   linkedinPeopleSearchUrl,
 } from "./google-search.ts";
 
@@ -17,6 +18,14 @@ test("builds a company query on the fixed Google Search origin", () => {
   assert.equal(url.origin, "https://www.google.com");
   assert.equal(url.pathname, "/search");
   assert.equal(url.searchParams.get("q"), "Edclub USA");
+});
+
+test("builds short LinkedIn keywords from candidate and company", () => {
+  assert.equal(
+    linkedinPeopleKeyword({ candidateName: "Ahmad Hassan", organization: "Edclub, USA" }),
+    "Ahmad Hassan Edclub",
+  );
+  assert.equal(linkedinPeopleKeyword({ candidateName: "Ahmad Hassan", organization: null }), "Ahmad Hassan");
 });
 
 test("builds an encoded LinkedIn people search URL", () => {

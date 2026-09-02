@@ -49,3 +49,16 @@ export function linkedinPeopleSearchUrl(query: string | null | undefined): strin
   url.searchParams.set("keywords", keywords);
   return url.toString();
 }
+
+export function linkedinPeopleKeyword({
+  candidateName,
+  organization,
+}: {
+  candidateName: string | null | undefined;
+  organization?: string | null;
+}): string | null {
+  const name = cleanPart(candidateName);
+  if (!name) return null;
+  const company = cleanPart(organization).split(",", 1)[0]?.trim();
+  return [name, company].filter(Boolean).join(" ");
+}
