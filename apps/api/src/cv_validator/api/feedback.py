@@ -60,6 +60,8 @@ class FeedbackInput(BaseModel):
     rating: Rating | None = None
     reason: Reason | None = None
     comment: str | None = Field(default=None, max_length=180)
+    context_label: str | None = Field(default=None, max_length=200)
+    context_text: str | None = Field(default=None, max_length=12000)
 
     @field_validator("comment")
     @classmethod
@@ -70,6 +72,13 @@ class FeedbackInput(BaseModel):
         if CONTACT_RE.search(normalized):
             raise ValueError("comment_contains_contact_data")
         return normalized or None
+
+    @field_validator("context_label", "context_text")
+    @classmethod
+    def normalize_context(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
     @model_validator(mode="after")
     def validate_combination(self) -> "FeedbackInput":
@@ -114,7 +123,7 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS feedback_targets_analysis ON feedback_targets(analysis_id);
         CREATE TABLE IF NOT EXISTS feedback_responses (
           target_id TEXT NOT NULL, actor_hash TEXT NOT NULL, rating TEXT, reason TEXT,
-          comment TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, withdrawn_at TEXT,
+          comment TEXT, actor_email TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, withdrawn_at TEXT,
           PRIMARY KEY(target_id, actor_hash),
           FOREIGN KEY(target_id) REFERENCES feedback_targets(target_id) ON DELETE CASCADE
         );
@@ -139,6 +148,13 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    response_columns = {row[1] for row in conn.execute("PRAGMA table_info(feedback_responses)")}
+    if "context_label" not in response_columns:
+        conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_label TEXT")
+    if "context_text" not in response_columns:
+        conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_text TEXT")
+    if "actor_email" not in response_columns:
+        conn.execute("ALTER TABLE feedback_responses ADD COLUMN actor_email TEXT")
 
 
 class FeedbackStore:
@@ -184,8 +200,9 @@ class FeedbackStore:
             ).fetchall()
         return {"analysis_id": analysis_id, "targets": [_manifest_row(row) for row in rows]}
 
-    def put(self, analysis_id: str, target_id: str, actor: str, value: FeedbackInput) -> dict[str, Any] | None:
+    def put(self, analysis_id: str, target_id: str, actor: str, value: FeedbackInput, *, actor_email: str | None = None) -> dict[str, Any] | None:
         actor_hash = self.pseudonym("actor", actor)
+        normalized_email = actor_email.strip().lower()[:320] if actor_email else None
         now = _now()
         with self._connect() as conn:
             target = conn.execute("SELECT kind FROM feedback_targets WHERE target_id=? AND analysis_id=?", (target_id, analysis_id)).fetchone()
@@ -198,14 +215,17 @@ class FeedbackStore:
             if target["kind"] == TargetKind.OPERATION_FAILURE:
                 if value.rating != Rating.NOT_HELPFUL or value.reason != Reason.OPERATION_FAILED:
                     raise ValueError("failure_feedback_is_closed")
-            existing = conn.execute("SELECT rating, reason, comment, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
-            equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"]) == (value.rating, value.reason, value.comment)
+            existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
+            equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, normalized_email)
             if not equivalent:
                 conn.execute(
-                    """INSERT INTO feedback_responses VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+                    """INSERT INTO feedback_responses(
+                         target_id,actor_hash,rating,reason,comment,created_at,updated_at,withdrawn_at,context_label,context_text,actor_email
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                        ON CONFLICT(target_id, actor_hash) DO UPDATE SET rating=excluded.rating, reason=excluded.reason,
-                       comment=excluded.comment, updated_at=excluded.updated_at, withdrawn_at=NULL""",
-                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now),
+                       comment=excluded.comment, updated_at=excluded.updated_at, withdrawn_at=NULL,
+                       context_label=excluded.context_label, context_text=excluded.context_text, actor_email=excluded.actor_email""",
+                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now, value.context_label, value.context_text, normalized_email),
                 )
                 conn.execute("INSERT INTO feedback_events(target_id,actor_hash,event_type,rating,reason,created_at) VALUES(?,?,?,?,?,?)", (target_id, actor_hash, "submitted", value.rating, value.reason, now))
                 conn.execute("INSERT OR IGNORE INTO feedback_triage(target_id,actor_hash,status,updated_at) VALUES(?,?,?,?)", (target_id, actor_hash, TriageStatus.NEW, now))
@@ -246,7 +266,7 @@ class FeedbackStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""SELECT r.rowid AS cursor,t.target_id,t.analysis_id,t.kind,t.source_category,t.source_key,t.versions_json,
-                    r.actor_hash,r.rating,r.reason,r.comment,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
+                    r.actor_hash,r.actor_email,r.rating,r.reason,r.comment,r.context_label,r.context_text,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
                     f.operation_kind,f.error_code,f.retryable,f.attempt_count,f.occurred_at,f.correlation_id,f.versions_json AS failure_versions
                     FROM feedback_responses r JOIN feedback_targets t ON t.target_id=r.target_id
                     LEFT JOIN feedback_triage g ON g.target_id=r.target_id AND g.actor_hash=r.actor_hash
@@ -262,6 +282,14 @@ class FeedbackStore:
         now = _now()
         with self._connect() as conn:
             result = conn.execute("UPDATE feedback_triage SET status=?,note=?,maintainer_hash=?,updated_at=? WHERE target_id=? AND actor_hash=?", (value.status, value.note, self.pseudonym("maintainer", maintainer), now, target_id, actor_hash))
+        return bool(result.rowcount)
+
+    def delete_response(self, target_id: str, actor_hash: str) -> bool:
+        with self._connect() as conn:
+            result = conn.execute(
+                "DELETE FROM feedback_responses WHERE target_id=? AND actor_hash=?",
+                (target_id, actor_hash),
+            )
         return bool(result.rowcount)
 
 
@@ -423,7 +451,7 @@ def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
 
 def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
     failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
-    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
+    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
 
 
 def _now() -> str:

@@ -38,6 +38,24 @@ def test_targets_are_stable_and_feedback_is_idempotent(tmp_path):
     assert inbox["items"][0]["comment"] is None
 
 
+def test_feedback_keeps_displayed_context_and_can_be_deleted_by_maintainer(tmp_path):
+    store, _ = _store(tmp_path)
+    target = store.materialize("analysis-1", {})[0]
+    value = FeedbackInput(
+        comment="The education section is incomplete",
+        context_label="CV overview",
+        context_text="Education\nUniversity of Gdansk · Computer Science",
+    )
+    store.put("analysis-1", target["target_id"], "actor", value, actor_email="Recruiter@Idego.pl")
+
+    item = store.inbox()["items"][0]
+    assert item["context_label"] == "CV overview"
+    assert item["context_text"] == "Education\nUniversity of Gdansk · Computer Science"
+    assert item["actor_email"] == "recruiter@idego.pl"
+    assert store.delete_response(target["target_id"], item["actor_hash"]) is True
+    assert store.inbox()["items"] == []
+
+
 def test_comment_validation_and_contact_rejection():
     with pytest.raises(ValidationError):
         FeedbackInput(rating="helpful", comment="too short")

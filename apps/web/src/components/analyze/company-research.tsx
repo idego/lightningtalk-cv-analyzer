@@ -136,6 +136,7 @@ function CompanyResult({ organization, feedback }: { organization: Organization;
     <HoverDisclosure
       className="rounded-md border bg-muted/20 p-3 text-sm"
       allowHover
+      feedbackSnapshotLabel={organization.query_subject}
       headerClassName="flex-wrap sm:flex-nowrap"
       actionClassName="w-full sm:w-auto"
       title={

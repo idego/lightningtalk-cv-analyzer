@@ -19,6 +19,7 @@ type HoverDisclosureProps = {
   defaultOpen?: boolean;
   allowHover?: boolean;
   collapsible?: boolean;
+  feedbackSnapshotLabel?: string;
 };
 
 export function HoverDisclosure({
@@ -34,6 +35,7 @@ export function HoverDisclosure({
   defaultOpen = false,
   allowHover = false,
   collapsible = true,
+  feedbackSnapshotLabel,
 }: HoverDisclosureProps) {
   const { previewFindingsOnHover, expandSectionsByDefault } = useAppSettings();
   const initialOpen = defaultOpen || expandSectionsByDefault;
@@ -71,7 +73,7 @@ export function HoverDisclosure({
 
   if (!collapsible) {
     return (
-      <div className={className}>
+      <div className={className} data-feedback-snapshot={feedbackSnapshotLabel}>
         <div className={cn("flex items-center gap-3", headerClassName)}>
           <div className={cn("flex min-w-0 flex-1 items-center gap-3 text-left", triggerClassName)}>
             <span className="min-w-0 flex-1">{title}</span>
@@ -90,6 +92,7 @@ export function HoverDisclosure({
       onPointerEnter={() => setHoverOpen(true)}
       onPointerLeave={() => setHoverOpen(false)}
       className={cn("group/disclosure", !open && "cursor-pointer", className)}
+      data-feedback-snapshot={feedbackSnapshotLabel}
     >
       <div className={cn("flex items-center gap-3", headerClassName)}>
         <Collapsible.Trigger

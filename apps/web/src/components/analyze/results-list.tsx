@@ -26,6 +26,7 @@ function FlagList({ flags, analysisId, feedbackManifest, section }: { flags: Rep
           key={flag.id}
           className="rounded-md border bg-muted/15 p-3 text-sm"
           allowHover
+          feedbackSnapshotLabel={flag.whatWeFound}
           title={<span className="block font-medium leading-snug">{flag.whatWeFound}</span>}
           action={feedbackTarget(feedbackManifest, "review_finding", section, flag.id) ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "review_finding", section, flag.id)!} /> : null}
           contentClassName="pt-3"
@@ -122,7 +123,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
   return (
-    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} action={feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} feedbackSnapshotLabel={t("extracted")} action={feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
           {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
@@ -269,7 +270,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
         const presentation = adaptReportInterface(report, settings.uiLanguage);
         return (
-          <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20">
+          <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
               <CardTitle className="text-base">{item.filename}</CardTitle>
             </CardHeader>

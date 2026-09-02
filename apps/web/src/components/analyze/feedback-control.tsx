@@ -1,6 +1,5 @@
 "use client";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FeedbackResponse, FeedbackTarget } from "@/lib/feedback-types";
 import "./feedback-control.css";
 type Rating = "helpful" | "not_helpful" | null;
@@ -69,13 +68,9 @@ export function FeedbackControl({
       failure ? "not_helpful" : (target.response?.rating ?? null),
     ),
     [comment, setComment] = useState(target.response?.comment ?? ""),
-    [confirmed, setConfirmed] = useState<FeedbackResponse | null>(
-      target.response,
-    ),
-    [mounted, setMounted] = useState(false),
+    [confirmed, setConfirmed] = useState<FeedbackResponse | null>(target.response),
     [error, setError] = useState(false),
-    [height, setHeight] = useState(36),
-    [placement, setPlacement] = useState<{ right: number; top: number; bottom: number; openUp: boolean } | null>(null);
+    [height, setHeight] = useState(36);
   const anchor = useRef<HTMLDivElement>(null),
     cloud = useRef<HTMLDivElement>(null),
     trigger = useRef<HTMLButtonElement>(null),
@@ -143,36 +138,12 @@ export function FeedbackControl({
     editor.current.style.height = `${next}px`;
     setHeight(next);
   }, []);
-  const position = useCallback(() => {
-    const rect = anchor.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPlacement({
-      right: window.innerWidth - rect.right - 10,
-      top: rect.top - 10,
-      bottom: window.innerHeight - rect.bottom - 10,
-      openUp: rect.bottom + 138 > window.innerHeight,
-    });
-  }, []);
   const close = useCallback(() => {
     if (sending) return;
     setPhase("idle");
     morph(0);
     requestAnimationFrame(() => trigger.current?.focus());
   }, [morph, sending]);
-  useLayoutEffect(() => {
-    const resizeObserver = new ResizeObserver(position);
-    resizeObserver.observe(document.body);
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
-    };
-  }, [position]);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
   useEffect(() => {
     const draft = sessionStorage.getItem(draftKey);
     if (!draft || target.response?.comment) return;
@@ -223,7 +194,6 @@ export function FeedbackControl({
   function toggle() {
     if (sending) return;
     if (!open) {
-      position();
       resize(200);
       openingUntil.current = performance.now() + 260;
       later(() => resize(), 270);
@@ -242,16 +212,25 @@ export function FeedbackControl({
   async function send() {
     if (!valid || sending) return;
     setError(false);
+    const contextElement = anchor.current?.closest<HTMLElement>("[data-feedback-snapshot]"),
+      contextLabel = contextElement?.dataset.feedbackSnapshot?.trim() || null,
+      contextClone = contextElement?.cloneNode(true) as HTMLElement | undefined;
+    contextClone?.querySelectorAll("[data-feedback-target]").forEach((control) => control.remove());
+    const contextText = contextClone?.innerText.trim().slice(0, 12000) || null;
     const body = failure
       ? {
           rating: "not_helpful",
           reason: "operation_failed",
           comment: normalized || null,
+          context_label: contextLabel,
+          context_text: contextText,
         }
       : {
           rating,
           reason: rating === "not_helpful" ? "other" : null,
           comment: normalized || null,
+          context_label: contextLabel,
+          context_text: contextText,
         };
     try {
       const response = await fetch(
@@ -295,25 +274,20 @@ export function FeedbackControl({
   }
   const remaining = 180 - comment.length,
     counterOpacity = Math.max(0, Math.min(1, (comment.length - 90) / 90)),
-    classes = ["feedback-cloud", phase, placement ? "positioned" : "", placement?.openUp ? "open-up" : "", confirmed ? "has-response" : ""]
+    classes = ["feedback-cloud", phase, confirmed ? "has-response" : ""]
       .filter(Boolean)
       .join(" ");
   return (
-    <>
     <div
       ref={anchor}
       className="feedback-anchor"
       data-feedback-target={target.target_id}
-    />
-    {mounted ? createPortal(<>
+    >
       <div
         ref={cloud}
         className={classes}
         style={{
           "--comment-h": `${height}px`,
-          "--cloud-right": `${placement?.right ?? 0}px`,
-          "--cloud-top": `${placement?.top ?? 0}px`,
-          "--cloud-bottom": `${placement?.bottom ?? 0}px`,
         } as React.CSSProperties}
       >
         <button
@@ -418,16 +392,17 @@ export function FeedbackControl({
         </section>
         <div className="feedback-send-stage" role="status">
           <Plane className="feedback-stage-plane" />
-          <div className="feedback-stage-copy">
-            <span>Wysłano!</span>
-          </div>
+          <span className="feedback-sent-tooltip">Wysłano!</span>
         </div>
       </div>
-      <span id={tooltip} className="feedback-tooltip" role="tooltip">
+      <span
+        id={tooltip}
+        className="feedback-tooltip"
+        role="tooltip"
+      >
         {failure ? "Zgłoś problem" : "Przekaż opinię"}
       </span>
-    </>, document.body) : null}
-    </>
+    </div>
   );
 }
 function Plane({ className = "" }: { className?: string }) {

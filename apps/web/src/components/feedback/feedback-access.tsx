@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type Member = { email: string; role: "owner" | "reviewer" };
 
@@ -65,7 +68,10 @@ export function FeedbackAccess() {
   }
 
   return <section className="mx-auto max-w-3xl space-y-6">
-    <div><h1 className="text-2xl font-semibold">Dostęp do feedbacku</h1><p className="text-sm text-muted-foreground">Zarządzaj osobami, które mogą przeglądać i obsługiwać feedback.</p></div>
+    <div className="space-y-3">
+      <Button variant="ghost" nativeButton={false} className="-ml-2 w-fit" render={<Link href="/feedback"><ArrowLeft />Back</Link>} />
+      <div><h1 className="text-2xl font-semibold">Dostęp do feedbacku</h1><p className="text-sm text-muted-foreground">Zarządzaj osobami, które mogą przeglądać i obsługiwać feedback.</p></div>
+    </div>
     <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
       <div><p className="font-medium">Zbieranie feedbacku</p><p className="text-sm text-muted-foreground">Steruje przyciskami i nowymi odpowiedziami. Inbox pozostaje dostępny.</p></div>
       <button type="button" role="switch" aria-checked={collectionEnabled} onClick={toggleCollection} className={`shrink-0 rounded-full px-4 py-2 text-sm ${collectionEnabled ? "bg-primary text-primary-foreground" : "border"}`}>{collectionEnabled ? "Włączone" : "Wyłączone"}</button>

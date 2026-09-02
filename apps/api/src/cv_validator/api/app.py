@@ -767,10 +767,10 @@ def create_app(
         return JSONResponse(feedback_store.manifest(analysis_id, x_analysis_access_token))
 
     @app.put("/analyses/{analysis_id}/feedback/{target_id}")
-    def put_feedback(analysis_id: str, target_id: str, update: FeedbackInput, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
+    def put_feedback(analysis_id: str, target_id: str, update: FeedbackInput, x_analysis_access_token: str | None = Header(default=None), x_feedback_actor_email: str | None = Header(default=None)) -> JSONResponse:
         _owned_payload(store, analysis_id, x_analysis_access_token)
         try:
-            result = feedback_store.put(analysis_id, target_id, x_analysis_access_token or "", update)
+            result = feedback_store.put(analysis_id, target_id, x_analysis_access_token or "", update, actor_email=x_feedback_actor_email)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if result is None:
@@ -796,6 +796,14 @@ def create_app(
         if not feedback_store.triage(target_id, actor_hash, x_feedback_maintainer, update):
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"updated": True})
+
+    @app.delete("/internal/feedback/{target_id}/{actor_hash}")
+    def delete_feedback_response(target_id: str, actor_hash: str, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
+        if not x_feedback_maintainer:
+            raise HTTPException(status_code=400, detail="maintainer_required")
+        if not feedback_store.delete_response(target_id, actor_hash):
+            raise HTTPException(status_code=404, detail="feedback_not_found")
+        return JSONResponse({"deleted": True})
 
     @app.post("/analyses/{analysis_id}/research/company")
     def research_company(

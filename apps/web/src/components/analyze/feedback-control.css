@@ -5,10 +5,17 @@
 }
 .feedback-anchor {
   position: relative;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   z-index: 20;
+}
+.feedback-anchor:has(.feedback-cloud.open),
+.feedback-anchor:has(.feedback-cloud.collapsing),
+.feedback-anchor:has(.feedback-cloud.launching),
+.feedback-anchor:has(.feedback-cloud.delivered),
+.feedback-anchor:has(.feedback-cloud.resetting) {
+  z-index: 25;
 }
 .feedback-cloud {
   --comment-h: 36px;
@@ -19,10 +26,10 @@
   --fborder: oklch(0.9055 0.012 308.6758);
   --morph: cubic-bezier(0.77, 0, 0.175, 1);
   --out: cubic-bezier(0.23, 1, 0.32, 1);
-  position: fixed;
-  z-index: 1000;
-  right: var(--cloud-right);
-  top: var(--cloud-top);
+  position: absolute;
+  z-index: 20;
+  right: -14px;
+  top: -14px;
   width: 56px;
   height: 56px;
   overflow: hidden;
@@ -36,24 +43,9 @@
     width 240ms var(--morph),
     height 240ms var(--morph),
     border-radius 200ms var(--out),
-    background-color 160ms ease,
-    border-color 160ms ease,
     color 160ms ease,
     box-shadow 160ms ease;
-  visibility: hidden;
-}
-.feedback-cloud.positioned {
   visibility: visible;
-}
-.feedback-cloud.open-up {
-  top: auto;
-  bottom: var(--cloud-bottom);
-  transform-origin: 100% 100%;
-}
-.feedback-cloud.open-up .feedback-trigger,
-.feedback-cloud.open-up .feedback-send-stage {
-  top: auto;
-  bottom: 12px;
 }
 .feedback-cloud.open {
   width: var(--cloud-w);
@@ -66,14 +58,14 @@
 .feedback-trigger {
   position: absolute;
   z-index: 3;
-  right: 12px;
-  top: 12px;
-  width: 32px;
-  height: 32px;
+  right: 14px;
+  top: 14px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: grid;
   place-items: center;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--soft);
   color: var(--foreground);
@@ -106,9 +98,9 @@
 }
 .feedback-tooltip {
   position: absolute;
-  z-index: 25;
-  right: 44px;
-  top: 50%;
+  z-index: 21;
+  right: 34px;
+  top: 14px;
   padding: 5px 8px;
   border-radius: 7px;
   background: var(--foreground);
@@ -151,16 +143,16 @@
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity 120ms ease,
-    visibility 0s 120ms;
+    opacity 100ms ease,
+    visibility 0s 100ms;
 }
 .feedback-cloud.open .feedback-panel {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
   transition:
-    opacity 160ms ease 70ms,
-    visibility 0s;
+    opacity 120ms ease 210ms,
+    visibility 0s 210ms;
 }
 .feedback-actions {
   height: 32px;
@@ -176,15 +168,15 @@
   font-weight: 600;
 }
 .feedback-vote {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: grid;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #fff;
-  color: #52525b;
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--ink);
   cursor: pointer;
   transition:
     transform 110ms var(--out),
@@ -192,8 +184,8 @@
     color 150ms ease;
 }
 .feedback-vote svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
 }
 .feedback-vote.selected {
   border-color: var(--ink);
@@ -255,10 +247,10 @@
   padding: 0;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 7px;
-  background: var(--ink);
-  color: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--ink);
   cursor: pointer;
   transition:
     transform 110ms var(--out),
@@ -267,6 +259,10 @@
 .feedback-send:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+.feedback-send:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: #fff;
 }
 .feedback-send svg {
   width: 13px;
@@ -281,10 +277,10 @@
 }
 .feedback-send-stage {
   position: absolute;
-  right: 12px;
-  top: 12px;
-  width: 32px;
-  height: 32px;
+  right: 14px;
+  top: 14px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border-radius: 12px;
@@ -348,13 +344,13 @@
   animation: dock 240ms var(--morph) forwards;
 }
 .feedback-cloud.delivered .feedback-send-stage {
-  right: -10px;
-  width: 76px;
-  border-radius: 10px;
+  right: 14px;
+  width: 28px;
+  border-radius: 12px;
 }
 .feedback-cloud.resetting .feedback-send-stage {
-  right: 12px;
-  width: 32px;
+  right: 14px;
+  width: 28px;
   border-radius: 12px;
   background: var(--soft);
   color: var(--foreground);
@@ -381,7 +377,10 @@
   transition: left 180ms var(--out);
 }
 .feedback-cloud.delivered .feedback-stage-plane {
-  left: 30px;
+  left: 6px;
+  top: 6px;
+  opacity: 1;
+  transform: none;
 }
 .feedback-cloud.collapsing .feedback-stage-plane {
   opacity: 1;
@@ -407,21 +406,37 @@
     transform: translate3d(36px, -28px, 0) rotate(-20deg);
   }
 }
-.feedback-stage-copy {
+.feedback-sent-tooltip {
   position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  right: calc(100% + 8px);
+  top: 50%;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: var(--foreground);
+  color: var(--background);
   font-size: 11px;
-  font-weight: 650;
+  font-weight: 500;
+  line-height: 16px;
   white-space: nowrap;
-}
-.feedback-stage-copy span {
   opacity: 0;
-  transition: opacity 180ms ease;
+  visibility: hidden;
+  transform: translate(3px, -50%);
+  transition: opacity 120ms ease, transform 160ms var(--out), visibility 0s 160ms;
 }
-.feedback-cloud.delivered .feedback-stage-copy span {
+.feedback-sent-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  border: 4px solid transparent;
+  border-left-color: var(--foreground);
+  transform: translateY(-50%);
+}
+.feedback-cloud.delivered .feedback-sent-tooltip {
   opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+  transition-delay: 80ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .feedback-cloud,
@@ -443,12 +458,12 @@
     color-mix(in oklch, var(--foreground) 16%, transparent);
 }
 .feedback-trigger {
-  background: var(--secondary);
-  color: var(--secondary-foreground);
+  background: var(--background);
+  color: var(--foreground);
 }
 .feedback-trigger:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
+  background: var(--muted);
+  color: var(--foreground);
 }
 .feedback-cloud.open .feedback-trigger {
   border-color: var(--border);

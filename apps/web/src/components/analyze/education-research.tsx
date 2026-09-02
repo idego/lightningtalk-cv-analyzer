@@ -29,6 +29,7 @@ function EducationResult({ credential, analysisId, feedback }: { credential: Cre
   return <HoverDisclosure
     className="rounded-md border bg-muted/20 p-3 text-sm"
     allowHover
+    feedbackSnapshotLabel={credential.institution ?? t("educationResearch")}
     headerClassName="flex-wrap sm:flex-nowrap"
     actionClassName="w-full sm:w-auto"
     title={<strong className="block min-w-0 truncate">{credential.institution}</strong>}
