@@ -15,8 +15,8 @@ from cv_validator.research.domain import EducationResearchInvalidResponse, Educa
 from cv_validator.research.subjects import accepted_records, supported_field
 
 RESEARCH_VERSION = "education-research-v2"
-PROMPT_VERSION = "education-research-prompt-v2"
-SCHEMA_VERSION = "education-research-schema-v1"
+PROMPT_VERSION = "education-research-prompt-v3"
+SCHEMA_VERSION = "education-research-schema-v2"
 MAX_CREDENTIALS = 12
 
 
@@ -36,7 +36,12 @@ class EducationResearchService:
     ) -> dict[str, Any]:
         request = request or build_education_research_request(stored_report)
         payload, response_model, usage = self.researcher.research(request)
-        validate_education_research(payload, request=request)
+        try:
+            validate_education_research(payload, request=request)
+        except EducationResearchInvalidResponse as exc:
+            exc.usage = usage
+            exc.model = response_model
+            raise
         result = normalize_public_education_result(payload)
         result.update({
             "status": "completed", "authority": "ai_research", "source": "openai_web_search",
@@ -175,10 +180,9 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
     for credential in payload["credentials"]:
         kinds = {finding["kind"] for finding in credential["findings"]}
         required: set[str] = set()
-        for field, kind in (("institution_exists", "institution"), ("program_exists", "program"), ("degree_exists", "degree"), ("certificate_exists", "certificate")):
+        for field, kind in (("program_exists", "program"), ("degree_exists", "degree"), ("certificate_exists", "certificate")):
             if credential[field] != "evidence_unavailable": required.add(kind)
         if credential["dates"] is not None: required.add("dates")
-        if credential["accreditation_status"] == "established": required.add("accreditation")
         if credential["city"] is not None or credential["country"] is not None: required.add("location")
         if credential["cv_consistency"] != "evidence_unavailable": required.add("cv_consistency")
         if not required.issubset(kinds):

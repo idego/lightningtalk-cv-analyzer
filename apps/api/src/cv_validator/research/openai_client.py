@@ -38,7 +38,9 @@ class OpenAIResponsesCompanyResearcher:
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise CompanyResearchInvalidResponse() from exc
+            raise CompanyResearchInvalidResponse(
+                usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
@@ -77,7 +79,9 @@ class OpenAIResponsesEducationResearcher:
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise EducationResearchInvalidResponse() from exc
+            raise EducationResearchInvalidResponse(
+                usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
@@ -140,7 +144,9 @@ class OpenAIResponsesLinkedInResearcher:
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise LinkedInResearchInvalidResponse("json_parse") from exc
+            raise LinkedInResearchInvalidResponse(
+                "json_parse", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         searches = _search_queries(response)
         if not searches or len(searches) > 4:
             raise LinkedInResearchInvalidResponse("search_count")
@@ -266,7 +272,6 @@ def _retain_cited_education_findings(
         credential["findings"] = retained_findings
         retained_kinds = {finding["kind"] for finding in retained_findings}
         for field, kind in (
-            ("institution_exists", "institution"),
             ("program_exists", "program"),
             ("degree_exists", "degree"),
             ("certificate_exists", "certificate"),
@@ -275,8 +280,6 @@ def _retain_cited_education_findings(
                 credential[field] = "evidence_unavailable"
         if "dates" not in retained_kinds:
             credential["dates"] = None
-        if "accreditation" not in retained_kinds:
-            credential["accreditation_status"] = "evidence_unavailable"
         if "location" not in retained_kinds:
             credential["city"] = None
             credential["country"] = None

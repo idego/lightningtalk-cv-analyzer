@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+import unicodedata
 
 from cv_validator.analysis.source import SourceBlock, SourceDocument
 
@@ -29,6 +30,13 @@ EDUCATION_FIELDS = (
 MAX_RECORDS = 100
 MAX_LIST_FIELDS = 200
 MAX_TEXT_LENGTH = 4000
+REVIEW_ANNOTATION_KINDS = frozenset({
+    "suspected_hallucination",
+    "unsupported_evidence",
+    "uncertain_relation",
+    "conflicting_relation",
+    "duplicate",
+})
 
 
 @dataclass
@@ -92,6 +100,8 @@ def apply_review(
     source: SourceDocument,
     state: CandidateState,
     review_payload: Any,
+    *,
+    review_status: str | None = None,
 ) -> tuple[CandidateState, dict[str, Any]]:
     payload = review_payload if isinstance(review_payload, dict) else {}
     known_records = state.records
@@ -100,27 +110,31 @@ def apply_review(
     conflicts = [*state.conflicts, *_safe_objects(payload.get("conflicts"), 300)]
     coverage_gaps = _safe_objects(payload.get("coverage_gaps"), 100)
 
-    rejected_ids: set[str] = set()
-    review_rejected: list[dict[str, str]] = []
-    for item in _safe_objects(payload.get("rejected_records"), 300):
-        record_id = item.get("id")
+    annotations: list[dict[str, str]] = []
+    annotated_ids: set[str] = set()
+    for item in _safe_objects(payload.get("annotations"), 300):
+        record_id = item.get("record_id")
+        kind = item.get("kind")
         reason = item.get("reason_code")
         if record_id not in known_records:
             conflicts.append({"reason_code": "unknown_reviewer_record_id"})
             continue
-        if not isinstance(reason, str) or not reason or len(reason) > 128:
-            reason = "reviewer_rejected"
-        rejected_ids.add(record_id)
-        review_rejected.append({"id": record_id, "reason_code": reason})
+        if kind not in REVIEW_ANNOTATION_KINDS or not isinstance(reason, str) or not reason or len(reason) > 128:
+            conflicts.append({
+                "record_id": record_id,
+                "reason_code": "invalid_reviewer_annotation",
+            })
+            continue
+        annotations.append({"record_id": record_id, "kind": kind, "reason_code": reason})
+        annotated_ids.add(record_id)
 
-    accepted_requested = payload.get("accepted_record_ids", [])
-    accepted_ids: set[str] = set()
-    if isinstance(accepted_requested, list):
-        for record_id in accepted_requested[:300]:
-            if record_id not in known_records:
-                conflicts.append({"reason_code": "unknown_reviewer_record_id"})
-            elif record_id not in rejected_ids:
-                accepted_ids.add(record_id)
+    # Review is a delta over the validated specialist baseline. Omission is not
+    # an instruction to discard a supported record.
+    accepted_ids: set[str] = {
+        record_id
+        for record_id, record in known_records.items()
+        if record.get("relation_status") == "supported"
+    }
 
     corrections: list[dict[str, Any]] = []
     for patch in _safe_objects(payload.get("relation_patches"), 300):
@@ -133,6 +147,7 @@ def apply_review(
             continue
         target = known_records[record_id]
         allowed_fields = EMPLOYMENT_FIELDS if target in state.employment else EDUCATION_FIELDS
+        original = _public_record(target, allowed_fields)
         field_index = _field_index(state)
         proposed = deepcopy(target)
         for field_id in dict.fromkeys(field_ids):
@@ -152,17 +167,51 @@ def apply_review(
             for name in allowed_fields:
                 target[name] = proposed.get(name)
             target["relation_status"] = relation
-            corrections.append({"record_id": record_id, "field_ids": list(dict.fromkeys(field_ids))})
+            accepted_ids.add(record_id)
+            corrections.append({
+                "record_id": record_id,
+                "field_ids": list(dict.fromkeys(field_ids)),
+                "original_candidate": original,
+                "effective_projection": _public_record(target, allowed_fields),
+            })
 
     merge_groups = _known_merge_groups(payload.get("merge_groups"), known_records, conflicts)
+    merge_originals = {
+        tuple(group): [
+            _public_record(
+                known_records[record_id],
+                EMPLOYMENT_FIELDS if known_records[record_id] in state.employment else EDUCATION_FIELDS,
+            )
+            for record_id in group
+        ]
+        for group in merge_groups
+    }
     applied_merge_groups = _apply_merge_groups(
         source,
         state,
         merge_groups,
         accepted_ids,
-        rejected_ids,
         conflicts,
     )
+    for group in applied_merge_groups:
+        for duplicate_id in group[1:]:
+            annotations.append({
+                "record_id": duplicate_id,
+                "kind": "duplicate",
+                "reason_code": "reviewer_duplicate_projection",
+            })
+            annotated_ids.add(duplicate_id)
+    merge_projections = [
+        {
+            "record_ids": group,
+            "original_candidates": merge_originals[tuple(group)],
+            "effective_projection": _public_record(
+                known_records[group[0]],
+                EMPLOYMENT_FIELDS if known_records[group[0]] in state.employment else EDUCATION_FIELDS,
+            ),
+        }
+        for group in applied_merge_groups
+    ]
 
     added_profile_fields: list[str] = []
     for addition in _safe_objects(payload.get("added_profile_fields"), 20):
@@ -224,7 +273,7 @@ def apply_review(
         record["status"] = (
             "accepted"
             if record["id"] in accepted_ids
-            and record["id"] not in rejected_ids
+            and record["id"] not in annotated_ids
             and record["relation_status"] == "supported"
             else "ambiguous"
         )
@@ -234,13 +283,15 @@ def apply_review(
         for record in [*state.employment, *state.education]
         if record["status"] == "accepted"
     ]
-    state.rejected = [*rejected, *review_rejected]
+    state.rejected = rejected
     state.conflicts = conflicts
     review = {
-        "status": _review_status(payload, conflicts, coverage_gaps),
+        "status": _review_status(payload, conflicts, coverage_gaps, review_status),
         "accepted_ids": accepted_final,
         "rejected": state.rejected,
+        "annotations": annotations,
         "merged_ids": applied_merge_groups,
+        "merge_projections": merge_projections,
         "relation_corrections": corrections,
         "added_profile_fields": list(dict.fromkeys(added_profile_fields)),
         "added_candidate_ids": added_candidate_ids,
@@ -272,6 +323,13 @@ def public_records(records: list[dict[str, Any]], field_names: tuple[str, ...]) 
         }
         for record in records
     ]
+
+
+def _public_record(record: dict[str, Any], field_names: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "id": record["id"],
+        **{name: _public_field(record.get(name)) for name in field_names},
+    }
 
 
 def _validate_profile(source: SourceDocument, payload: Any, rejected: list[dict[str, str]]) -> dict[str, Any]:
@@ -336,6 +394,7 @@ def _validate_records(
         if relation == "invalid":
             rejected.append({"id": record_id, "reason_code": "invalid_record_relation"})
             continue
+        record["status"] = "accepted" if relation == "supported" else "ambiguous"
         output.append(record)
     return output
 
@@ -367,12 +426,20 @@ def _validate_field(source: SourceDocument, raw: Any) -> dict[str, Any] | None:
         block_id = citation.get("block_id") or citation.get("source_id")
         excerpt = citation.get("excerpt")
         block = blocks.get(block_id)
-        if block is None or not isinstance(excerpt, str) or not excerpt or excerpt not in block.text:
+        if block is None or not isinstance(excerpt, str) or not excerpt:
             return None
-        if value not in excerpt:
+        normalized_text, start_offsets, end_offsets = _normalized_with_offsets(block.text)
+        normalized_excerpt = _normalize_literal(excerpt)
+        normalized_value = _normalize_literal(value)
+        if not normalized_excerpt or not normalized_value:
             return None
-        start = block.text.find(excerpt)
-        final_evidence.append(block.evidence(start, start + len(excerpt)))
+        start_normalized = normalized_text.find(normalized_excerpt)
+        if start_normalized < 0 or normalized_value not in normalized_excerpt:
+            return None
+        end_normalized = start_normalized + len(normalized_excerpt)
+        start = start_offsets[start_normalized]
+        end = end_offsets[end_normalized - 1]
+        final_evidence.append(block.evidence(start, end))
         block_ids.append(block.id)
     return {
         "_id": field_id,
@@ -391,10 +458,10 @@ def _relation_status(source: SourceDocument, fields: list[dict[str, Any]]) -> st
     if len(blocks) <= 1:
         return "supported"
     table_blocks = [block for block in blocks if block.table_id]
-    if table_blocks:
+    if len(table_blocks) == len(blocks):
         table_positions = {(block.table_id, block.row_index) for block in table_blocks}
-        if len(table_blocks) != len(blocks) or len(table_positions) != 1:
-            return "invalid"
+        if len(table_positions) != 1:
+            return "ambiguous"
         return "supported"
     if (
         len({block.parent_id for block in blocks}) == 1
@@ -404,9 +471,51 @@ def _relation_status(source: SourceDocument, fields: list[dict[str, Any]]) -> st
     distance = max(block.order for block in blocks) - min(block.order for block in blocks)
     if distance <= 3:
         return "supported"
-    if distance > 6:
-        return "invalid"
     return "ambiguous"
+
+
+_TYPOGRAPHIC_EQUIVALENTS = str.maketrans({
+    "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+    "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-",
+})
+
+
+def _normalize_literal(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).translate(_TYPOGRAPHIC_EQUIVALENTS).split())
+
+
+def _normalized_with_offsets(value: str) -> tuple[str, list[int], list[int]]:
+    output: list[str] = []
+    start_offsets: list[int] = []
+    end_offsets: list[int] = []
+    in_whitespace = False
+    index = 0
+    while index < len(value):
+        cluster_end = index + 1
+        while cluster_end < len(value) and unicodedata.combining(value[cluster_end]):
+            cluster_end += 1
+        expanded = unicodedata.normalize("NFKC", value[index:cluster_end]).translate(_TYPOGRAPHIC_EQUIVALENTS)
+        for normalized in expanded:
+            if normalized.isspace():
+                if output and not in_whitespace:
+                    output.append(" ")
+                    start_offsets.append(index)
+                    end_offsets.append(cluster_end)
+                elif output and in_whitespace:
+                    end_offsets[-1] = cluster_end
+                in_whitespace = True
+            else:
+                output.append(normalized)
+                start_offsets.append(index)
+                end_offsets.append(cluster_end)
+                in_whitespace = False
+        index = cluster_end
+    if output and output[-1] == " ":
+        output.pop()
+        start_offsets.pop()
+        end_offsets.pop()
+    return "".join(output), start_offsets, end_offsets
 
 
 def _public_field(field: Any) -> Any:
@@ -470,7 +579,6 @@ def _apply_merge_groups(
     state: CandidateState,
     groups: list[list[str]],
     accepted_ids: set[str],
-    rejected_ids: set[str],
     conflicts: list[dict[str, Any]],
 ) -> list[list[str]]:
     applied: list[list[str]] = []
@@ -486,7 +594,6 @@ def _apply_merge_groups(
             conflicts.append({"reason_code": "invalid_reviewer_merge_type"})
             continue
         field_names = EMPLOYMENT_FIELDS if employment_merge else EDUCATION_FIELDS
-        collection = state.employment if employment_merge else state.education
         canonical = records[0]
         assert canonical is not None
         proposed = deepcopy(canonical)
@@ -502,17 +609,20 @@ def _apply_merge_groups(
         for name in field_names:
             canonical[name] = proposed.get(name)
         canonical["relation_status"] = relation
-        duplicate_ids = {record["id"] for record in records[1:] if record is not None}
-        collection[:] = [record for record in collection if record["id"] not in duplicate_ids]
         if any(record_id in accepted_ids for record_id in group):
             accepted_ids.add(canonical["id"])
-        accepted_ids.difference_update(duplicate_ids)
-        rejected_ids.difference_update(duplicate_ids)
         applied.append(group)
     return applied
 
 
-def _review_status(payload: dict[str, Any], conflicts: list[Any], gaps: list[Any]) -> str:
+def _review_status(
+    payload: dict[str, Any],
+    conflicts: list[Any],
+    gaps: list[Any],
+    pass_status: str | None,
+) -> str:
+    if pass_status in {"failed", "unavailable"}:
+        return pass_status
     declared = payload.get("status")
     if declared in {"failed", "unavailable"}:
         return declared

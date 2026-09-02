@@ -4,8 +4,10 @@ import json
 import sqlite3
 import hashlib
 import hmac
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -25,6 +27,7 @@ class PersistenceConfig:
 class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
+        self._event_write_lock = threading.Lock()
         self._purge_listener: Callable[[tuple[str, ...]], None] | None = None
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -145,6 +148,53 @@ class PersistenceStore:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS analysis_runs (
+                    analysis_id TEXT PRIMARY KEY,
+                    correlation_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    access_token_hash TEXT NOT NULL,
+                    error_code TEXT
+                );
+                CREATE TABLE IF NOT EXISTS diagnostic_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    analysis_id TEXT NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    event TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ai_usage_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    analysis_id TEXT NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    configured_model TEXT NOT NULL,
+                    response_model TEXT,
+                    reasoning_effort TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    outcome TEXT NOT NULL,
+                    error_code TEXT,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    latency_ms INTEGER NOT NULL,
+                    input_tokens INTEGER NOT NULL,
+                    cached_input_tokens INTEGER NOT NULL,
+                    output_tokens INTEGER NOT NULL,
+                    total_tokens INTEGER NOT NULL,
+                    estimated_cost_usd TEXT,
+                    pricing_version TEXT NOT NULL,
+                    pricing_reason TEXT,
+                    cache_outcome TEXT,
+                    saved_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    saved_cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    saved_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    saved_total_tokens INTEGER NOT NULL DEFAULT 0,
+                    saved_cost_usd TEXT
+                );
                 """
             )
             conn.execute(
@@ -153,6 +203,129 @@ class PersistenceStore:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
             )
+
+    def create_analysis_run(
+        self,
+        analysis_id: str,
+        correlation_id: str,
+        access_token: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO analysis_runs
+                   (analysis_id, correlation_id, status, created_at, access_token_hash)
+                   VALUES (?, ?, 'running', ?, ?)""",
+                (analysis_id, correlation_id, _utc_now(), _token_hash(access_token)),
+            )
+
+    def complete_analysis_run(
+        self,
+        analysis_id: str,
+        status: str,
+        error_code: str | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE analysis_runs SET status = ?, completed_at = ?, error_code = ?
+                   WHERE analysis_id = ?""",
+                (status, _utc_now(), error_code, analysis_id),
+            )
+
+    def record_diagnostic_event(self, payload: dict[str, Any]) -> None:
+        safe = dict(payload)
+        with self._event_write_lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO diagnostic_events
+                       (analysis_id, correlation_id, event, payload_json, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        safe.pop("analysis_id"),
+                        safe.pop("correlation_id"),
+                        safe.pop("event"),
+                        json.dumps(safe, sort_keys=True, separators=(",", ":")),
+                        _utc_now(),
+                    ),
+                )
+
+    def record_ai_usage_event(self, event: dict[str, Any]) -> None:
+        columns = (
+            "analysis_id", "correlation_id", "operation", "category", "provider",
+            "configured_model", "response_model", "reasoning_effort", "attempt",
+            "outcome", "error_code", "started_at", "completed_at", "latency_ms",
+            "input_tokens", "cached_input_tokens", "output_tokens", "total_tokens",
+            "estimated_cost_usd", "pricing_version", "pricing_reason", "cache_outcome",
+            "saved_input_tokens", "saved_cached_input_tokens", "saved_output_tokens",
+            "saved_total_tokens", "saved_cost_usd",
+        )
+        with self._event_write_lock:
+            with self._connect() as conn:
+                conn.execute(
+                    f"INSERT INTO ai_usage_events ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                    tuple(event.get(column) for column in columns),
+                )
+
+    def get_analysis_diagnostics(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            run = conn.execute(
+                "SELECT analysis_id, correlation_id, status, created_at, completed_at, error_code FROM analysis_runs WHERE analysis_id = ?",
+                (analysis_id,),
+            ).fetchone()
+            if run is None:
+                return None
+            diagnostic_rows = conn.execute(
+                "SELECT event, payload_json, created_at FROM diagnostic_events WHERE analysis_id = ? ORDER BY id",
+                (analysis_id,),
+            ).fetchall()
+            usage_rows = conn.execute(
+                "SELECT * FROM ai_usage_events WHERE analysis_id = ? ORDER BY id",
+                (analysis_id,),
+            ).fetchall()
+        diagnostics = [
+            {"event": row["event"], "created_at": row["created_at"], **json.loads(row["payload_json"])}
+            for row in diagnostic_rows
+        ]
+        usage = [{key: row[key] for key in row.keys() if key != "id"} for row in usage_rows]
+        aggregate: dict[str, Any] = {
+            "attempts": len(usage), "input_tokens": 0, "cached_input_tokens": 0,
+            "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": "0.000000000",
+        }
+        cost = Decimal("0")
+        cost_known = True
+        for item in usage:
+            for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
+                aggregate[key] += item[key]
+            if item["estimated_cost_usd"] is None:
+                cost_known = False
+            else:
+                cost += Decimal(item["estimated_cost_usd"])
+        aggregate["estimated_cost_usd"] = f"{cost:.9f}" if cost_known else None
+        return {
+            "analysis": dict(run),
+            "diagnostics": diagnostics,
+            "usage_events": usage,
+            "aggregate": aggregate,
+            "aggregates": {
+                "by_operation": _group_usage(usage, lambda item: item["operation"]),
+                "by_model": _group_usage(
+                    usage,
+                    lambda item: item["response_model"] or item["configured_model"],
+                ),
+                "by_day": _group_usage(usage, lambda item: item["completed_at"][:10]),
+                "by_cache": _group_usage(
+                    usage,
+                    lambda item: item["cache_outcome"] or "live",
+                ),
+            },
+        }
+
+    def analysis_correlation_id(self, analysis_id: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT correlation_id FROM analysis_runs WHERE analysis_id = ?",
+                (analysis_id,),
+            ).fetchone()
+        return None if row is None else str(row["correlation_id"])
 
     def persist_report(
         self,
@@ -261,7 +434,11 @@ class PersistenceStore:
         if not access_token:
             return False
         with self._connect() as conn:
-            row = conn.execute("SELECT access_token_hash FROM reports WHERE analysis_id = ?", (analysis_id,)).fetchone()
+            row = conn.execute(
+                """SELECT access_token_hash FROM reports WHERE analysis_id = ?
+                   UNION ALL SELECT access_token_hash FROM analysis_runs WHERE analysis_id = ? LIMIT 1""",
+                (analysis_id, analysis_id),
+            ).fetchone()
         return row is not None and isinstance(row["access_token_hash"], str) and hmac.compare_digest(row["access_token_hash"], _token_hash(access_token))
 
     def delete_analysis(self, analysis_id: str, access_token: str | None) -> bool:
@@ -290,6 +467,8 @@ class PersistenceStore:
         placeholders = ",".join("?" for _ in analysis_ids)
         with self._connect() as conn:
             for table in (
+                "diagnostic_events",
+                "ai_usage_events",
                 "research_cache_audit",
                 "company_research",
                 "education_research",
@@ -304,6 +483,10 @@ class PersistenceStore:
                 )
             conn.execute(
                 f"DELETE FROM reports WHERE analysis_id IN ({placeholders})",
+                analysis_ids,
+            )
+            conn.execute(
+                f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})",
                 analysis_ids,
             )
 
@@ -592,6 +775,7 @@ class PersistenceStore:
                 ("linkedin_comparison", "created_at"),
                 ("linkedin_confirmation", "confirmed_at"),
                 ("audit_log", "created_at"),
+                ("analysis_runs", "created_at"),
             ):
                 expired_ids_set.update(
                     row[0]
@@ -605,9 +789,11 @@ class PersistenceStore:
             if expired_ids:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in ("research_cache_audit", "company_research", "education_research",
-                              "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation", "audit_log"):
+                              "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation",
+                              "audit_log", "diagnostic_events", "ai_usage_events"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
+                deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
             deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
             if expired_ids and self._purge_listener is not None:
@@ -617,6 +803,40 @@ class PersistenceStore:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _group_usage(
+    usage: list[dict[str, Any]],
+    key_for: Callable[[dict[str, Any]], str],
+) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for item in usage:
+        key = key_for(item)
+        group = groups.setdefault(key, {
+            "key": key,
+            "attempts": 0,
+            "input_tokens": 0,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "estimated_cost_usd": Decimal("0"),
+            "cost_available": True,
+        })
+        group["attempts"] += 1
+        for token in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
+            group[token] += item[token]
+        if item["estimated_cost_usd"] is None:
+            group["cost_available"] = False
+        else:
+            group["estimated_cost_usd"] += Decimal(item["estimated_cost_usd"])
+    output: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        group = groups[key]
+        available = group.pop("cost_available")
+        cost = group["estimated_cost_usd"]
+        group["estimated_cost_usd"] = f"{cost:.9f}" if available else None
+        output.append(group)
+    return output
 
 
 def _token_hash(token: str) -> str:

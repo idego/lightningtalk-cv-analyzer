@@ -49,12 +49,17 @@ class LinkedInDiscoveryService:
                 payload["possible_profiles"],
                 key=lambda profile: str(profile.get("profile_url", "")) if isinstance(profile, dict) else "",
             )[: self.max_profiles]
-        validate_discovery(
-            payload,
-            request=request,
-            connection_threshold=self.connection_threshold,
-            max_profiles=self.max_profiles,
-        )
+        try:
+            validate_discovery(
+                payload,
+                request=request,
+                connection_threshold=self.connection_threshold,
+                max_profiles=self.max_profiles,
+            )
+        except LinkedInResearchInvalidResponse as exc:
+            exc.usage = usage
+            exc.model = response_model
+            raise
         return _completed(payload, DISCOVERY_VERSION, DISCOVERY_SCHEMA_VERSION, response_model, usage)
 
 

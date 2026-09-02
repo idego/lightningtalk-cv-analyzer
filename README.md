@@ -56,6 +56,15 @@ uses project `cv-analyzer-docling-luna`, API database
 `/app/data/docling_luna.db`, and auth database
 `/app/data/docling_luna_auth.db`.
 
+`GET /health` reports `ready: false` when the Luna analysis client is not
+configured; uploads then fail with `analysis_strategy_unavailable` and are not
+persisted as successful reports. Each attempted analysis has owner-scoped,
+PII-safe diagnostics and an immutable AI token/cost ledger at
+`GET /analyses/{analysis_id}/diagnostics`. Rates are versioned in code and can
+be overridden with `CV_VALIDATOR_PRICING_PATH`; unknown model pricing leaves
+the cost null without discarding token usage. Reusable research cache hits
+record zero current-call tokens and separate saved usage/cost provenance.
+
 ## Privacy and persistence
 
 - OpenAI requests use `store=false`.

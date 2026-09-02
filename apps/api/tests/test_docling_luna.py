@@ -107,8 +107,7 @@ def complete_payloads() -> dict[str, dict]:
         }]},
         "education": {"records": []},
         "review": {
-            "accepted_record_ids": ["employment-1", "review-education-1"],
-            "rejected_records": [{"id": "employment-tech", "reason_code": "technology_not_employer"}],
+            "annotations": [{"record_id": "employment-tech", "kind": "suspected_hallucination", "reason_code": "technology_not_employer"}],
             "merge_groups": [],
             "relation_patches": [],
             "added_profile_fields": [],
@@ -187,8 +186,9 @@ def test_literal_and_relation_validation_is_record_isolated() -> None:
     }]}
     state = validate_specialists(source, {}, employment, {})
 
-    assert [record["id"] for record in state.employment] == ["valid"]
-    assert {item["reason_code"] for item in state.rejected} >= {"invalid_record_relation"}
+    assert [record["id"] for record in state.employment] == ["mixed", "valid"]
+    assert state.employment[0]["status"] == "ambiguous"
+    assert state.employment[1]["status"] == "accepted"
 
 
 def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
@@ -210,8 +210,8 @@ def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
         "relationship_type": None,
     }]}, {})
 
-    assert state.employment == []
-    assert {item["reason_code"] for item in state.rejected} >= {"invalid_record_relation"}
+    assert [record["id"] for record in state.employment] == ["cross-row"]
+    assert state.employment[0]["relation_status"] == "ambiguous"
 
 
 def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
@@ -229,11 +229,29 @@ def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
     assert {item["reason_code"] for item in state.rejected} >= {"missing_organization"}
 
 
+def test_evidence_allows_only_safe_unicode_whitespace_and_typography_normalization() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Cafe\u0301\nExample — Engineer", order=0),
+    ), "pdf")
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "normalized",
+        "organization": field("org", "Café Example", "b-0", "Café   Example - Engineer"),
+        "role": field("role", "Engineer", "b-0", "Example - Engineer"),
+        "start_date": None,
+        "end_date": None,
+        "location": None,
+        "relationship_type": None,
+    }]}, {})
+
+    assert [record["id"] for record in state.employment] == ["normalized"]
+    assert state.employment[0]["organization"]["evidence"][0]["excerpt"] == "Cafe\u0301\nExample — Engineer"
+
+
 def test_reviewer_unknown_ids_and_invalid_added_evidence_are_rejected() -> None:
     source = SourceDocument.create((SourceBlock("b-1", "Example University", order=0),), "pdf")
     state = validate_specialists(source, {}, {}, {})
     state, review = apply_review(source, state, {
-        "accepted_record_ids": ["unknown"],
+        "annotations": [{"record_id": "unknown", "kind": "uncertain_relation", "reason_code": "unknown"}],
         "relation_patches": [{"record_id": "unknown", "field_ids": ["missing"]}],
         "added_candidates": [{
             "id": "review-education-1", "candidate_type": "education",
@@ -274,8 +292,7 @@ def test_reviewer_applies_relation_patch_by_stable_field_ids() -> None:
     }]}, {})
 
     state, review = apply_review(source, state, {
-        "accepted_record_ids": ["needs-correction"],
-        "rejected_records": [{"id": "field-source", "reason_code": "field_source_only"}],
+        "annotations": [{"record_id": "field-source", "kind": "duplicate", "reason_code": "field_source_only"}],
         "merge_groups": [],
         "relation_patches": [{"record_id": "needs-correction", "field_ids": ["correct-role"]}],
         "added_profile_fields": [], "added_candidates": [], "coverage_gaps": [],
@@ -286,9 +303,9 @@ def test_reviewer_applies_relation_patch_by_stable_field_ids() -> None:
     assert corrected["role"]["value"] == "Developer"
     assert corrected["relation_status"] == "supported"
     assert corrected["status"] == "accepted"
-    assert review["relation_corrections"] == [{
-        "record_id": "needs-correction", "field_ids": ["correct-role"],
-    }]
+    assert review["relation_corrections"][0]["record_id"] == "needs-correction"
+    assert review["relation_corrections"][0]["original_candidate"]["role"]["value"] == "Designer"
+    assert review["relation_corrections"][0]["effective_projection"]["role"]["value"] == "Developer"
 
 
 def test_reviewer_merge_is_applied_deterministically() -> None:
@@ -310,16 +327,65 @@ def test_reviewer_merge_is_applied_deterministically() -> None:
     }]}, {})
 
     state, review = apply_review(source, state, {
-        "accepted_record_ids": ["duplicate"], "rejected_records": [],
+        "annotations": [],
         "merge_groups": [["canonical", "duplicate"]], "relation_patches": [],
         "added_profile_fields": [], "added_candidates": [], "coverage_gaps": [],
         "conflicts": [], "status": "completed",
     })
 
-    assert [record["id"] for record in state.employment] == ["canonical"]
+    assert [record["id"] for record in state.employment] == ["canonical", "duplicate"]
     assert state.employment[0]["role"]["value"] == "Developer"
     assert state.employment[0]["status"] == "accepted"
     assert review["merged_ids"] == [["canonical", "duplicate"]]
+    assert review["merge_projections"][0]["original_candidates"][0]["role"] is None
+    assert review["merge_projections"][0]["effective_projection"]["role"]["value"] == "Developer"
+    assert review["annotations"] == [{
+        "record_id": "duplicate",
+        "kind": "duplicate",
+        "reason_code": "reviewer_duplicate_projection",
+    }]
+
+
+def test_reviewer_cannot_remove_evidence_supported_education_for_research_reasons() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example University", order=0),
+    ), "pdf")
+    state = validate_specialists(source, {}, {}, {"records": [{
+        "id": "education-1",
+        "institution": field("institution-1", "Example University", "b-0"),
+        "program": None,
+        "degree": None,
+        "certificate": None,
+        "start_date": None,
+        "end_date": None,
+        "location": None,
+    }]})
+
+    state, review = apply_review(source, state, {
+        "rejected_records": [{
+            "id": "education-1",
+            "reason_code": "accreditation_not_found",
+        }],
+        "annotations": [{
+            "record_id": "education-1",
+            "kind": "accreditation_not_found",
+            "reason_code": "no_public_source",
+        }],
+        "merge_groups": [],
+        "relation_patches": [],
+        "added_profile_fields": [],
+        "added_candidates": [],
+        "coverage_gaps": [],
+        "conflicts": [],
+        "status": "completed",
+    })
+
+    assert [record["id"] for record in state.education] == ["education-1"]
+    assert state.education[0]["status"] == "accepted"
+    assert review["annotations"] == []
+    assert {item["reason_code"] for item in review["conflicts"]} == {
+        "invalid_reviewer_annotation"
+    }
 
 
 def test_reviewer_adds_supported_profile_and_employment_candidates() -> None:
@@ -330,7 +396,7 @@ def test_reviewer_adds_supported_profile_and_employment_candidates() -> None:
     state = validate_specialists(source, {}, {}, {})
 
     state, review = apply_review(source, state, {
-        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [],
+        "annotations": [], "merge_groups": [],
         "relation_patches": [],
         "added_profile_fields": [{
             "field_name": "summary",
@@ -384,7 +450,6 @@ def test_specialists_run_concurrently_and_reviewer_runs_after_them() -> None:
 
 def test_failed_specialist_does_not_remove_other_passes() -> None:
     payloads = complete_payloads()
-    payloads["review"]["accepted_record_ids"] = ["review-education-1"]
     client = FakeLuna(payloads, failing={"employment"})
     strategy = DoclingLunaAnalysisStrategy(client=client)
     report = strategy.analyze(AnalysisInput.from_upload(
@@ -395,8 +460,9 @@ def test_failed_specialist_does_not_remove_other_passes() -> None:
     assert report["base_analysis"]["status"] == "partial"
     assert report["base_analysis"]["profile"]["candidate_name"]["value"] == "Alex Example"
     assert report["base_analysis"]["education"][0]["added_by_reviewer"] is True
-    assert report["base_analysis"]["pass_statuses"]["employment"]["attempt_count"] == 2
-    assert [name for name, _ in client.calls].count("employment") == 2
+    assert report["base_analysis"]["pass_statuses"]["employment"]["attempt_count"] == 1
+    assert [name for name, _ in client.calls].count("employment") == 1
+    assert [name for name, _ in client.calls].count("employment_rescue") == 1
     assert [name for name, _ in client.calls].count("profile") == 1
     assert [name for name, _ in client.calls].count("education") == 1
 
@@ -425,6 +491,27 @@ def test_upload_persistence_ownership_and_health_with_real_strategy(tmp_path) ->
     assert report["contract_version"] == "base-analysis-v2"
     assert client.get(f"/analyses/{report['analysis_id']}", headers=owner).status_code == 200
     assert client.get(f"/analyses/{report['analysis_id']}", headers={"X-Analysis-Access-Token": "other"}).status_code == 404
+    diagnostics = client.get(
+        f"/analyses/{report['analysis_id']}/diagnostics",
+        headers=owner,
+    )
+    assert diagnostics.status_code == 200
+    diagnostic_payload = diagnostics.json()
+    assert diagnostic_payload["analysis"]["status"] == "completed"
+    assert diagnostic_payload["aggregate"]["attempts"] == 5
+    assert diagnostic_payload["aggregate"]["input_tokens"] == 50
+    assert {item["key"] for item in diagnostic_payload["aggregates"]["by_operation"]} == {
+        "profile", "employment", "education", "education_rescue", "review",
+    }
+    assert diagnostic_payload["aggregates"]["by_model"][0]["attempts"] == 5
+    assert all(
+        event["configured_model"] == "gpt-5.6-luna"
+        for event in diagnostic_payload["usage_events"]
+    )
+    assert client.get(
+        f"/analyses/{report['analysis_id']}/diagnostics",
+        headers={"X-Analysis-Access-Token": "other"},
+    ).status_code == 404
 
 
 def test_openai_contract_pins_model_store_and_reasoning() -> None:
@@ -433,9 +520,11 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
             return {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
 
     class Response:
-        output_text = "{}"
         model = "gpt-5.6-luna"
         usage = Usage()
+
+        def __init__(self, output_text):
+            self.output_text = output_text
 
     class Responses:
         def __init__(self):
@@ -443,7 +532,13 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
 
         def create(self, **kwargs):
             self.calls.append(kwargs)
-            return Response()
+            name = kwargs["text"]["format"]["name"]
+            if name == "cv_profile":
+                output = {"profile": {"candidate_name": None, "declared_location": None, "headline": None, "summary": None, "skills": [], "languages": []}}
+            else:
+                output = {"annotations": [], "merge_groups": [], "relation_patches": [], "added_profile_fields": [], "added_candidates": [], "conflicts": [], "coverage_gaps": [], "status": "completed"}
+            import json
+            return Response(json.dumps(output))
 
     class Client:
         def __init__(self):
