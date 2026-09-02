@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import type { AnalysisReport, EducationResearch } from "@/lib/analyze-types";
-import { Badge } from "@/components/ui/badge";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
@@ -10,22 +9,8 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
-import { useCopy, type CopyKey } from "@/lib/app-settings";
+import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
-
-function institutionStatusKey(status: string): CopyKey {
-  return ({
-    supported: "institutionConfirmed",
-    mismatch: "institutionMismatch",
-    evidence_unavailable: "institutionNotConfirmed",
-  }[status] ?? "institutionNotConfirmed") as CopyKey;
-}
-
-function accreditationStatusKey(status: string | null): CopyKey {
-  if (status === "established") return "accreditationConfirmed";
-  if (status === "not_established") return "accreditationNotConfirmed";
-  return "accreditationUnknown";
-}
 
 export function EducationResearchPanel({
   report,
@@ -92,7 +77,7 @@ export function EducationResearchPanel({
       key={`${credential.institution}:${credential.program ?? ""}`}
       className="rounded-md border bg-muted/20 p-3 text-sm"
       allowHover
-      title={<div className="flex min-w-0 flex-wrap items-center gap-2"><strong>{credential.institution}</strong><Badge variant="outline">{t(institutionStatusKey(credential.institution_exists))}</Badge><Badge variant="outline">{t(accreditationStatusKey(credential.accreditation_status))}</Badge></div>}
+      title={<strong>{credential.institution}</strong>}
       action={<ResearchConfidenceBadge confidence={credential.confidence} />}
       contentClassName="space-y-2 pt-3"
     >

@@ -70,7 +70,9 @@ function report() {
           { id: "employment-ambiguous", reason_code: "invalid_literal_evidence" },
           { id: "unknown-id", reason_code: "reviewer_added_candidate_invalid_evidence" },
         ],
+        annotations: [{ record_id: "employment-ambiguous", kind: "suspected_hallucination", reason_code: "technology_not_employer" }],
         merged_ids: [["employment-1", "employment-duplicate"]],
+        merge_projections: [],
         relation_corrections: [],
         added_profile_fields: ["candidate_name"],
         added_candidate_ids: ["education-1"],
@@ -127,7 +129,7 @@ test("shows only deduplicated recruiter-facing signals", () => {
   assert.doesNotMatch(rendered, /invalid_literal_evidence|invalid addition|unknown reviewer|rejected/i);
 });
 
-test("CV overview includes accepted records and intentionally omits skills", () => {
+test("CV overview includes accepted and annotated records and intentionally omits skills", () => {
   const overview = adaptReportInterface(report(), "en").overview;
 
   assert.equal(overview.candidateName, "Alex Example");
@@ -135,6 +137,8 @@ test("CV overview includes accepted records and intentionally omits skills", () 
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
   assert.equal(overview.employment.length, 1);
+  assert.equal(overview.attentionRecords[0].value, "MongoDB");
+  assert.equal(overview.attentionRecords[0].needsReview, true);
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 

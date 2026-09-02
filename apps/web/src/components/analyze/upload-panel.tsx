@@ -27,7 +27,7 @@ function AnalysisProgress({ files, completed, currentIndex, elapsedSeconds, comp
   const estimatedRemaining = files.length * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="analysis-flow-enter mx-auto max-w-3xl"><CardContent className="py-8">
     <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total: files.length })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current: currentIndex + 1, total: files.length })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("reportReady") : files[currentIndex]?.name}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div> : null}</div>
-    <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${result?.status === "ok" ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{result?.status === "ok" ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (result.status === "ok" ? t("completed") : t("failed")) : active ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
+    <ol className="mt-4 divide-y rounded-lg border px-3">{files.map((file, index) => { const result = completedByName.get(file.name); const active = index === currentIndex && !result; const usable = result && result.status !== "error"; return <li key={`${file.name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${usable ? "bg-emerald-500/15 text-emerald-700" : result?.status === "error" ? "bg-destructive/10 text-destructive" : active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{usable ? <Check className="size-3.5" /> : result?.status === "error" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{result ? (usable ? t("completed") : t("failed")) : active ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
   </CardContent></Card>;
 }
 
@@ -70,7 +70,7 @@ export function UploadPanel() {
       const file = acceptedFiles[index]; setCurrentIndex(index); let result: AnalyzeItemResult;
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       setEntries((previous) => [...previous, { file, result }]);
-      if (result.status === "ok") {
+      if (result.status !== "error") {
         void getAutoResearchOrchestrator()?.schedule(result.report, settings);
       }
     }
@@ -83,7 +83,7 @@ export function UploadPanel() {
   }
 
   function reset() { setFiles([]); setEntries([]); setError(null); setElapsedSeconds(0); setCurrentIndex(0); }
-  function openHistorical(filename: string, report: Extract<AnalyzeItemResult, { status: "ok" }>["report"]) {
+  function openHistorical(filename: string, report: Extract<AnalyzeItemResult, { report: unknown }>["report"]) {
     setEntries([{ file: null, result: { filename, status: "ok", report } }]);
   }
   if (loading) return <div className="space-y-6">
@@ -98,7 +98,7 @@ export function UploadPanel() {
   if (entries.length) return <AnalysisWorkspace
     entries={entries}
     onBack={reset}
-    analyzedCount={entries.length > 1 ? t("analyzedCount", { completed: entries.filter(({ result }) => result.status === "ok").length, total: entries.length }) : undefined}
+    analyzedCount={entries.length > 1 ? t("analyzedCount", { completed: entries.filter(({ result }) => result.status !== "error").length, total: entries.length }) : undefined}
   />;
 
   return <div className="mx-auto max-w-5xl space-y-6">
