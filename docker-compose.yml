@@ -1,4 +1,17 @@
 services:
+  feedback-init:
+    build:
+      context: ./apps/web
+      target: feedback-init
+    command: ["node", "scripts/init-feedback-access.mjs", "/config/feedback-access.json"]
+    environment:
+      BETTER_AUTH_DB_PATH: /app/data/docling_luna_auth.db
+      LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
+    volumes:
+      - web_auth_data:/app/data
+      - ./config/feedback-access.json:/config/feedback-access.json:ro
+    restart: "no"
+
   geonames-init:
     build:
       context: ./apps/api
@@ -43,6 +56,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      feedback-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     logging:
       driver: json-file
@@ -59,12 +74,7 @@ services:
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/docling_luna.db}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
-      CV_VALIDATOR_FEEDBACK_ENABLED: ${CV_VALIDATOR_FEEDBACK_ENABLED:-false}
-      CV_VALIDATOR_FEEDBACK_INBOX_ENABLED: ${CV_VALIDATOR_FEEDBACK_INBOX_ENABLED:-false}
-      CV_VALIDATOR_FEEDBACK_FAILURES_ENABLED: ${CV_VALIDATOR_FEEDBACK_FAILURES_ENABLED:-false}
-      CV_VALIDATOR_FEEDBACK_HMAC_SECRET: ${CV_VALIDATOR_FEEDBACK_HMAC_SECRET:-}
-      CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN: ${CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN:-}
-      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}
+      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
       CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}

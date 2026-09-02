@@ -5,5 +5,5 @@ import { feedbackRole } from "@/lib/feedback-access";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user=await requireWebUser();
-  return <AppShell feedbackRole={feedbackRole(user.id)}>{children}</AppShell>;
+  return <AppShell feedbackRole={feedbackRole(user.email)}>{children}</AppShell>;
 }

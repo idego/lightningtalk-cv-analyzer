@@ -280,16 +280,7 @@ def create_app(
             ),
         )
     )
-    feedback_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_ENABLED", "false").lower() in {"1", "true", "yes"}
-    feedback_inbox_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_INBOX_ENABLED", "false").lower() in {"1", "true", "yes"}
-    feedback_failures_enabled = os.environ.get("CV_VALIDATOR_FEEDBACK_FAILURES_ENABLED", "false").lower() in {"1", "true", "yes"}
-    feedback_secret = os.environ.get("CV_VALIDATOR_FEEDBACK_HMAC_SECRET") or "local-feedback-secret-change-me"
-    feedback_internal_token = os.environ.get("CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN", "")
-    if feedback_enabled and feedback_secret == "local-feedback-secret-change-me":
-        raise ValueError("CV_VALIDATOR_FEEDBACK_HMAC_SECRET is required when feedback is enabled")
-    if feedback_inbox_enabled and not feedback_internal_token:
-        raise ValueError("CV_VALIDATOR_FEEDBACK_INTERNAL_TOKEN is required when feedback inbox is enabled")
-    feedback_store = FeedbackStore(store.config.db_path, feedback_secret)
+    feedback_store = FeedbackStore(store.config.db_path)
     max_files = (
         batch_max_files
         if batch_max_files is not None
@@ -354,8 +345,8 @@ def create_app(
                 ),
             },
             "database": {"ready": True},
-            "feedback": {"ready": True, "enabled": feedback_enabled},
-            "feedback_inbox": {"ready": not feedback_inbox_enabled or bool(feedback_internal_token), "enabled": feedback_inbox_enabled},
+            "feedback": {"ready": True, "enabled": True},
+            "feedback_inbox": {"ready": True, "enabled": True},
         }
 
     def attach_capabilities(payload: dict) -> dict:
@@ -564,8 +555,7 @@ def create_app(
                 access_token=access_token,
                 source_filename=filename,
             )
-            if feedback_enabled:
-                feedback_store.materialize(analysis_id, response_payload, include_failures=feedback_failures_enabled)
+            feedback_store.materialize(analysis_id, response_payload, include_failures=False)
             recorder.emit(
                 "persistence_completed",
                 operation="report_persistence",
@@ -770,16 +760,12 @@ def create_app(
 
     @app.get("/analyses/{analysis_id}/feedback")
     def get_feedback_manifest(analysis_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
-        if not feedback_enabled:
-            raise HTTPException(status_code=404, detail="feedback_not_found")
         payload = _owned_payload(store, analysis_id, x_analysis_access_token)
-        feedback_store.materialize(analysis_id, payload, include_failures=feedback_failures_enabled)
+        feedback_store.materialize(analysis_id, payload, include_failures=False)
         return JSONResponse(feedback_store.manifest(analysis_id, x_analysis_access_token))
 
     @app.put("/analyses/{analysis_id}/feedback/{target_id}")
     def put_feedback(analysis_id: str, target_id: str, update: FeedbackInput, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
-        if not feedback_enabled:
-            raise HTTPException(status_code=404, detail="feedback_not_found")
         _owned_payload(store, analysis_id, x_analysis_access_token)
         try:
             result = feedback_store.put(analysis_id, target_id, x_analysis_access_token or "", update)
@@ -791,26 +777,18 @@ def create_app(
 
     @app.delete("/analyses/{analysis_id}/feedback/{target_id}")
     def withdraw_feedback(analysis_id: str, target_id: str, x_analysis_access_token: str | None = Header(default=None)) -> JSONResponse:
-        if not feedback_enabled:
-            raise HTTPException(status_code=404, detail="feedback_not_found")
         _owned_payload(store, analysis_id, x_analysis_access_token)
         result = feedback_store.withdraw(analysis_id, target_id, x_analysis_access_token or "")
         if result is None:
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"withdrawn": result})
 
-    def require_feedback_internal(token: str | None) -> None:
-        if not feedback_inbox_enabled or not feedback_internal_token or not token or not hmac.compare_digest(token, feedback_internal_token):
-            raise HTTPException(status_code=404, detail="feedback_not_found")
-
     @app.get("/internal/feedback")
-    def feedback_inbox(x_feedback_internal_token: str | None = Header(default=None), limit: int = Query(default=50, ge=1, le=100), cursor: int = Query(default=0, ge=0), rating: str | None = None, reason: str | None = None, kind: str | None = None, status: str | None = None, source: str | None = None, version: str | None = None, operation: str | None = None, error_code: str | None = None, date_from: str | None = None, date_to: str | None = None) -> JSONResponse:
-        require_feedback_internal(x_feedback_internal_token)
+    def feedback_inbox(limit: int = Query(default=50, ge=1, le=100), cursor: int = Query(default=0, ge=0), rating: str | None = None, reason: str | None = None, kind: str | None = None, status: str | None = None, source: str | None = None, version: str | None = None, operation: str | None = None, error_code: str | None = None, date_from: str | None = None, date_to: str | None = None) -> JSONResponse:
         return JSONResponse(feedback_store.inbox(limit=limit, cursor=cursor, filters={"rating": rating, "reason": reason, "kind": kind, "status": status, "source": source, "version": version, "operation": operation, "error_code": error_code, "date_from": date_from, "date_to": date_to}))
 
     @app.put("/internal/feedback/{target_id}/{actor_hash}/triage")
-    def update_feedback_triage(target_id: str, actor_hash: str, update: TriageInput, x_feedback_internal_token: str | None = Header(default=None), x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
-        require_feedback_internal(x_feedback_internal_token)
+    def update_feedback_triage(target_id: str, actor_hash: str, update: TriageInput, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
         if not x_feedback_maintainer:
             raise HTTPException(status_code=400, detail="maintainer_required")
         if not feedback_store.triage(target_id, actor_hash, x_feedback_maintainer, update):

@@ -7,8 +7,15 @@ reference_mode=${3:-automatic}
 
 fail() { echo "preflight: $*" >&2; exit 1; }
 has_key() { grep -Eq "^[[:space:]]*$1=.+" "$env_file"; }
-is_true() { grep -Eq "^[[:space:]]*$1=true[[:space:]]*$" "$env_file"; }
 value_of() { sed -n "s/^[[:space:]]*$1=//p" "$env_file" | tail -n 1; }
+validate_ai_configuration() {
+  ai_enabled=$(value_of CV_VALIDATOR_AI_ENABLED)
+  case "${ai_enabled:-true}" in
+    true) has_key OPENAI_API_KEY || fail "OPENAI_API_KEY is required when AI is enabled";;
+    false) :;;
+    *) fail "CV_VALIDATOR_AI_ENABLED must be true or false";;
+  esac
+}
 
 [ -f "$env_file" ] || fail "missing $env_file"
 case "$reference_mode" in
@@ -46,7 +53,7 @@ case "$reference_mode" in
 esac
 
 if [ "$mode" = dev ]; then
-  if is_true CV_VALIDATOR_AI_ENABLED; then has_key OPENAI_API_KEY || fail "OPENAI_API_KEY is required when AI is enabled"; fi
+  validate_ai_configuration
 elif [ "$mode" = production ]; then
   [ -z "$(git status --porcelain)" ] || fail "production deploy requires a clean worktree"
   grep -Eq '^[[:space:]]*LOCAL_DEV_AUTH_BYPASS=false[[:space:]]*$' "$env_file" || fail "LOCAL_DEV_AUTH_BYPASS must be false"
@@ -62,7 +69,7 @@ elif [ "$mode" = production ]; then
   [ ${#secret} -ge 32 ] || fail "BETTER_AUTH_SECRET must contain at least 32 characters"
   case "$secret" in *replace*|*change-me*|*dev-only*) fail "BETTER_AUTH_SECRET still uses a placeholder";; esac
   case "$(value_of BASE_URL)" in https://*) :;; *) fail "BASE_URL must use HTTPS";; esac
-  if is_true CV_VALIDATOR_AI_ENABLED; then has_key OPENAI_API_KEY || fail "OPENAI_API_KEY is required when AI is enabled"; fi
+  validate_ai_configuration
   # shellcheck disable=SC2086
   docker --context "${DOCKER_CONTEXT:-default}" compose $compose_files --env-file "$env_file" config --quiet
   if [ "$reference_mode" = automatic ]; then

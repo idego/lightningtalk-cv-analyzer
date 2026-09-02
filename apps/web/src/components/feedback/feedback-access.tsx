@@ -1,4 +1,81 @@
 "use client";
-import { useEffect,useState } from "react";
-type Member={userId:string;email:string;name:string|null;role:"owner"|"reviewer"};
-export function FeedbackAccess(){const [members,setMembers]=useState<Member[]>([]),[email,setEmail]=useState(""),[role,setRole]=useState<"owner"|"reviewer">("reviewer"),[error,setError]=useState("");async function load(){const r=await fetch("/api/feedback/access",{cache:"no-store"});if(r.ok)setMembers((await r.json()).members)}useEffect(()=>{let active=true;fetch("/api/feedback/access",{cache:"no-store"}).then(async r=>r.ok?r.json():null).then(data=>{if(active&&data)setMembers(data.members)});return()=>{active=false}},[]);async function grant(){setError("");const r=await fetch("/api/feedback/access",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,role})});if(!r.ok){setError((await r.json()).error);return}setEmail("");await load()}async function revoke(userId:string){const r=await fetch("/api/feedback/access",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId})});if(!r.ok){setError((await r.json()).error);return}await load()}return <section className="mx-auto max-w-3xl space-y-4"><h1 className="text-2xl font-semibold">Dostęp do feedbacku</h1><div className="flex gap-2"><input className="flex-1 rounded-md border px-3" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Dokładny zweryfikowany email"/><select className="rounded-md border px-3" value={role} onChange={e=>setRole(e.target.value as typeof role)}><option value="reviewer">reviewer</option><option value="owner">owner</option></select><button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>Nadaj</button></div>{error?<p className="text-sm text-destructive">{error}</p>:null}<ul className="divide-y rounded-lg border">{members.map(member=><li key={member.userId} className="flex items-center justify-between p-3"><span>{member.email} · {member.role}</span><button className="text-sm text-destructive" onClick={()=>revoke(member.userId)}>Cofnij</button></li>)}</ul></section>}
+
+import { useEffect, useState } from "react";
+
+type Member = { email: string; role: "owner" | "reviewer" };
+
+export function FeedbackAccess() {
+  const [members, setMembers] = useState<Member[]>([]);
+  const [collectionEnabled, setCollectionEnabled] = useState(true);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Member["role"]>("reviewer");
+  const [error, setError] = useState("");
+
+  async function load() {
+    const response = await fetch("/api/feedback/access", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    setMembers(data.members);
+    setCollectionEnabled(data.collectionEnabled);
+  }
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/feedback/access", { cache: "no-store" })
+      .then(async response => response.ok ? response.json() : null)
+      .then(data => {
+        if (!active || !data) return;
+        setMembers(data.members);
+        setCollectionEnabled(data.collectionEnabled);
+      });
+    return () => { active = false; };
+  }, []);
+
+  async function grant() {
+    setError("");
+    const response = await fetch("/api/feedback/access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role }),
+    });
+    if (!response.ok) { setError((await response.json()).error); return; }
+    setEmail("");
+    await load();
+  }
+
+  async function revoke(memberEmail: string) {
+    setError("");
+    const response = await fetch("/api/feedback/access", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: memberEmail }),
+    });
+    if (!response.ok) { setError((await response.json()).error); return; }
+    await load();
+  }
+
+  async function toggleCollection() {
+    const next = !collectionEnabled;
+    const response = await fetch("/api/feedback/access", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ collectionEnabled: next }),
+    });
+    if (response.ok) setCollectionEnabled(next);
+  }
+
+  return <section className="mx-auto max-w-3xl space-y-6">
+    <div><h1 className="text-2xl font-semibold">Dostęp do feedbacku</h1><p className="text-sm text-muted-foreground">Zarządzaj osobami, które mogą przeglądać i obsługiwać feedback.</p></div>
+    <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+      <div><p className="font-medium">Zbieranie feedbacku</p><p className="text-sm text-muted-foreground">Steruje przyciskami i nowymi odpowiedziami. Inbox pozostaje dostępny.</p></div>
+      <button type="button" role="switch" aria-checked={collectionEnabled} onClick={toggleCollection} className={`shrink-0 rounded-full px-4 py-2 text-sm ${collectionEnabled ? "bg-primary text-primary-foreground" : "border"}`}>{collectionEnabled ? "Włączone" : "Wyłączone"}</button>
+    </div>
+    <div className="flex gap-2">
+      <input className="flex-1 rounded-md border px-3" value={email} onChange={event => setEmail(event.target.value)} placeholder="Firmowy adres e-mail" />
+      <select className="rounded-md border px-3" value={role} onChange={event => setRole(event.target.value as Member["role"])}><option value="reviewer">reviewer</option><option value="owner">owner</option></select>
+      <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>Nadaj</button>
+    </div>
+    {error ? <p className="text-sm text-destructive">{error}</p> : null}
+    <ul className="divide-y rounded-lg border">{members.map(member => <li key={member.email} className="flex items-center justify-between p-3"><span>{member.email} · {member.role}</span><button className="text-sm text-destructive" onClick={() => revoke(member.email)}>Cofnij</button></li>)}</ul>
+  </section>;
+}

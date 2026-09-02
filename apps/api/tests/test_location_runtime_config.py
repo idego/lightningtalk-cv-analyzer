@@ -148,7 +148,7 @@ def test_base_compose_bootstraps_persistent_read_only_reference_data() -> None:
     gitignore = (root / ".gitignore").read_text(encoding="utf-8")
 
     assert "CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: \"true\"" in compose
-    assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}" in compose
+    assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}" in compose
     assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/current/locations.sqlite3" in compose
     assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/current/locations.manifest.json" in compose
     assert "CV_VALIDATOR_POSTAL_INDEX_PATH: /app/reference-data/current/postal-codes.sqlite3" in compose

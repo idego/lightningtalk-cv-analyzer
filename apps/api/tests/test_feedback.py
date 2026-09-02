@@ -20,7 +20,7 @@ def _store(tmp_path):
                ) VALUES('hash','base-analysis-v2','test','v1','complete',
                         '2026-01-01T00:00:00+00:00','analysis-1')"""
         )
-    return FeedbackStore(db_path, "test-secret"), db_path
+    return FeedbackStore(db_path), db_path
 
 
 def test_targets_are_stable_and_feedback_is_idempotent(tmp_path):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import re
 import sqlite3
@@ -143,9 +142,8 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
 
 
 class FeedbackStore:
-    def __init__(self, db_path: Path, secret: str) -> None:
+    def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.secret = secret.encode()
         with self._connect() as conn:
             init_feedback_schema(conn)
 
@@ -156,7 +154,7 @@ class FeedbackStore:
         return conn
 
     def pseudonym(self, purpose: Literal["actor", "maintainer"], value: str) -> str:
-        return hmac.new(self.secret, f"{purpose}:{value}".encode(), hashlib.sha256).hexdigest()
+        return hashlib.sha256(f"{purpose}:{value}".encode()).hexdigest()
 
     def materialize(self, analysis_id: str, payload: dict[str, Any], *, include_failures: bool = True) -> list[dict[str, Any]]:
         candidates = [candidate for candidate in _target_candidates(payload) if include_failures or candidate[0] != TargetKind.OPERATION_FAILURE]

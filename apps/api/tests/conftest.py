@@ -1,4 +1,8 @@
+import os
+
 import pytest
+
+os.environ.setdefault("CV_VALIDATOR_AI_ENABLED", "false")
 
 from cv_validator.domain import ComponentVersion
 from cv_validator.location import (

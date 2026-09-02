@@ -37,7 +37,7 @@ class OpenAISettings:
 
 def load_openai_settings() -> OpenAISettings:
     return OpenAISettings(
-        enabled=_read_bool("CV_VALIDATOR_AI_ENABLED", default=False),
+        enabled=_read_bool("CV_VALIDATOR_AI_ENABLED", default=True),
         api_key=os.environ.get("OPENAI_API_KEY") or None,
     )
 
