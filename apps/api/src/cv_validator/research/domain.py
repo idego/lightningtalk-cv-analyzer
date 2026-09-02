@@ -20,7 +20,15 @@ class CompanyResearchTimeout(CompanyResearchError):
 
 
 class CompanyResearchInvalidResponse(CompanyResearchError):
-    pass
+    def __init__(
+        self,
+        reason: str = "invalid_response",
+        *,
+        usage: Any = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(reason, usage=usage, model=model)
+        self.reason = reason
 
 
 class CompanyResearchClientError(CompanyResearchError):
@@ -41,7 +49,15 @@ class EducationResearchTimeout(EducationResearchError):
 
 
 class EducationResearchInvalidResponse(EducationResearchError):
-    pass
+    def __init__(
+        self,
+        reason: str = "invalid_response",
+        *,
+        usage: Any = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(reason, usage=usage, model=model)
+        self.reason = reason
 
 
 class EducationResearchClientError(EducationResearchError):

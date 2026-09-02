@@ -63,6 +63,7 @@ _SAFE_LOG_FIELDS = {
     "duration_ms",
     "latency_ms",
     "error_code",
+    "reason",
     "raw_candidate_count",
     "evidence_valid_count",
     "accepted_count",

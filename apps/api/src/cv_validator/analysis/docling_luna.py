@@ -45,7 +45,7 @@ from cv_validator.usage import normalize_usage
 
 STRATEGY_NAME = "docling-luna"
 STRATEGY_VERSION = "docling-luna-analysis-v3"
-MAX_PASS_ATTEMPTS = 1
+MAX_PASS_ATTEMPTS = 2
 EU_COUNTRY_CODES = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
     "FR", "GR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL",
@@ -165,85 +165,29 @@ class DoclingLunaAnalysisStrategy:
                 evidence_invalid_count=len(state.rejected),
                 rejection_reason_histogram=dict(rejection_histogram),
             )
-        rescue_outcomes: dict[str, _PassOutcome] = {}
-        for section in ("employment", "education"):
-            outcome = outcomes[section]
-            records = state.employment if section == "employment" else state.education
-            raw = outcome.payload.get("records", []) if isinstance(outcome.payload, dict) else []
-            if (
-                outcome.status != "completed"
-                or not isinstance(raw, list)
-                or not raw
-                or len(records) < len(raw)
-            ):
-                rescue = self._run_pass(f"{section}_rescue", source, None, request.recorder)
-                rescue_outcomes[section] = rescue
-                rescued_state = validate_specialists(
-                    source,
-                    {},
-                    rescue.payload if section == "employment" else {},
-                    rescue.payload if section == "education" else {},
-                )
-                additions = rescued_state.employment if section == "employment" else rescued_state.education
-                target = state.employment if section == "employment" else state.education
-                known_ids = {record["id"] for record in target}
-                known_signatures = {_record_signature(record) for record in target}
-                for record in additions:
-                    signature = _record_signature(record)
-                    if record["id"] in known_ids or signature in known_signatures:
-                        continue
-                    target.append(record)
-                    known_ids.add(record["id"])
-                    known_signatures.add(signature)
-                state.rejected.extend(rescued_state.rejected)
-                state.conflicts.extend(rescued_state.conflicts)
-        for section in ("employment", "education"):
-            records = state.employment if section == "employment" else state.education
-            rescue = rescue_outcomes.get(section)
-            if records:
-                section_status = "completed_with_records"
-            elif rescue is not None and rescue.status == "failed":
-                section_status = "failed"
-            elif rescue is not None and rescue.payload.get("section_status") == "not_present":
-                section_status = "not_present"
-            else:
-                section_status = "unresolved"
-            outcomes[section] = _PassOutcome(
-                **{**outcomes[section].__dict__, "section_status": section_status}
-            )
         review_context = {
-            "profile": public_profile(state.profile),
-            "employment": public_records(state.employment, EMPLOYMENT_FIELDS),
-            "education": public_records(state.education, EDUCATION_FIELDS),
+            "profile": public_profile(state.profile, include_field_ids=True),
+            "employment": public_records(state.employment, EMPLOYMENT_FIELDS, include_field_ids=True),
+            "education": public_records(state.education, EDUCATION_FIELDS, include_field_ids=True),
             "rejected": state.rejected,
             "conflicts": state.conflicts,
             "mechanical": mechanical,
             "pass_statuses": {name: outcome.status for name, outcome in outcomes.items()},
         }
         review_outcome = self._run_pass("review", source, review_context, request.recorder)
-        state, review = apply_review(
-            source,
-            state,
-            review_outcome.payload,
-            review_status=review_outcome.status,
-        )
+        state, review = apply_review(source, state, review_outcome.payload)
         if request.recorder:
-            annotations = review["annotations"]
+            reviewer_rejected = review_outcome.payload.get("rejected_records", [])
+            if not isinstance(reviewer_rejected, list):
+                reviewer_rejected = []
             request.recorder.emit(
                 "review_completed",
                 operation="review",
                 outcome=review["status"],
                 extracted_count=len(state.employment) + len(state.education),
-                annotated_count=len(annotations),
+                rejected_count=len(reviewer_rejected),
                 corrected_count=len(review["relation_corrections"]),
                 added_count=len(review["added_candidate_ids"]),
-                suspected_hallucination_count=sum(
-                    item.get("kind") == "suspected_hallucination" for item in annotations
-                ),
-                uncertain_count=sum(
-                    item.get("kind") in {"uncertain_relation", "conflicting_relation", "unsupported_evidence"}
-                    for item in annotations
-                ),
                 research_eligible_count=sum(
                     record.get("status") == "accepted" and record.get("relation_status") == "supported"
                     for record in [*state.employment, *state.education]
@@ -260,15 +204,9 @@ class DoclingLunaAnalysisStrategy:
             for name, outcome in outcomes.items()
         }
         pass_statuses["review"] = review_outcome.status_payload(REVIEWER_REASONING_EFFORT)
-        for section, outcome in rescue_outcomes.items():
-            pass_statuses[f"{section}_rescue"] = outcome.status_payload(SPECIALIST_REASONING_EFFORT)
         statuses = [outcome.status for outcome in outcomes.values()]
         status = _overall_status(statuses, review["status"])
-        total_usage = _aggregate_usage([
-            *outcomes.values(),
-            *rescue_outcomes.values(),
-            review_outcome,
-        ])
+        total_usage = _aggregate_usage([*outcomes.values(), review_outcome])
         report = {
             "contract_version": "base-analysis-v2",
             "strategy": {"name": self.name, "version": self.version},

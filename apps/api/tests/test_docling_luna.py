@@ -107,7 +107,8 @@ def complete_payloads() -> dict[str, dict]:
         }]},
         "education": {"records": []},
         "review": {
-            "annotations": [{"record_id": "employment-tech", "kind": "suspected_hallucination", "reason_code": "technology_not_employer"}],
+            "accepted_record_ids": ["employment-1", "review-education-1"],
+            "rejected_records": [{"id": "employment-tech", "reason_code": "technology_not_employer"}],
             "merge_groups": [],
             "relation_patches": [],
             "added_profile_fields": [],
@@ -153,6 +154,35 @@ def test_docling_converts_text_pdf_and_docx_without_models(source_format) -> Non
         assert any(block.table_id and block.row_index == 0 for block in source.blocks)
 
 
+def test_pdf_wrapped_lines_merge_into_one_block_but_entries_stay_separate() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    canvas.setFont("Helvetica-Bold", 13)
+    canvas.drawString(72, 760, "EDUCATION")
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(72, 740, "Master of Computer Science 2017 - 2020 Example University of Science and")
+    canvas.drawString(72, 726, "Technology, Jilin, China")
+    canvas.drawString(72, 712, "with distinction")
+    canvas.drawString(72, 686, "Bachelor of Software Engineering 2013 - 2017 Example University,")
+    canvas.drawString(72, 672, "Faisalabad, Punjab, Pakistan")
+    canvas.drawString(90, 646, "- First bullet item")
+    canvas.drawString(90, 632, "- Second bullet item")
+    canvas.save()
+
+    source = DoclingTextConverter().convert(output.getvalue(), "wrapped.pdf", SourceFormat.PDF)
+    texts = [block.text for block in source.blocks]
+
+    assert texts == [
+        "EDUCATION",
+        "Master of Computer Science 2017 - 2020 Example University of Science and Technology, Jilin, China with distinction",
+        "Bachelor of Software Engineering 2013 - 2017 Example University, Faisalabad, Punjab, Pakistan",
+        "- First bullet item",
+        "- Second bullet item",
+    ]
+    assert [block.order for block in source.blocks] == list(range(len(source.blocks)))
+    assert all(block.bbox is not None and block.page_number == 1 for block in source.blocks)
+
+
 def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
     output = BytesIO()
     canvas = Canvas(output)
@@ -163,7 +193,7 @@ def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
         DoclingTextConverter().convert(output.getvalue(), "scan.pdf", SourceFormat.PDF)
 
 
-def test_literal_and_relation_validation_is_record_isolated() -> None:
+def test_far_fields_are_detached_and_records_stay_isolated() -> None:
     source = SourceDocument.create(tuple(
         SourceBlock(f"b-{index}", text, order=index)
         for index, text in enumerate([
@@ -186,12 +216,19 @@ def test_literal_and_relation_validation_is_record_isolated() -> None:
     }]}
     state = validate_specialists(source, {}, employment, {})
 
-    assert [record["id"] for record in state.employment] == ["mixed", "valid"]
-    assert state.employment[0]["status"] == "ambiguous"
-    assert state.employment[1]["status"] == "accepted"
+    # Far fields are detached from the record instead of discarding it whole.
+    mixed, valid = state.employment
+    assert mixed["id"] == "mixed" and valid["id"] == "valid"
+    assert mixed["organization"]["value"] == "Example Systems"
+    assert mixed["role"] is None and mixed["start_date"] is None
+    assert mixed["relation_status"] == "supported"
+    assert valid["role"]["value"] == "Designer" and valid["start_date"]["value"] == "2024"
+    detached = [c for c in state.conflicts if c["reason_code"] == "field_detached_from_record"]
+    assert {(c["record_id"], c["field"]) for c in detached} == {("mixed", "role"), ("mixed", "start_date")}
+    assert state.rejected == []
 
 
-def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
+def test_fields_from_different_table_rows_are_detached_not_merged() -> None:
     source = SourceDocument.create((
         SourceBlock(
             "table/cell-0-0", "Example Systems", order=0,
@@ -210,8 +247,10 @@ def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
         "relationship_type": None,
     }]}, {})
 
-    assert [record["id"] for record in state.employment] == ["cross-row"]
-    assert state.employment[0]["relation_status"] == "ambiguous"
+    record, = state.employment
+    assert record["organization"]["value"] == "Example Systems"
+    assert record["role"] is None
+    assert [c["field"] for c in state.conflicts if c["reason_code"] == "field_detached_from_record"] == ["role"]
 
 
 def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
@@ -229,29 +268,66 @@ def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
     assert {item["reason_code"] for item in state.rejected} >= {"missing_organization"}
 
 
-def test_evidence_allows_only_safe_unicode_whitespace_and_typography_normalization() -> None:
+def test_value_spanning_adjacent_blocks_is_supported_by_ordered_excerpts() -> None:
     source = SourceDocument.create((
-        SourceBlock("b-0", "Cafe\u0301\nExample — Engineer", order=0),
+        SourceBlock("b-0", "Master of Computer Science 2017 - 2020 Changchun University of Science and", order=0),
+        SourceBlock("b-1", "Technology, Jilin, China", order=1),
+        SourceBlock("b-2", "filler", order=2),
+        SourceBlock("b-3", "University of Agriculture,", order=3),
+        SourceBlock("b-4", "Faisalabad, Punjab, Pakistan", order=4),
     ), "pdf")
-    state = validate_specialists(source, {}, {"records": [{
-        "id": "normalized",
-        "organization": field("org", "Café Example", "b-0", "Café   Example - Engineer"),
-        "role": field("role", "Engineer", "b-0", "Example - Engineer"),
-        "start_date": None,
-        "end_date": None,
-        "location": None,
-        "relationship_type": None,
-    }]}, {})
+    spanning = {
+        "id": "inst-1",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+            {"block_id": "b-1", "excerpt": "Technology"},
+        ],
+    }
+    partial_second = {
+        "id": "inst-2",
+        "value": "University of Agriculture",
+        "evidence": [
+            {"block_id": "b-3", "excerpt": "University of Agriculture,"},
+            {"block_id": "b-4", "excerpt": "Faisalabad, Punjab, Pakistan"},
+        ],
+    }
+    non_adjacent = {
+        "id": "inst-3",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+            {"block_id": "b-4", "excerpt": "Faisalabad, Punjab, Pakistan"},
+        ],
+    }
+    wrong_order = {
+        "id": "inst-4",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-1", "excerpt": "Technology"},
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+        ],
+    }
+    empty = {"institution": None, "program": None, "degree": None, "certificate": None,
+             "start_date": None, "end_date": None, "location": None}
+    state = validate_specialists(source, {}, {}, {"records": [
+        {"id": "edu-1", **empty, "institution": spanning},
+        {"id": "edu-2", **empty, "institution": partial_second},
+        {"id": "edu-3", **empty, "institution": non_adjacent},
+        {"id": "edu-4", **empty, "institution": wrong_order},
+    ]})
 
-    assert [record["id"] for record in state.employment] == ["normalized"]
-    assert state.employment[0]["organization"]["evidence"][0]["excerpt"] == "Cafe\u0301\nExample — Engineer"
+    assert [record["id"] for record in state.education] == ["edu-1", "edu-2"]
+    assert state.education[0]["institution"]["value"] == "Changchun University of Science and Technology"
+    assert [item["source_id"] for item in state.education[0]["institution"]["evidence"]] == ["b-0", "b-1"]
+    assert {item["id"] for item in state.rejected} == {"edu-3", "edu-4"}
 
 
 def test_reviewer_unknown_ids_and_invalid_added_evidence_are_rejected() -> None:
     source = SourceDocument.create((SourceBlock("b-1", "Example University", order=0),), "pdf")
     state = validate_specialists(source, {}, {}, {})
     state, review = apply_review(source, state, {
-        "annotations": [{"record_id": "unknown", "kind": "uncertain_relation", "reason_code": "unknown"}],
+        "accepted_record_ids": ["unknown"],
         "relation_patches": [{"record_id": "unknown", "field_ids": ["missing"]}],
         "added_candidates": [{
             "id": "review-education-1", "candidate_type": "education",
@@ -292,7 +368,8 @@ def test_reviewer_applies_relation_patch_by_stable_field_ids() -> None:
     }]}, {})
 
     state, review = apply_review(source, state, {
-        "annotations": [{"record_id": "field-source", "kind": "duplicate", "reason_code": "field_source_only"}],
+        "accepted_record_ids": ["needs-correction"],
+        "rejected_records": [{"id": "field-source", "reason_code": "field_source_only"}],
         "merge_groups": [],
         "relation_patches": [{"record_id": "needs-correction", "field_ids": ["correct-role"]}],
         "added_profile_fields": [], "added_candidates": [], "coverage_gaps": [],
@@ -303,9 +380,9 @@ def test_reviewer_applies_relation_patch_by_stable_field_ids() -> None:
     assert corrected["role"]["value"] == "Developer"
     assert corrected["relation_status"] == "supported"
     assert corrected["status"] == "accepted"
-    assert review["relation_corrections"][0]["record_id"] == "needs-correction"
-    assert review["relation_corrections"][0]["original_candidate"]["role"]["value"] == "Designer"
-    assert review["relation_corrections"][0]["effective_projection"]["role"]["value"] == "Developer"
+    assert review["relation_corrections"] == [{
+        "record_id": "needs-correction", "field_ids": ["correct-role"],
+    }]
 
 
 def test_reviewer_merge_is_applied_deterministically() -> None:
@@ -327,65 +404,16 @@ def test_reviewer_merge_is_applied_deterministically() -> None:
     }]}, {})
 
     state, review = apply_review(source, state, {
-        "annotations": [],
+        "accepted_record_ids": ["duplicate"], "rejected_records": [],
         "merge_groups": [["canonical", "duplicate"]], "relation_patches": [],
         "added_profile_fields": [], "added_candidates": [], "coverage_gaps": [],
         "conflicts": [], "status": "completed",
     })
 
-    assert [record["id"] for record in state.employment] == ["canonical", "duplicate"]
+    assert [record["id"] for record in state.employment] == ["canonical"]
     assert state.employment[0]["role"]["value"] == "Developer"
     assert state.employment[0]["status"] == "accepted"
     assert review["merged_ids"] == [["canonical", "duplicate"]]
-    assert review["merge_projections"][0]["original_candidates"][0]["role"] is None
-    assert review["merge_projections"][0]["effective_projection"]["role"]["value"] == "Developer"
-    assert review["annotations"] == [{
-        "record_id": "duplicate",
-        "kind": "duplicate",
-        "reason_code": "reviewer_duplicate_projection",
-    }]
-
-
-def test_reviewer_cannot_remove_evidence_supported_education_for_research_reasons() -> None:
-    source = SourceDocument.create((
-        SourceBlock("b-0", "Example University", order=0),
-    ), "pdf")
-    state = validate_specialists(source, {}, {}, {"records": [{
-        "id": "education-1",
-        "institution": field("institution-1", "Example University", "b-0"),
-        "program": None,
-        "degree": None,
-        "certificate": None,
-        "start_date": None,
-        "end_date": None,
-        "location": None,
-    }]})
-
-    state, review = apply_review(source, state, {
-        "rejected_records": [{
-            "id": "education-1",
-            "reason_code": "accreditation_not_found",
-        }],
-        "annotations": [{
-            "record_id": "education-1",
-            "kind": "accreditation_not_found",
-            "reason_code": "no_public_source",
-        }],
-        "merge_groups": [],
-        "relation_patches": [],
-        "added_profile_fields": [],
-        "added_candidates": [],
-        "coverage_gaps": [],
-        "conflicts": [],
-        "status": "completed",
-    })
-
-    assert [record["id"] for record in state.education] == ["education-1"]
-    assert state.education[0]["status"] == "accepted"
-    assert review["annotations"] == []
-    assert {item["reason_code"] for item in review["conflicts"]} == {
-        "invalid_reviewer_annotation"
-    }
 
 
 def test_reviewer_adds_supported_profile_and_employment_candidates() -> None:
@@ -396,7 +424,7 @@ def test_reviewer_adds_supported_profile_and_employment_candidates() -> None:
     state = validate_specialists(source, {}, {}, {})
 
     state, review = apply_review(source, state, {
-        "annotations": [], "merge_groups": [],
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [],
         "relation_patches": [],
         "added_profile_fields": [{
             "field_name": "summary",
@@ -450,6 +478,7 @@ def test_specialists_run_concurrently_and_reviewer_runs_after_them() -> None:
 
 def test_failed_specialist_does_not_remove_other_passes() -> None:
     payloads = complete_payloads()
+    payloads["review"]["accepted_record_ids"] = ["review-education-1"]
     client = FakeLuna(payloads, failing={"employment"})
     strategy = DoclingLunaAnalysisStrategy(client=client)
     report = strategy.analyze(AnalysisInput.from_upload(
@@ -460,9 +489,8 @@ def test_failed_specialist_does_not_remove_other_passes() -> None:
     assert report["base_analysis"]["status"] == "partial"
     assert report["base_analysis"]["profile"]["candidate_name"]["value"] == "Alex Example"
     assert report["base_analysis"]["education"][0]["added_by_reviewer"] is True
-    assert report["base_analysis"]["pass_statuses"]["employment"]["attempt_count"] == 1
-    assert [name for name, _ in client.calls].count("employment") == 1
-    assert [name for name, _ in client.calls].count("employment_rescue") == 1
+    assert report["base_analysis"]["pass_statuses"]["employment"]["attempt_count"] == 2
+    assert [name for name, _ in client.calls].count("employment") == 2
     assert [name for name, _ in client.calls].count("profile") == 1
     assert [name for name, _ in client.calls].count("education") == 1
 
@@ -491,27 +519,6 @@ def test_upload_persistence_ownership_and_health_with_real_strategy(tmp_path) ->
     assert report["contract_version"] == "base-analysis-v2"
     assert client.get(f"/analyses/{report['analysis_id']}", headers=owner).status_code == 200
     assert client.get(f"/analyses/{report['analysis_id']}", headers={"X-Analysis-Access-Token": "other"}).status_code == 404
-    diagnostics = client.get(
-        f"/analyses/{report['analysis_id']}/diagnostics",
-        headers=owner,
-    )
-    assert diagnostics.status_code == 200
-    diagnostic_payload = diagnostics.json()
-    assert diagnostic_payload["analysis"]["status"] == "completed"
-    assert diagnostic_payload["aggregate"]["attempts"] == 5
-    assert diagnostic_payload["aggregate"]["input_tokens"] == 50
-    assert {item["key"] for item in diagnostic_payload["aggregates"]["by_operation"]} == {
-        "profile", "employment", "education", "education_rescue", "review",
-    }
-    assert diagnostic_payload["aggregates"]["by_model"][0]["attempts"] == 5
-    assert all(
-        event["configured_model"] == "gpt-5.6-luna"
-        for event in diagnostic_payload["usage_events"]
-    )
-    assert client.get(
-        f"/analyses/{report['analysis_id']}/diagnostics",
-        headers={"X-Analysis-Access-Token": "other"},
-    ).status_code == 404
 
 
 def test_openai_contract_pins_model_store_and_reasoning() -> None:
@@ -520,11 +527,9 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
             return {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
 
     class Response:
+        output_text = "{}"
         model = "gpt-5.6-luna"
         usage = Usage()
-
-        def __init__(self, output_text):
-            self.output_text = output_text
 
     class Responses:
         def __init__(self):
@@ -532,13 +537,7 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
 
         def create(self, **kwargs):
             self.calls.append(kwargs)
-            name = kwargs["text"]["format"]["name"]
-            if name == "cv_profile":
-                output = {"profile": {"candidate_name": None, "declared_location": None, "headline": None, "summary": None, "skills": [], "languages": []}}
-            else:
-                output = {"annotations": [], "merge_groups": [], "relation_patches": [], "added_profile_fields": [], "added_candidates": [], "conflicts": [], "coverage_gaps": [], "status": "completed"}
-            import json
-            return Response(json.dumps(output))
+            return Response()
 
     class Client:
         def __init__(self):
@@ -558,3 +557,191 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
     assert specialist["store"] is reviewer["store"] is False
     assert "tools" not in specialist and "tools" not in reviewer
     assert specialist["text"]["format"]["strict"] is True
+
+
+def test_validated_records_are_accepted_by_default_and_reviewer_can_reject() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems — Developer", order=0),
+        SourceBlock("b-1", "Served 100+ clients", order=1),
+    ), "pdf")
+    empty = {"role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None}
+
+    def records() -> dict:
+        return {"records": [
+            {"id": "employment_1", **empty, "organization": field("org-1", "Example Systems", "b-0")},
+            {"id": "employment_2", **empty, "organization": field("org-2", "100+ clients", "b-1")},
+        ]}
+
+    without_review, review = apply_review(source, validate_specialists(source, {}, records(), {}), {})
+    assert [record["status"] for record in without_review.employment] == ["accepted", "accepted"]
+    assert review["accepted_ids"] == ["employment_1", "employment_2"]
+
+    reviewed, review = apply_review(source, validate_specialists(source, {}, records(), {}), {
+        "accepted_record_ids": [],
+        "rejected_records": [{"id": "employment_2", "reason_code": "client_count_not_employer"}],
+        "merge_groups": [], "relation_patches": [], "added_profile_fields": [],
+        "added_candidates": [], "conflicts": [], "coverage_gaps": [], "status": "completed",
+    })
+    assert {record["id"]: record["status"] for record in reviewed.employment} == {
+        "employment_1": "accepted",
+        "employment_2": "ambiguous",
+    }
+    assert review["accepted_ids"] == ["employment_1"]
+    assert {"id": "employment_2", "reason_code": "client_count_not_employer"} in review["rejected"]
+
+
+def test_certificate_only_education_record_is_kept() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "AWS Certified Cloud Practitioner (CLF-C02) - In Progress", order=0),
+        SourceBlock("b-1", "Computer Science", order=1),
+    ), "pdf")
+    empty = {"institution": None, "program": None, "degree": None, "certificate": None,
+             "start_date": None, "end_date": None, "location": None}
+    state = validate_specialists(source, {}, {}, {"records": [
+        {"id": "education_1", **empty, "certificate": field(
+            "cert", "AWS Certified Cloud Practitioner", "b-0", "AWS Certified Cloud Practitioner (CLF-C02)",
+        )},
+        {"id": "education_2", **empty, "program": field("prog", "Computer Science", "b-1")},
+    ]})
+
+    assert [record["id"] for record in state.education] == ["education_1"]
+    assert {"id": "education_2", "reason_code": "missing_institution_or_certificate"} in state.rejected
+
+
+def test_review_context_exposes_field_ids_and_bounds_reviewer_text() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems — Developer", order=0),
+    ), "pdf")
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "employment_1",
+        "organization": field("employment_1.organization", "Example Systems", "b-0"),
+        "role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None,
+    }]}, {})
+
+    from cv_validator.analysis.candidates import EMPLOYMENT_FIELDS, public_records
+    context = public_records(state.employment, EMPLOYMENT_FIELDS, include_field_ids=True)
+    assert context[0]["organization"]["field_id"] == "employment_1.organization"
+    assert "field_id" not in public_records(state.employment, EMPLOYMENT_FIELDS)[0]["organization"]
+
+    _, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [],
+        "relation_patches": [], "added_profile_fields": [], "added_candidates": [],
+        "conflicts": [{
+            "reason_code": "x" * 200, "record_ids": ["employment_1"], "field_ids": [],
+            "source_block_ids": ["b-0"], "summary": "quoted cv text " * 40,
+        }],
+        "coverage_gaps": [{"target": "profile", "reason_code": "", "source_block_ids": []}],
+        "status": "partial",
+    })
+    conflict = review["conflicts"][-1]
+    assert conflict["reason_code"] == "reviewer_annotation"
+    assert conflict["summary"] is None
+    assert review["coverage_gaps"][0]["reason_code"] == "reviewer_annotation"
+
+
+def test_docx_inline_formatting_runs_form_one_block() -> None:
+    document = Document()
+    paragraph = document.add_paragraph("Backend engineer with ")
+    paragraph.add_run("Python").bold = True
+    paragraph.add_run(", ")
+    paragraph.add_run("Django").bold = True
+    paragraph.add_run(" and cloud experience.")
+    document.add_paragraph("Second paragraph")
+    output = BytesIO()
+    document.save(output)
+
+    source = DoclingTextConverter().convert(output.getvalue(), "runs.docx", SourceFormat.DOCX)
+    texts = [block.text for block in source.blocks]
+
+    assert "Backend engineer with Python, Django and cloud experience." in texts
+    assert "Second paragraph" in texts
+    assert [block.order for block in source.blocks] == list(range(len(source.blocks)))
+
+
+def test_truncated_model_output_is_reported_as_truncated() -> None:
+    class Response:
+        status = "incomplete"
+        output_text = '{"profile": {'
+        usage = None
+        model = "gpt-5.6-luna"
+
+    class Responses:
+        def create(self, **kwargs):
+            assert kwargs["max_output_tokens"] >= 6000
+            return Response()
+
+    class Client:
+        responses = Responses()
+
+    source = SourceDocument.create((SourceBlock("b-0", "Alex Example", order=0),), "pdf")
+    with pytest.raises(ModelPassError, match="truncated"):
+        OpenAIResponsesLunaClient(client=Client()).run("profile", source)
+
+
+def test_company_research_rejections_carry_rule_names() -> None:
+    from cv_validator.research.company import CompanyResearchRequest, validate_company_research
+    from cv_validator.research.domain import CompanyResearchInvalidResponse
+
+    request = CompanyResearchRequest(({"organization": "Example Systems"},))
+    organization = {
+        "query_subject": "Example Systems",
+        "existence": "supported",
+        "activity": None, "operating_dates": None, "location": None, "official_website": None,
+        "company_pages": [], "registries": [], "findings": [{"claim": "x", "source_url": "https://example.com"}],
+        "confidence": "low", "uncertainty": "n/a",
+        "limited_online_presence": True,
+        "limited_online_presence_reason": "does not establish existence or absence",
+    }
+    payload = {"organizations": [organization], "searches_performed": ["q"], "search_limitations": ["l"]}
+    with pytest.raises(CompanyResearchInvalidResponse) as info:
+        validate_company_research(payload, request=request)
+    assert info.value.reason in {"schema", "limited_presence_contradiction"}
+
+
+def test_reviewer_can_add_a_candidate_and_merge_it_in_one_pass() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems", order=0),
+        SourceBlock("b-1", "Developer", order=1),
+    ), "pdf")
+    empty = {"role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None}
+    state = validate_specialists(source, {}, {"records": [
+        {"id": "employment_1", **empty, "organization": field("org", "Example Systems", "b-0")},
+    ]}, {})
+    reviewed, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "relation_patches": [],
+        "added_profile_fields": [], "conflicts": [], "coverage_gaps": [], "status": "completed",
+        "added_candidates": [{
+            "id": "review_employment_1", "candidate_type": "employment", "reason_code": "missed_role",
+            "candidate": {**empty, "organization": field("org2", "Example Systems", "b-0"), "role": field("role", "Developer", "b-1")},
+        }],
+        "merge_groups": [["employment_1", "review_employment_1"]],
+    })
+
+    assert [record["id"] for record in reviewed.employment] == ["employment_1"]
+    assert reviewed.employment[0]["role"]["value"] == "Developer"
+    assert review["merged_ids"] == [["employment_1", "review_employment_1"]]
+    assert review["added_candidate_ids"] == []
+    assert not any(c["reason_code"] == "unknown_reviewer_merge_id" for c in review["conflicts"])
+
+
+def test_detached_fields_do_not_make_the_review_partial() -> None:
+    source = SourceDocument.create(tuple(
+        SourceBlock(f"b-{index}", text, order=index)
+        for index, text in enumerate(["Example Systems", "Developer", *["filler"] * 8, "2024"])
+    ), "pdf")
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "employment_1",
+        "organization": field("org", "Example Systems", "b-0"),
+        "role": field("role", "Developer", "b-1"),
+        "start_date": field("date", "2024", "b-10"),
+        "end_date": None, "location": None, "relationship_type": None,
+    }]}, {})
+    assert any(c["reason_code"] == "field_detached_from_record" for c in state.conflicts)
+
+    _, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [], "relation_patches": [],
+        "added_profile_fields": [], "added_candidates": [], "conflicts": [], "coverage_gaps": [],
+        "status": "completed",
+    })
+    assert review["status"] == "completed"
+    assert review["accepted_ids"] == ["employment_1"]

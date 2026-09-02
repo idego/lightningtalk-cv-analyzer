@@ -11,6 +11,14 @@ from cv_validator.research.domain import CompanyResearchClientError, CompanyRese
 from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LIMIT
 
 
+
+# Larger batches with cited findings can exceed the old 4096-token ceiling.
+MAX_OUTPUT_TOKENS = {"company": 12000, "education": 12000, "linkedin": 6000}
+
+
+def _incomplete(response: Any) -> bool:
+    return getattr(response, "status", None) == "incomplete"
+
 class OpenAIResponsesCompanyResearcher:
     def __init__(self, *, client=None, api_key: str | None = None, timeout_seconds: float = 120.0):
         self._client = client or openai.OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=0)
@@ -29,22 +37,26 @@ class OpenAIResponsesCompanyResearcher:
                 max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "company_research", "strict": True, "schema": schema}},
                 store=False,
-                max_output_tokens=4096,
+                max_output_tokens=MAX_OUTPUT_TOKENS["company"],
             )
         except openai.APITimeoutError as exc:
             raise CompanyResearchTimeout() from exc
         except openai.APIError as exc:
             raise CompanyResearchClientError() from exc
+        if _incomplete(response):
+            raise CompanyResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
             raise CompanyResearchInvalidResponse(
-                usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+                "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
             ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise CompanyResearchInvalidResponse()
+            raise CompanyResearchInvalidResponse("search_count")
         payload["searches_performed"] = actual_queries
         if len(payload.get("organizations", [])) == len(request.input_facts):
             for organization, input_fact in zip(
@@ -70,22 +82,26 @@ class OpenAIResponsesEducationResearcher:
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "education_research", "strict": True, "schema": schema}},
-                store=False, max_output_tokens=4096,
+                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["education"],
             )
         except openai.APITimeoutError as exc:
             raise EducationResearchTimeout() from exc
         except openai.APIError as exc:
             raise EducationResearchClientError() from exc
+        if _incomplete(response):
+            raise EducationResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
             raise EducationResearchInvalidResponse(
-                usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+                "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
             ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise EducationResearchInvalidResponse()
+            raise EducationResearchInvalidResponse("search_count")
         payload["searches_performed"] = actual_queries
         if len(payload.get("credentials", [])) == len(request.input_facts):
             for credential, input_fact in zip(
@@ -135,12 +151,16 @@ class OpenAIResponsesLinkedInResearcher:
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}},
-                store=False, max_output_tokens=4096,
+                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
             )
         except openai.APITimeoutError as exc:
             raise LinkedInResearchTimeout() from exc
         except openai.APIError as exc:
             raise LinkedInResearchClientError() from exc
+        if _incomplete(response):
+            raise LinkedInResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:

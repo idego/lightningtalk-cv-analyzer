@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import json
 import hmac
 import os
@@ -1175,8 +1177,16 @@ def _research_failure(
         category=category,
         outcome="failed",
         error_code=outcome,
+        reason=_bounded_reason(getattr(exc, "reason", None) or (str(exc) if exc.args else None)),
     )
     raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+def _bounded_reason(value: Any) -> str | None:
+    """Only short snake_case rule names are logged; never model or CV text."""
+    if isinstance(value, str) and 0 < len(value) <= 64 and value.replace("_", "").isalnum():
+        return value
+    return None
 
 
 def _raise_research_persistence_error(exc: PersistenceError) -> None:

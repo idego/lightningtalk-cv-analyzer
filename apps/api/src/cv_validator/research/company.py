@@ -16,8 +16,8 @@ from cv_validator.research.domain import (
 )
 from cv_validator.research.subjects import accepted_records, subject_key, supported_field
 
-RESEARCH_VERSION = "company-research-v2"
-PROMPT_VERSION = "company-research-prompt-v4"
+RESEARCH_VERSION = "company-research-v1"
+PROMPT_VERSION = "company-research-prompt-v3"
 SCHEMA_VERSION = "company-research-schema-v1"
 MAX_ORGANIZATIONS = 12
 
@@ -80,18 +80,18 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
     schema = json.loads(files("cv_validator.research.contracts").joinpath("company-research.schema.json").read_text())
     errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload))
     if errors:
-        raise CompanyResearchInvalidResponse()
+        raise CompanyResearchInvalidResponse("schema")
     expected = {fact["organization"].strip().casefold() for fact in request.input_facts}
     returned = {item["query_subject"].strip().casefold() for item in payload["organizations"]}
     if returned != expected or len(returned) != len(payload["organizations"]):
-        raise CompanyResearchInvalidResponse()
+        raise CompanyResearchInvalidResponse("subject_mismatch")
     for organization in payload["organizations"]:
         claims_public_facts = organization["existence"] != "insufficient_evidence" or any(
             organization[key] is not None
             for key in ("activity", "operating_dates", "location", "official_website")
         ) or bool(organization["company_pages"] or organization["registries"])
         if claims_public_facts and not organization["findings"]:
-            raise CompanyResearchInvalidResponse()
+            raise CompanyResearchInvalidResponse("claims_without_findings")
         if organization["limited_online_presence"]:
             reason = organization["limited_online_presence_reason"]
             if (
@@ -101,7 +101,7 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
                 or not payload["searches_performed"]
                 or not payload["search_limitations"]
             ):
-                raise CompanyResearchInvalidResponse()
+                raise CompanyResearchInvalidResponse("limited_presence_contradiction")
 
 
 def _safe_organization_subject(value: str) -> bool:
