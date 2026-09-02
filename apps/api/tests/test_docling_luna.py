@@ -596,3 +596,34 @@ def test_certificate_only_education_record_is_kept() -> None:
 
     assert [record["id"] for record in state.education] == ["education_1"]
     assert {"id": "education_2", "reason_code": "missing_institution_or_certificate"} in state.rejected
+
+
+def test_review_context_exposes_field_ids_and_bounds_reviewer_text() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems — Developer", order=0),
+    ), "pdf")
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "employment_1",
+        "organization": field("employment_1.organization", "Example Systems", "b-0"),
+        "role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None,
+    }]}, {})
+
+    from cv_validator.analysis.candidates import EMPLOYMENT_FIELDS, public_records
+    context = public_records(state.employment, EMPLOYMENT_FIELDS, include_field_ids=True)
+    assert context[0]["organization"]["field_id"] == "employment_1.organization"
+    assert "field_id" not in public_records(state.employment, EMPLOYMENT_FIELDS)[0]["organization"]
+
+    _, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [],
+        "relation_patches": [], "added_profile_fields": [], "added_candidates": [],
+        "conflicts": [{
+            "reason_code": "x" * 200, "record_ids": ["employment_1"], "field_ids": [],
+            "source_block_ids": ["b-0"], "summary": "quoted cv text " * 40,
+        }],
+        "coverage_gaps": [{"target": "profile", "reason_code": "", "source_block_ids": []}],
+        "status": "partial",
+    })
+    conflict = review["conflicts"][-1]
+    assert conflict["reason_code"] == "reviewer_annotation"
+    assert conflict["summary"] is None
+    assert review["coverage_gaps"][0]["reason_code"] == "reviewer_annotation"

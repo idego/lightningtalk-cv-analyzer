@@ -114,9 +114,9 @@ class DoclingLunaAnalysisStrategy:
             outcomes["education"].payload,
         )
         review_context = {
-            "profile": public_profile(state.profile),
-            "employment": public_records(state.employment, EMPLOYMENT_FIELDS),
-            "education": public_records(state.education, EDUCATION_FIELDS),
+            "profile": public_profile(state.profile, include_field_ids=True),
+            "employment": public_records(state.employment, EMPLOYMENT_FIELDS, include_field_ids=True),
+            "education": public_records(state.education, EDUCATION_FIELDS, include_field_ids=True),
             "rejected": state.rejected,
             "conflicts": state.conflicts,
             "mechanical": mechanical,

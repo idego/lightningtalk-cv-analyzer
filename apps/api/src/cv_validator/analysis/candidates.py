@@ -97,8 +97,13 @@ def apply_review(
     known_records = state.records
     known_fields = state.field_ids
     rejected = list(state.rejected)
-    conflicts = [*state.conflicts, *_safe_objects(payload.get("conflicts"), 300)]
-    coverage_gaps = _safe_objects(payload.get("coverage_gaps"), 100)
+    conflicts = [
+        *state.conflicts,
+        *(_bounded_annotation(item) for item in _safe_objects(payload.get("conflicts"), 300)),
+    ]
+    coverage_gaps = [
+        _bounded_annotation(item) for item in _safe_objects(payload.get("coverage_gaps"), 100)
+    ]
 
     rejected_ids: set[str] = set()
     review_rejected: list[dict[str, str]] = []
@@ -252,25 +257,30 @@ def apply_review(
     return state, review
 
 
-def public_profile(profile: dict[str, Any]) -> dict[str, Any]:
+def public_profile(profile: dict[str, Any], *, include_field_ids: bool = False) -> dict[str, Any]:
     return {
         name: (
-            [_public_field(item) for item in value]
+            [_public_field(item, include_field_ids) for item in value]
             if isinstance(value, list)
-            else _public_field(value)
+            else _public_field(value, include_field_ids)
         )
         for name, value in profile.items()
     }
 
 
-def public_records(records: list[dict[str, Any]], field_names: tuple[str, ...]) -> list[dict[str, Any]]:
+def public_records(
+    records: list[dict[str, Any]],
+    field_names: tuple[str, ...],
+    *,
+    include_field_ids: bool = False,
+) -> list[dict[str, Any]]:
     return [
         {
             "id": record["id"],
             "status": record["status"],
             "relation_status": record["relation_status"],
             "added_by_reviewer": record["added_by_reviewer"],
-            **{name: _public_field(record.get(name)) for name in field_names},
+            **{name: _public_field(record.get(name), include_field_ids) for name in field_names},
         }
         for record in records
     ]
@@ -440,10 +450,13 @@ def _relation_status(source: SourceDocument, fields: list[dict[str, Any]]) -> st
     return "ambiguous"
 
 
-def _public_field(field: Any) -> Any:
+def _public_field(field: Any, include_field_id: bool = False) -> Any:
     if not isinstance(field, dict):
         return None
-    return {key: deepcopy(field[key]) for key in ("value", "status", "evidence")}
+    public = {key: deepcopy(field[key]) for key in ("value", "status", "evidence")}
+    if include_field_id:
+        public["field_id"] = field["_id"]
+    return public
 
 
 def _remove_duplicate_ids(employment, education, rejected) -> None:
@@ -457,6 +470,24 @@ def _remove_duplicate_ids(employment, education, rejected) -> None:
                 seen.add(record["id"])
                 retained.append(record)
         collection[:] = retained
+
+
+MAX_REASON_CODE_LENGTH = 128
+MAX_SUMMARY_LENGTH = 200
+
+
+def _bounded_annotation(item: dict[str, Any]) -> dict[str, Any]:
+    """Cap reviewer free text so the persisted report cannot carry CV excerpts."""
+    output = deepcopy(item)
+    reason = output.get("reason_code")
+    if not isinstance(reason, str) or not reason or len(reason) > MAX_REASON_CODE_LENGTH:
+        output["reason_code"] = "reviewer_annotation"
+    if "summary" in output:
+        summary = output["summary"]
+        output["summary"] = (
+            summary if isinstance(summary, str) and len(summary) <= MAX_SUMMARY_LENGTH else None
+        )
+    return output
 
 
 def _safe_objects(value: Any, limit: int) -> list[dict[str, Any]]:
