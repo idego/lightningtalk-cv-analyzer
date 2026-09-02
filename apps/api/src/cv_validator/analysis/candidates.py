@@ -348,13 +348,57 @@ def _validate_records(
         if not anchored:
             rejected.append({"id": record_id, "reason_code": missing_reason})
             continue
-        relation = _relation_status(source, [record[name] for name in field_names if record[name]])
+        anchors = ("organization",) if candidate_type == "employment" else ("institution", "certificate")
+        relation = _detach_far_fields(source, record, field_names, anchors, conflicts)
         record["relation_status"] = relation
         if relation == "invalid":
             rejected.append({"id": record_id, "reason_code": "invalid_record_relation"})
             continue
         output.append(record)
     return output
+
+
+def _detach_far_fields(
+    source: SourceDocument,
+    record: dict[str, Any],
+    field_names: tuple[str, ...],
+    anchors: tuple[str, ...],
+    conflicts: list[dict[str, Any]],
+) -> str:
+    """Drop optional fields cited far from the anchor until the record relation is valid.
+
+    Two-column layouts place dates or locations tens of blocks away from the entry they
+    belong to. Losing those fields is better than losing the whole record."""
+    block_map = source.by_id()
+
+    def present() -> list[dict[str, Any]]:
+        return [record[name] for name in field_names if record[name]]
+
+    relation = _relation_status(source, present())
+    while relation == "invalid":
+        anchor_orders = [
+            block_map[block_id].order
+            for name in anchors
+            if record.get(name)
+            for block_id in record[name]["_block_ids"]
+        ]
+        if not anchor_orders:
+            return relation
+        candidates = [
+            (
+                max(abs(block_map[block_id].order - order) for block_id in record[name]["_block_ids"] for order in anchor_orders),
+                name,
+            )
+            for name in field_names
+            if name not in anchors and record.get(name)
+        ]
+        if not candidates:
+            return relation
+        _, farthest = max(candidates)
+        record[farthest] = None
+        conflicts.append({"record_id": record["id"], "field": farthest, "reason_code": "field_detached_from_record"})
+        relation = _relation_status(source, present())
+    return relation
 
 
 def _validate_field(source: SourceDocument, raw: Any) -> dict[str, Any] | None:

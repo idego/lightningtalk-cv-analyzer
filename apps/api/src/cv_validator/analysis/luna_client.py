@@ -12,6 +12,13 @@ from cv_validator.openai_config import PINNED_OPENAI_MODEL
 
 SPECIALIST_REASONING_EFFORT = "none"
 REVIEWER_REASONING_EFFORT = "low"
+# Long skill lists with repeated excerpts exceeded the previous 2200-token profile cap.
+MAX_OUTPUT_TOKENS = {
+    "profile": 6000,
+    "employment": 5000,
+    "education": 4000,
+    "review": 5000,
+}
 
 
 class ModelPassError(RuntimeError):
@@ -76,17 +83,14 @@ class OpenAIResponsesLunaClient:
                     }
                 },
                 store=False,
-                max_output_tokens={
-                    "profile": 2200,
-                    "employment": 3200,
-                    "education": 2600,
-                    "review": 3600,
-                }[pass_name],
+                max_output_tokens=MAX_OUTPUT_TOKENS[pass_name],
             )
         except openai.APITimeoutError as exc:
             raise ModelPassError("timeout") from exc
         except openai.APIError as exc:
             raise ModelPassError("client_error") from exc
+        if getattr(response, "status", None) == "incomplete":
+            raise ModelPassError("truncated")
         try:
             parsed = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
@@ -258,7 +262,7 @@ _COMMON_RULES = """## Input
 ## Evidence rules
 <rules>
 1. A non-null field is {"id", "value", "evidence": [{"block_id", "excerpt"}]}.
-2. `excerpt` is copied character-for-character (casing, punctuation, diacritics, spacing) from the `text` of the block named by `block_id`. One excerpt cites exactly one block.
+2. `excerpt` is copied character-for-character (casing, punctuation, diacritics, spacing) from the `text` of the block named by `block_id`. One excerpt cites exactly one block. Keep excerpts short: cite the value itself, or the smallest span around it that keeps it unambiguous; never copy a whole paragraph for a short value.
 3. `value` is a contiguous substring of one excerpt. Never combine, reorder, abbreviate, translate, expand, or join spans with punctuation.
 4. Wrapped line only: when one value is split across blocks whose `order` values are consecutive on the same `page` (and the same `table_id`/`row` if any), cite each block in reading order and set `value` to the excerpts joined by a single space. Otherwise cite one block.
 5. Do not infer from layout, filename, common practice, or other fields. Use null when a value is missing, ambiguous, or not literally present. Every schema key must appear; use null (or [] for lists) when absent.

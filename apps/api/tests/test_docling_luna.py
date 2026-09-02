@@ -193,7 +193,7 @@ def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
         DoclingTextConverter().convert(output.getvalue(), "scan.pdf", SourceFormat.PDF)
 
 
-def test_literal_and_relation_validation_is_record_isolated() -> None:
+def test_far_fields_are_detached_and_records_stay_isolated() -> None:
     source = SourceDocument.create(tuple(
         SourceBlock(f"b-{index}", text, order=index)
         for index, text in enumerate([
@@ -216,11 +216,19 @@ def test_literal_and_relation_validation_is_record_isolated() -> None:
     }]}
     state = validate_specialists(source, {}, employment, {})
 
-    assert [record["id"] for record in state.employment] == ["valid"]
-    assert {item["reason_code"] for item in state.rejected} >= {"invalid_record_relation"}
+    # Far fields are detached from the record instead of discarding it whole.
+    mixed, valid = state.employment
+    assert mixed["id"] == "mixed" and valid["id"] == "valid"
+    assert mixed["organization"]["value"] == "Example Systems"
+    assert mixed["role"] is None and mixed["start_date"] is None
+    assert mixed["relation_status"] == "supported"
+    assert valid["role"]["value"] == "Designer" and valid["start_date"]["value"] == "2024"
+    detached = [c for c in state.conflicts if c["reason_code"] == "field_detached_from_record"]
+    assert {(c["record_id"], c["field"]) for c in detached} == {("mixed", "role"), ("mixed", "start_date")}
+    assert state.rejected == []
 
 
-def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
+def test_fields_from_different_table_rows_are_detached_not_merged() -> None:
     source = SourceDocument.create((
         SourceBlock(
             "table/cell-0-0", "Example Systems", order=0,
@@ -239,8 +247,10 @@ def test_fields_from_different_table_rows_cannot_form_one_record() -> None:
         "relationship_type": None,
     }]}, {})
 
-    assert state.employment == []
-    assert {item["reason_code"] for item in state.rejected} >= {"invalid_record_relation"}
+    record, = state.employment
+    assert record["organization"]["value"] == "Example Systems"
+    assert record["role"] is None
+    assert [c["field"] for c in state.conflicts if c["reason_code"] == "field_detached_from_record"] == ["role"]
 
 
 def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
@@ -627,3 +637,62 @@ def test_review_context_exposes_field_ids_and_bounds_reviewer_text() -> None:
     assert conflict["reason_code"] == "reviewer_annotation"
     assert conflict["summary"] is None
     assert review["coverage_gaps"][0]["reason_code"] == "reviewer_annotation"
+
+
+def test_docx_inline_formatting_runs_form_one_block() -> None:
+    document = Document()
+    paragraph = document.add_paragraph("Backend engineer with ")
+    paragraph.add_run("Python").bold = True
+    paragraph.add_run(", ")
+    paragraph.add_run("Django").bold = True
+    paragraph.add_run(" and cloud experience.")
+    document.add_paragraph("Second paragraph")
+    output = BytesIO()
+    document.save(output)
+
+    source = DoclingTextConverter().convert(output.getvalue(), "runs.docx", SourceFormat.DOCX)
+    texts = [block.text for block in source.blocks]
+
+    assert "Backend engineer with Python, Django and cloud experience." in texts
+    assert "Second paragraph" in texts
+    assert [block.order for block in source.blocks] == list(range(len(source.blocks)))
+
+
+def test_truncated_model_output_is_reported_as_truncated() -> None:
+    class Response:
+        status = "incomplete"
+        output_text = '{"profile": {'
+        usage = None
+        model = "gpt-5.6-luna"
+
+    class Responses:
+        def create(self, **kwargs):
+            assert kwargs["max_output_tokens"] >= 6000
+            return Response()
+
+    class Client:
+        responses = Responses()
+
+    source = SourceDocument.create((SourceBlock("b-0", "Alex Example", order=0),), "pdf")
+    with pytest.raises(ModelPassError, match="truncated"):
+        OpenAIResponsesLunaClient(client=Client()).run("profile", source)
+
+
+def test_company_research_rejections_carry_rule_names() -> None:
+    from cv_validator.research.company import CompanyResearchRequest, validate_company_research
+    from cv_validator.research.domain import CompanyResearchInvalidResponse
+
+    request = CompanyResearchRequest(({"organization": "Example Systems"},))
+    organization = {
+        "query_subject": "Example Systems",
+        "existence": "supported",
+        "activity": None, "operating_dates": None, "location": None, "official_website": None,
+        "company_pages": [], "registries": [], "findings": [{"claim": "x", "source_url": "https://example.com"}],
+        "confidence": "low", "uncertainty": "n/a",
+        "limited_online_presence": True,
+        "limited_online_presence_reason": "does not establish existence or absence",
+    }
+    payload = {"organizations": [organization], "searches_performed": ["q"], "search_limitations": ["l"]}
+    with pytest.raises(CompanyResearchInvalidResponse) as info:
+        validate_company_research(payload, request=request)
+    assert info.value.reason in {"schema", "limited_presence_contradiction"}

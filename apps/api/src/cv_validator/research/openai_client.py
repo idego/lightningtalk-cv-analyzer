@@ -38,11 +38,11 @@ class OpenAIResponsesCompanyResearcher:
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise CompanyResearchInvalidResponse() from exc
+            raise CompanyResearchInvalidResponse("invalid_json") from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise CompanyResearchInvalidResponse()
+            raise CompanyResearchInvalidResponse("search_count")
         payload["searches_performed"] = actual_queries
         if len(payload.get("organizations", [])) == len(request.input_facts):
             for organization, input_fact in zip(

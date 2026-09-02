@@ -19,7 +19,11 @@ search. State confidence and uncertainty. Never infer fraud, shell-company statu
 candidate identity, nationality, or physical location.
 
 Use at most four searches total. Record the actual searches and material limits.
-When evidence is insufficient, use `insufficient_evidence`. A
-`limited_online_presence` result means only that the bounded public searches found
-little reliable indexed evidence. Its reason must include the exact caveat
-"does not establish existence or absence". Return only the strict schema.
+When evidence is insufficient, use `insufficient_evidence`. Set
+`limited_online_presence` to true only together with `existence:
+insufficient_evidence`, empty company pages and registries, and null activity,
+dates, location, and website; it means only that the bounded public searches found
+little reliable indexed evidence. If you found any cited evidence for the
+organization, set `limited_online_presence` to false. Its reason must include the
+exact caveat "does not establish existence or absence". Return only the strict
+schema.

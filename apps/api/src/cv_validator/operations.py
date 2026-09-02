@@ -34,7 +34,7 @@ class OperationsTelemetry:
 
 def safe_log(event: str, **fields: Any) -> None:
     allowed = {"event": event}
-    for key in ("correlation_id", "analysis_id", "category", "outcome", "status_code", "duration_ms", "error_code"):
+    for key in ("correlation_id", "analysis_id", "category", "outcome", "status_code", "duration_ms", "error_code", "reason"):
         value = fields.get(key)
         if isinstance(value, (str, int, float)):
             allowed[key] = value

@@ -9,7 +9,7 @@ from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
 from docling.datamodel.base_models import DocumentStream, InputFormat
 from docling.document_converter import DocumentConverter, FormatOption, WordFormatOption
 from docling.pipeline.simple_pipeline import SimplePipeline
-from docling_core.types.doc import BoundingBox, DocItemLabel, DoclingDocument, ProvenanceItem
+from docling_core.types.doc import BoundingBox, DocItemLabel, DoclingDocument, GroupLabel, ProvenanceItem
 
 from cv_validator.analysis.source import SourceBlock, SourceDocument
 from cv_validator.analysis.strategy import AnalysisStrategyError, SourceFormat
@@ -181,8 +181,12 @@ class DoclingTextConverter:
         return source
 
 
+NO_SPACE_BEFORE = (",", ".", ";", ":", ")", "!", "?")
+
+
 def _project(document: DoclingDocument, source_format: str) -> SourceDocument:
     blocks: list[SourceBlock] = []
+    inline_groups: set[str] = set()
     order = 0
     for item, _level in document.iterate_items(with_groups=True):
         item_id = _reference(item.self_ref)
@@ -190,11 +194,27 @@ def _project(document: DoclingDocument, source_format: str) -> SourceDocument:
             continue
         parent_id = _reference(getattr(item, "parent", None))
         label = getattr(item, "label", None)
+        if label == GroupLabel.INLINE:
+            inline_groups.add(item_id)
+            continue
         kind = getattr(label, "value", None) or item.__class__.__name__.casefold()
         prov = tuple(getattr(item, "prov", ()) or ())
         page_number = prov[0].page_no if prov else None
         bbox = _bbox(prov[0].bbox) if prov else None
         text = str(getattr(item, "text", "") or "").strip()
+        if text and blocks and _is_inline_continuation(blocks[-1], parent_id, kind, inline_groups):
+            previous = blocks[-1]
+            joiner = "" if text.startswith(NO_SPACE_BEFORE) or previous.text.endswith("(") else " "
+            blocks[-1] = SourceBlock(
+                id=previous.id,
+                text=f"{previous.text}{joiner}{text}",
+                kind=previous.kind,
+                order=previous.order,
+                parent_id=previous.parent_id,
+                page_number=previous.page_number,
+                bbox=previous.bbox,
+            )
+            continue
         if text:
             blocks.append(
                 SourceBlock(
@@ -231,6 +251,24 @@ def _project(document: DoclingDocument, source_format: str) -> SourceDocument:
             )
             order += 1
     return SourceDocument.create(tuple(blocks), source_format)
+
+
+def _is_inline_continuation(
+    previous: SourceBlock,
+    parent_id: str | None,
+    kind: str,
+    inline_groups: set[str],
+) -> bool:
+    """Formatted runs of one DOCX paragraph arrive as separate text items under an
+    inline group; they are one paragraph and must form one evidence block."""
+    return (
+        parent_id is not None
+        and parent_id in inline_groups
+        and previous.parent_id == parent_id
+        and previous.table_id is None
+        and kind == "text"
+        and previous.kind == "text"
+    )
 
 
 def _reference(value: Any) -> str | None:

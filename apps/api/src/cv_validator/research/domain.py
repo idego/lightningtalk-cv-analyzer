@@ -13,7 +13,9 @@ class CompanyResearchTimeout(CompanyResearchError):
 
 
 class CompanyResearchInvalidResponse(CompanyResearchError):
-    pass
+    def __init__(self, reason: str = "invalid_response") -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class CompanyResearchClientError(CompanyResearchError):
