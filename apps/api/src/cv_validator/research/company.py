@@ -16,8 +16,8 @@ from cv_validator.research.domain import (
 )
 from cv_validator.research.subjects import accepted_records, subject_key, supported_field
 
-RESEARCH_VERSION = "company-research-v1"
-PROMPT_VERSION = "company-research-prompt-v2"
+RESEARCH_VERSION = "company-research-v2"
+PROMPT_VERSION = "company-research-prompt-v3"
 SCHEMA_VERSION = "company-research-schema-v1"
 MAX_ORGANIZATIONS = 12
 

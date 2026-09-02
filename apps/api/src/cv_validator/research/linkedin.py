@@ -21,9 +21,9 @@ from cv_validator.research.subjects import (
     supported_profile_field,
 )
 
-DISCOVERY_VERSION = "linkedin-discovery-v2"
+DISCOVERY_VERSION = "linkedin-discovery-v3"
 COMPARISON_VERSION = "linkedin-comparison-v2"
-PROMPT_VERSION = "linkedin-research-prompt-v3"
+PROMPT_VERSION = "linkedin-research-prompt-v4"
 DISCOVERY_SCHEMA_VERSION = "linkedin-discovery-schema-v3"
 MAX_SEARCHES = 4
 DEFAULT_CONNECTION_THRESHOLD = 500

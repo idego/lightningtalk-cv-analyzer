@@ -150,6 +150,7 @@ class OpenAIResponsesLinkedInResearcher:
             _retain_sourced_linkedin_profiles(
                 payload, sources, connection_threshold=self._connection_threshold
             )
+            _normalize_linkedin_confidence(payload, input_payload)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
 
@@ -236,6 +237,9 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
                 ),
             })
             normalized = True
+        elif organization.get("confidence") == "high" and len(retained_findings) < 2:
+            organization["confidence"] = "medium"
+            normalized = True
     if normalized:
         payload.setdefault("search_limitations", []).append(
             "Some URLs not supported by returned web-search origins were omitted."
@@ -288,6 +292,9 @@ def _retain_cited_education_findings(
             credential["uncertainty"] = (
                 "The returned web sources did not support a retained finding."
             )
+        elif credential.get("confidence") == "high" and len(retained_findings) < 2:
+            credential["confidence"] = "medium"
+            normalized = True
     if normalized:
         payload.setdefault("search_limitations", []).append(
             "Some claims without support from returned web-search origins were omitted."
@@ -384,3 +391,20 @@ def _retain_sourced_linkedin_profiles(
         payload.setdefault("search_limitations", []).append(
             "Unsourced profile details were omitted from the retained result."
         )
+
+
+def _normalize_linkedin_confidence(payload: dict[str, Any], input_payload: dict[str, Any]) -> None:
+    hints = [
+        str(value).strip().casefold()
+        for hint in input_payload.get("search_hints", [])
+        if isinstance(hint, dict)
+        for value in hint.values()
+        if isinstance(value, str) and value.strip()
+    ]
+    conflict_words = ("conflict", "different", "does not match", "mismatch", "unrelated")
+    for profile in payload.get("possible_profiles", []):
+        uncertainty = str(profile.get("uncertainty", "")).casefold()
+        if any(word in uncertainty for word in conflict_words):
+            profile["confidence"] = "low"
+        elif profile.get("confidence") == "high" and not any(hint in uncertainty for hint in hints):
+            profile["confidence"] = "medium"
