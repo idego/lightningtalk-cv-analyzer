@@ -161,16 +161,6 @@ def apply_review(
             target["relation_status"] = relation
             corrections.append({"record_id": record_id, "field_ids": list(dict.fromkeys(field_ids))})
 
-    merge_groups = _known_merge_groups(payload.get("merge_groups"), known_records, conflicts)
-    applied_merge_groups = _apply_merge_groups(
-        source,
-        state,
-        merge_groups,
-        accepted_ids,
-        rejected_ids,
-        conflicts,
-    )
-
     added_profile_fields: list[str] = []
     for addition in _safe_objects(payload.get("added_profile_fields"), 20):
         field_name = addition.get("field_name")
@@ -226,6 +216,20 @@ def apply_review(
         known_records[record["id"]] = record
         accepted_ids.add(record["id"])
         added_candidate_ids.append(record["id"])
+
+    # Merges run after additions so a reviewer may add a candidate and merge it in one pass.
+    merge_groups = _known_merge_groups(payload.get("merge_groups"), known_records, conflicts)
+    applied_merge_groups = _apply_merge_groups(
+        source,
+        state,
+        merge_groups,
+        accepted_ids,
+        rejected_ids,
+        conflicts,
+    )
+
+    surviving = state.records
+    added_candidate_ids = [record_id for record_id in added_candidate_ids if record_id in surviving]
 
     for record in [*state.employment, *state.education]:
         record["status"] = (

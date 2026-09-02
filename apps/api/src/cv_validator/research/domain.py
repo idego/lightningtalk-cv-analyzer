@@ -36,7 +36,9 @@ class EducationResearchTimeout(EducationResearchError):
 
 
 class EducationResearchInvalidResponse(EducationResearchError):
-    pass
+    def __init__(self, reason: str = "invalid_response") -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class EducationResearchClientError(EducationResearchError):

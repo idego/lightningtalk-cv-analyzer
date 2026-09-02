@@ -696,3 +696,29 @@ def test_company_research_rejections_carry_rule_names() -> None:
     with pytest.raises(CompanyResearchInvalidResponse) as info:
         validate_company_research(payload, request=request)
     assert info.value.reason in {"schema", "limited_presence_contradiction"}
+
+
+def test_reviewer_can_add_a_candidate_and_merge_it_in_one_pass() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems", order=0),
+        SourceBlock("b-1", "Developer", order=1),
+    ), "pdf")
+    empty = {"role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None}
+    state = validate_specialists(source, {}, {"records": [
+        {"id": "employment_1", **empty, "organization": field("org", "Example Systems", "b-0")},
+    ]}, {})
+    reviewed, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "relation_patches": [],
+        "added_profile_fields": [], "conflicts": [], "coverage_gaps": [], "status": "completed",
+        "added_candidates": [{
+            "id": "review_employment_1", "candidate_type": "employment", "reason_code": "missed_role",
+            "candidate": {**empty, "organization": field("org2", "Example Systems", "b-0"), "role": field("role", "Developer", "b-1")},
+        }],
+        "merge_groups": [["employment_1", "review_employment_1"]],
+    })
+
+    assert [record["id"] for record in reviewed.employment] == ["employment_1"]
+    assert reviewed.employment[0]["role"]["value"] == "Developer"
+    assert review["merged_ids"] == [["employment_1", "review_employment_1"]]
+    assert review["added_candidate_ids"] == []
+    assert not any(c["reason_code"] == "unknown_reviewer_merge_id" for c in review["conflicts"])
