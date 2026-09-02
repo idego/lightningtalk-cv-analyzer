@@ -15,7 +15,7 @@ from cv_validator.research.domain import EducationResearchInvalidResponse, Educa
 from cv_validator.research.subjects import accepted_records, supported_field
 
 RESEARCH_VERSION = "education-research-v3"
-PROMPT_VERSION = "education-research-prompt-v3"
+PROMPT_VERSION = "education-research-prompt-v4"
 SCHEMA_VERSION = "education-research-schema-v1"
 MAX_CREDENTIALS = 12
 

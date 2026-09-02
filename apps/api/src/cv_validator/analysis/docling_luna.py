@@ -39,7 +39,7 @@ from cv_validator.openai_config import PINNED_OPENAI_MODEL
 
 
 STRATEGY_NAME = "docling-luna"
-STRATEGY_VERSION = "docling-luna-analysis-v1"
+STRATEGY_VERSION = "docling-luna-analysis-v2"
 MAX_PASS_ATTEMPTS = 2
 EU_COUNTRY_CODES = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
