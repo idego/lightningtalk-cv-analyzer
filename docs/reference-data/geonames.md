@@ -1,64 +1,101 @@
 # GeoNames reference data
 
-The analyzer resolves countries and localities with an offline SQLite index
-built from GeoNames `cities500`. An unresolved place is unknown, not invalid.
-Analysis never downloads reference data.
+The analyzer uses two offline SQLite indexes: countries/localities from
+`cities500`, and postal-code-to-city relationships. Runtime CV analysis never
+calls GeoNames or sends CV fields to it.
 
-## Sources and license
+GeoNames data is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Generated manifests record attribution, source URLs, hashes, build tools,
+filtering rules, and record counts.
+
+## Normal Compose startup
+
+The base stack owns the complete lifecycle:
+
+1. `geonames-init` downloads the four official HTTPS sources.
+2. It builds and validates both index/manifest pairs in a temporary directory.
+3. It atomically promotes the complete release behind `current`.
+4. Only then may `api` start; the API mounts the named volume read-only.
+
+The persistent volume is scoped by the Compose project name. A valid matching
+release is verified and reused without any network request on later deploys.
+An interrupted download or build never replaces `current`; the next start
+removes stale staging data and retries. A filesystem lock prevents two jobs
+from writing the same volume concurrently.
+
+Configure the release identity in the deployment environment:
+
+```dotenv
+GEONAMES_SNAPSHOT_VERSION=2026-09-02
+```
+
+The source URLs default to:
 
 - `https://download.geonames.org/export/dump/cities500.zip`
 - `https://download.geonames.org/export/dump/countryInfo.txt`
 - `https://download.geonames.org/export/dump/alternateNamesV2.zip`
+- `https://download.geonames.org/export/zip/allCountries.zip`
 
-GeoNames is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-The generated manifest records attribution, source URLs, hashes, build tools,
-filtering rules, and record counts.
+Override the corresponding `GEONAMES_*_URL` variables only for an approved
+HTTPS mirror. GeoNames URLs are mutable, so a successful release is immutable
+inside the volume and records the exact downloaded source hashes. Refreshing is
+always explicit: choose a new `GEONAMES_SNAPSHOT_VERSION` and deploy again.
 
-## Build and validate
+Allow at least 3 GiB free before the first build or a refresh. This covers
+compressed sources, extracted inputs, temporary SQLite files, and completed
+indexes. After promotion, temporary inputs are removed and only the current and
+immediately previous releases are retained.
 
-Keep inputs and generated artifacts under ignored `data/`. Build with
-`cv-location-index build` and validate the result with
-`cv-location-index validate`; run `--help` for the required paths and snapshot
-date. The runtime pair is:
+Useful checks:
+
+```bash
+docker compose ps
+docker compose logs geonames-init
+docker compose exec -T api python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())"
+```
+
+The health request runs inside the API container because the normal deployment
+does not publish the API port on the host.
+
+## Offline or operator-provided snapshot
+
+For a host without outbound access, build both pairs separately using
+`cv-location-index build` and `cv-postal-index`, then place these four files in
+one approved directory:
 
 ```text
 locations.sqlite3
 locations.manifest.json
+postal-codes.sqlite3
+postal-codes.manifest.json
 ```
 
-Set `CV_VALIDATOR_REFERENCE_DATA_DIR` to the directory containing that pair.
-Compose mounts it read-only at `/app/reference-data`. Outside Compose, point
-`CV_VALIDATOR_LOCATION_INDEX_PATH` and
-`CV_VALIDATOR_LOCATION_MANIFEST_PATH` directly at the two files.
-
-The promoted snapshot is recorded in `config/geonames.lock`. Runtime artifacts
-stay outside Git under `data/geonames-build/<snapshot>/`; `make dev` and
-`make deploy-check` compare both files against the tracked SHA-256 values.
-Transfer the exact approved pair to a production host manually or from private
-artifact storage. Routine startup and deployment never download a newer copy.
-
-Refresh the snapshot manually in a new dated directory. Validate all hashes,
-SQLite integrity, resolver behavior, and tests before changing the promoted
-version. Never overwrite an approved snapshot in place.
-
-## Optional postal-code index
-
-Postal-code-to-city validation uses a separate offline index built from the
-GeoNames postal-code dump. The main locality index does not contain these
-relationships. Build an approved snapshot outside runtime:
+Set `CV_VALIDATOR_REFERENCE_DATA_DIR` in the environment file and run:
 
 ```bash
-cv-postal-index \
-  --source data/geonames-postal/allCountries.txt \
-  --source-url https://download.geonames.org/export/zip/allCountries.zip \
-  --snapshot-date YYYY-MM-DD \
-  --output-index data/geonames-build/YYYY-MM-DD/postal-codes.sqlite3 \
-  --output-manifest data/geonames-build/YYYY-MM-DD/postal-codes.manifest.json
+REFERENCE_DATA_MODE=operator make dev
+REFERENCE_DATA_MODE=operator make deploy
 ```
 
-Point `CV_VALIDATOR_POSTAL_INDEX_PATH` and
-`CV_VALIDATOR_POSTAL_MANIFEST_PATH` at the generated pair. Both paths are
-optional, but must be configured together. Without them the report explicitly
-marks postal validation as `unavailable`; it never substitutes country-format
-regex matching. The importer runs only as an operator action and runtime never
-downloads source data.
+This applies `docker-compose.reference-data.yml`: the initialization command is
+bypassed and the approved directory replaces the named reference-data mount.
+The API receives it read-only. Preflight verifies the locality pair against
+`config/geonames.lock` and requires the postal pair; runtime validates both.
+
+## Recovery and rollback
+
+- If initialization fails, inspect `docker compose logs geonames-init`, fix
+  network, disk, or source configuration, and run the same deploy again.
+- Do not create or edit files inside the named volume manually. The initializer
+  ignores incomplete staging directories and preserves the last current release
+  until a replacement validates.
+- To retry a corrupt release with the same configured version, restart the
+  stack; validation removes and rebuilds that release without promoting partial
+  files.
+- To roll back the application, use the previous reviewed Git revision. Keep
+  the GeoNames volume intact. If the older application expects flat paths, use
+  operator mode with a compatible approved directory.
+
+Generated artifacts and downloaded source data remain outside Git. Never add
+them to the repository.

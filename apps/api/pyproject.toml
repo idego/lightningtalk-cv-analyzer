@@ -24,6 +24,7 @@ dependencies = [
 [project.scripts]
 cv-location-index = "cv_validator.location.index_cli:main"
 cv-postal-index = "cv_validator.location.postal_cli:main"
+cv-geonames-bootstrap = "cv_validator.location.bootstrap_cli:main"
 
 [project.optional-dependencies]
 dev = [

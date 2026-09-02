@@ -56,6 +56,20 @@ uses project `cv-analyzer-docling-luna`, API database
 `/app/data/docling_luna.db`, and auth database
 `/app/data/docling_luna_auth.db`.
 
+On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
+downloads the configured official GeoNames sources and builds both locality and
+postal indexes in the project-scoped `geonames_data` volume. The API waits for
+that job and mounts its completed `current` release read-only. Later starts
+validate and reuse the volume without downloading. Set `GEONAMES_SNAPSHOT_VERSION`
+to a new date to request an explicit refresh; allow at least 3 GiB of free space
+for archives, staging files, and indexes.
+
+For a host with no outbound access, prepare an approved directory containing
+both index/manifest pairs and run `REFERENCE_DATA_MODE=operator make deploy` with
+`CV_VALIDATOR_REFERENCE_DATA_DIR` set in `.env`. See
+[`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for recovery,
+refresh, and rollback details.
+
 `GET /health` reports `ready: false` when the Luna analysis client is not
 configured; uploads then fail with `analysis_strategy_unavailable` and are not
 persisted as successful reports. Each attempted analysis has owner-scoped,

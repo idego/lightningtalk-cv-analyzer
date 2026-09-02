@@ -1,8 +1,16 @@
 services:
+  geonames-init:
+    command: ["true"]
+    volumes: !override []
+
   api:
-    # Compatibility overlay. The standard stack now requires GeoNames too;
-    # this file only lets operators override the default snapshot directory.
-    volumes:
+    environment:
+      CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3
+      CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json
+      CV_VALIDATOR_POSTAL_INDEX_PATH: /app/reference-data/postal-codes.sqlite3
+      CV_VALIDATOR_POSTAL_MANIFEST_PATH: /app/reference-data/postal-codes.manifest.json
+    volumes: !override
+      - cv_validator_data:/app/data
       - type: bind
         source: ${CV_VALIDATOR_REFERENCE_DATA_DIR:?set CV_VALIDATOR_REFERENCE_DATA_DIR to an approved versioned directory}
         target: /app/reference-data
