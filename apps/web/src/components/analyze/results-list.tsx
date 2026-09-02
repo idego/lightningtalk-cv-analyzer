@@ -14,6 +14,8 @@ import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { useCopy } from "@/lib/app-settings";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
 function FlagList({ flags }: { flags: ReportFinding[] }) {
   const { t } = useCopy();
@@ -178,6 +180,22 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
   const { settings, t } = useCopy();
   const reportRefs = useRef<Array<HTMLElement | null>>([]);
   const [reportOverrides, setReportOverrides] = useState<Record<string, AnalysisReport>>({});
+  const [feedback, setFeedback] = useState<Record<string, FeedbackManifest>>({});
+  const feedbackLoads = useRef(new Set<string>());
+  const reportIds = items.filter((item): item is Extract<AnalyzeItemResult, { status: "ok" }> => item.status === "ok").map((item) => item.report.analysis_id).join(",");
+
+  useEffect(() => {
+    let cancelled = false;
+    for (const analysisId of reportIds.split(",").filter(Boolean)) {
+      if (feedbackLoads.current.has(analysisId)) continue;
+      feedbackLoads.current.add(analysisId);
+      fetch(`/api/analyses/${encodeURIComponent(analysisId)}/feedback`, { cache: "no-store" })
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((manifest) => { if (!cancelled && manifest) setFeedback((previous) => ({ ...previous, [analysisId]: manifest })); })
+        .catch(() => feedbackLoads.current.delete(analysisId));
+    }
+    return () => { cancelled = true; };
+  }, [reportIds]);
 
   function updateCompletedResearch(
     report: AnalysisReport,
@@ -243,13 +261,14 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
 
               <StructuredFacts overview={presentation.overview} />
 
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
               {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={`${t("remaining")} (${presentation.remaining.length})`} contentClassName="pt-3">
                 <FlagList flags={presentation.remaining} />
               </HoverDisclosure> : null}
+              {feedbackTarget(feedback[report.analysis_id], "report_overall", "report", "overall") ? <div className="flex justify-end"><FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "report", "overall")!} /></div> : null}
             </CardContent>
           </Card>
         );

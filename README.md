@@ -66,6 +66,12 @@ uses project `cv-analyzer-docling-luna`, API database
 - Old pilot reports are not migrated. The new default database is
   `data/docling_luna.db`; existing databases are never deleted implicitly.
 
+Contextual feedback is disabled by default. When enabled, it stores opaque
+target identities, closed classifications, short sanitized comments and safe
+technical diagnostics; it never stores CV/report content or raw logs. Feedback
+is removed with its parent analysis. Setup and staged enablement are documented
+in [`docs/operations.md`](docs/operations.md).
+
 ## Public research
 
 Company, education, and LinkedIn research remains optional. Subjects come only

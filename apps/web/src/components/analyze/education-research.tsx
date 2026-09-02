@@ -14,6 +14,8 @@ import { useCopy, type CopyKey } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { educationGoogleSearchUrl } from "@/lib/google-search";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget, type FeedbackManifest, type FeedbackTarget } from "@/lib/feedback-types";
 
 function institutionStatusKey(status: string): CopyKey {
   return ({
@@ -31,7 +33,7 @@ function accreditationStatusKey(status: string | null): CopyKey {
 
 type Credential = EducationResearch["credentials"][number];
 
-function EducationResult({ credential }: { credential: Credential }) {
+function EducationResult({ credential, analysisId, feedback }: { credential: Credential; analysisId: string; feedback?: FeedbackTarget }) {
   const { t } = useCopy();
   const searchHref = educationGoogleSearchUrl({
     institution: credential.institution,
@@ -45,7 +47,7 @@ function EducationResult({ credential }: { credential: Credential }) {
     headerClassName="flex-wrap sm:flex-nowrap"
     actionClassName="w-full sm:w-auto"
     title={<div className="flex min-w-0 flex-wrap items-center gap-2"><strong>{credential.institution}</strong><Badge variant="outline">{t(institutionStatusKey(credential.institution_exists))}</Badge><Badge variant="outline">{t(accreditationStatusKey(credential.accreditation_status))}</Badge></div>}
-    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref && credential.institution ? <GoogleSearchAction href={searchHref} subject={credential.institution} variant="labeled" /> : null}</div>}
+    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref && credential.institution ? <GoogleSearchAction href={searchHref} subject={credential.institution} variant="labeled" /> : null}{feedback ? <FeedbackControl analysisId={analysisId} target={feedback} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
     <p className="text-muted-foreground">{[credential.program, credential.degree, credential.certificate, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ") || t("notEnoughPublicInformation")}</p>
@@ -59,9 +61,11 @@ function EducationResult({ credential }: { credential: Credential }) {
 export function EducationResearchPanel({
   report,
   onResearchChange,
+  feedbackManifest,
 }: {
   report: AnalysisReport;
   onResearchChange?: (research: EducationResearch) => void;
+  feedbackManifest?: FeedbackManifest;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "education");
@@ -117,6 +121,6 @@ export function EducationResearchPanel({
   >
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
     <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
-    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
+    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => { const index = visibleResearch.credentials.indexOf(credential); return <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} analysisId={report.analysis_id} feedback={feedbackTarget(feedbackManifest, "education_research_result", "education_research", String(index)) ?? undefined} />; })}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
   </HoverDisclosure>;
 }

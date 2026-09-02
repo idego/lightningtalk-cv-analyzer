@@ -11,6 +11,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from cv_validator.analysis import validate_analysis_report
+from cv_validator.api.feedback import init_feedback_schema
 from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
 from cv_validator.serialization import deserialize_analysis_payload
 
@@ -147,6 +148,7 @@ class PersistenceStore:
                 );
                 """
             )
+            init_feedback_schema(conn)
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS reports_analysis_id ON reports(analysis_id)"
             )

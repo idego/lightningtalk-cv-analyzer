@@ -13,6 +13,8 @@ import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -27,9 +29,13 @@ function profileNote(uncertainty: string) {
 function LinkedInProfileCard({
   profile,
   profileIndex,
+  feedbackManifest,
+  analysisId,
 }: {
   profile: LinkedInProfile;
   profileIndex: number;
+  feedbackManifest?: FeedbackManifest;
+  analysisId: string;
 }) {
   const { t } = useCopy();
   const note = profileNote(profile.uncertainty);
@@ -42,6 +48,7 @@ function LinkedInProfileCard({
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ResearchConfidenceBadge confidence={profile.confidence} />
+            {feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", String(profileIndex)) ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", String(profileIndex))!} /> : null}
           </div>
         }
         contentClassName="space-y-2 pt-3"
@@ -73,9 +80,11 @@ function LinkedInProfileCard({
 export function LinkedInResearchPanel({
   report,
   onDiscoveryChange,
+  feedbackManifest,
 }: {
   report: AnalysisReport;
   onDiscoveryChange?: (discovery: LinkedInDiscovery) => void;
+  feedbackManifest?: FeedbackManifest;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "linkedin");
@@ -127,6 +136,8 @@ export function LinkedInResearchPanel({
           key={profile.profile_url}
           profile={profile}
           profileIndex={profileIndex}
+          feedbackManifest={feedbackManifest}
+          analysisId={report.analysis_id}
         />
       ))}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
@@ -14,6 +14,8 @@ import { researchEligibility } from "@/lib/auto-research";
 import { isSelfEmploymentLabel } from "@/lib/relationship-labels";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { companyGoogleSearchUrl } from "@/lib/google-search";
+import { FeedbackControl } from "@/components/analyze/feedback-control";
+import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
 function isResearchableCompany(value: string) {
   const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
@@ -23,9 +25,11 @@ function isResearchableCompany(value: string) {
 export function CompanyResearchPanel({
   report,
   onResearchChange,
+  feedbackManifest,
 }: {
   report: AnalysisReport;
   onResearchChange?: (research: CompanyResearch) => void;
+  feedbackManifest?: FeedbackManifest;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "company");
@@ -87,9 +91,11 @@ export function CompanyResearchPanel({
 
       {visibleResearch ? (
         <div className="space-y-2">
-          {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => (
-            <CompanyResult key={organization.query_subject} organization={organization} />
-          ))}
+          {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => {
+            const index = visibleResearch.organizations.indexOf(organization);
+            const target = feedbackTarget(feedbackManifest, "company_research_result", "company_research", String(index));
+            return <CompanyResult key={organization.query_subject} organization={organization} feedback={target ? <FeedbackControl analysisId={report.analysis_id} target={target} /> : null} />;
+          })}
           {visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? (
             <HoverDisclosure
               className="pt-2 text-xs text-muted-foreground"
@@ -111,7 +117,7 @@ export function CompanyResearchPanel({
 
 type Organization = CompanyResearch["organizations"][number];
 
-function CompanyResult({ organization }: { organization: Organization }) {
+function CompanyResult({ organization, feedback }: { organization: Organization; feedback?: ReactNode }) {
   const { t } = useCopy();
   const searchHref = companyGoogleSearchUrl({ organization: organization.query_subject, location: organization.location });
   const sources = Array.from(new Set([
@@ -142,6 +148,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
           {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} variant="labeled" /> : null}
+          {feedback}
         </div>
       }
       contentClassName="pt-3"
