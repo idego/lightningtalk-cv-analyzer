@@ -24,3 +24,28 @@ def test_builds_versioned_offline_postal_index_and_resolves_city(tmp_path):
     assert resolver.validate("00-001", city="Krakow", country_code="PL").status == "mismatch"
     assert resolver.validate("99-999", city="Warsaw", country_code="PL").status == "unresolved"
     resolver.close()
+
+
+def test_skips_postal_records_without_a_place_name(tmp_path):
+    source = tmp_path / "allCountries.txt"
+    source.write_text(
+        "LT\t38052\t\tPanevėžys\n"
+        "PL\t00-001\tWarsaw\tMazowieckie\n"
+        "PL\t00-001\tWARSAW\tMazowieckie\n",
+        encoding="utf-8",
+    )
+    index = tmp_path / "postal-codes.sqlite3"
+    manifest = tmp_path / "postal-codes.manifest.json"
+
+    metadata = build_postal_index(
+        source_path=source,
+        source_url="https://example.test/postal/allCountries.zip",
+        snapshot_date="2026-09-02",
+        output_index=index,
+        output_manifest=manifest,
+    )
+    resolver = SQLitePostalCodeResolver(index, manifest)
+
+    assert metadata["records"] == 1
+    assert resolver.validate("00-001", city="Warsaw", country_code="PL").status == "resolved"
+    resolver.close()

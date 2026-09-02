@@ -92,12 +92,10 @@ export type EducationResearch = {
     program: string | null;
     degree: string | null;
     certificate: string | null;
-    institution_exists: "supported" | "mismatch" | "evidence_unavailable";
     program_exists: "supported" | "mismatch" | "evidence_unavailable";
     degree_exists: "supported" | "mismatch" | "evidence_unavailable";
     certificate_exists: "supported" | "mismatch" | "evidence_unavailable";
     dates: string | null;
-    accreditation_status: "established" | "not_established" | "evidence_unavailable";
     city: string | null;
     country: string | null;
     cv_consistency: "supported" | "mismatch" | "evidence_unavailable";
@@ -184,12 +182,15 @@ export type AnalysisReport = {
       usage: Record<string, number>;
       model: string | null;
       reasoning_effort: "none" | "low";
+      section_status?: "completed_with_records" | "not_present" | "unresolved" | "failed";
     }>;
     review: {
       status: AnalysisStatus;
       accepted_ids: string[];
       rejected: Array<Record<string, unknown>>;
+      annotations: Array<{ record_id: string; kind: "suspected_hallucination" | "unsupported_evidence" | "uncertain_relation" | "conflicting_relation" | "duplicate"; reason_code: string }>;
       merged_ids: string[][];
+      merge_projections: Array<Record<string, unknown>>;
       relation_corrections: Array<Record<string, unknown>>;
       added_profile_fields: Array<"candidate_name" | "declared_location" | "headline" | "summary" | "skills" | "languages">;
       added_candidate_ids: string[];
@@ -220,7 +221,7 @@ export type AnalysisReport = {
 export type AnalyzeItemResult =
   | {
       filename: string;
-      status: "ok";
+      status: "ok" | "partial";
       report: AnalysisReport;
     }
   | {

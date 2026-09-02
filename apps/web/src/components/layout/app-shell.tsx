@@ -6,14 +6,16 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { buildSidebarNav } from "@/components/layout/sidebar-data";
+import type { FeedbackRole } from "@/lib/feedback-access";
 
 type AppShellProps = {
   defaultOpen?: boolean;
   children: ReactNode;
+  feedbackRole?: FeedbackRole|null;
 };
 
-export function AppShell({ defaultOpen = true, children }: AppShellProps) {
-  const nav = buildSidebarNav();
+export function AppShell({ defaultOpen = true, children, feedbackRole }: AppShellProps) {
+  const nav = buildSidebarNav(Boolean(feedbackRole));
 
   return (
     <SidebarProvider defaultOpen={defaultOpen} className="min-h-dvh w-full">

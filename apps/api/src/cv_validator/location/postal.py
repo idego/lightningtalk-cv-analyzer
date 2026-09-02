@@ -192,49 +192,62 @@ def build_postal_index(
         raise ValueError("postal output already exists")
     source_sha256 = _sha256(source_path)
     reference_data_version = f"geonames-postal-{snapshot_date}-{source_sha256[:12]}"
-    records: set[tuple[str, str, str, str, str]] = set()
-    for line_number, line in enumerate(source_path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line or line.startswith("#"):
-            continue
-        columns = line.split("\t")
-        if len(columns) < 3:
-            raise ValueError(f"invalid postal source row: {line_number}")
-        country_code, postal_code, place_name = columns[:3]
-        if (
-            len(country_code) != 2
-            or not country_code.isalpha()
-            or not postal_code.strip()
-            or not place_name.strip()
-        ):
-            raise ValueError(f"invalid postal source row: {line_number}")
-        records.add((
-            country_code.upper(),
-            postal_code,
-            normalize_postal_code(postal_code),
-            place_name,
-            normalize_location(place_name),
-        ))
-    if not records:
-        raise ValueError("postal source contains no records")
     output_index.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(output_index) as connection:
-        connection.execute(
-            """CREATE TABLE postal_record (
-                country_code TEXT NOT NULL,
-                postal_code TEXT NOT NULL,
-                normalized_postal_code TEXT NOT NULL,
-                place_name TEXT NOT NULL,
-                normalized_place_name TEXT NOT NULL,
-                PRIMARY KEY (country_code, normalized_postal_code, normalized_place_name)
-            ) WITHOUT ROWID"""
-        )
-        connection.executemany(
-            "INSERT INTO postal_record VALUES (?, ?, ?, ?, ?)",
-            sorted(records),
-        )
-        connection.execute(
-            "CREATE INDEX postal_lookup ON postal_record(country_code, normalized_postal_code)"
-        )
+    try:
+        with sqlite3.connect(output_index) as connection:
+            connection.execute("PRAGMA temp_store = FILE")
+            connection.execute(
+                """CREATE TABLE postal_record (
+                    country_code TEXT NOT NULL,
+                    postal_code TEXT NOT NULL,
+                    normalized_postal_code TEXT NOT NULL,
+                    place_name TEXT NOT NULL,
+                    normalized_place_name TEXT NOT NULL,
+                    PRIMARY KEY (country_code, normalized_postal_code, normalized_place_name)
+                ) WITHOUT ROWID"""
+            )
+            with source_path.open("r", encoding="utf-8", newline="") as source:
+                for line_number, raw_line in enumerate(source, 1):
+                    line = raw_line.rstrip("\r\n")
+                    if not line or line.startswith("#"):
+                        continue
+                    columns = line.split("\t")
+                    if len(columns) < 3:
+                        raise ValueError(f"invalid postal source row: {line_number}")
+                    country_code, postal_code, place_name = columns[:3]
+                    if (
+                        len(country_code) != 2
+                        or not country_code.isalpha()
+                        or not postal_code.strip()
+                    ):
+                        raise ValueError(f"invalid postal source row: {line_number}")
+                    if not place_name.strip():
+                        continue
+                    record = (
+                        country_code.upper(),
+                        postal_code,
+                        normalize_postal_code(postal_code),
+                        place_name,
+                        normalize_location(place_name),
+                    )
+                    connection.execute(
+                        """INSERT INTO postal_record VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(country_code, normalized_postal_code, normalized_place_name)
+                        DO UPDATE SET postal_code = excluded.postal_code,
+                                      place_name = excluded.place_name
+                        WHERE (excluded.postal_code, excluded.place_name)
+                              < (postal_record.postal_code, postal_record.place_name)""",
+                        record,
+                    )
+            records = connection.execute("SELECT count(*) FROM postal_record").fetchone()[0]
+            if not records:
+                raise ValueError("postal source contains no records")
+            connection.execute(
+                "CREATE INDEX postal_lookup ON postal_record(country_code, normalized_postal_code)"
+            )
+    except Exception:
+        output_index.unlink(missing_ok=True)
+        raise
     manifest: dict[str, object] = {
         "manifest_schema_version": 1,
         "reference_data_version": reference_data_version,
@@ -253,7 +266,7 @@ def build_postal_index(
             "name": "CC BY 4.0",
             "url": "https://creativecommons.org/licenses/by/4.0/",
         },
-        "records": len(records),
+        "records": records,
     }
     output_manifest.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",

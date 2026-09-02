@@ -18,7 +18,7 @@ class FakeStrategy:
         )
 
 
-def test_health_reports_docling_strategy_and_invalid_pdf_fails_clearly(tmp_path) -> None:
+def test_health_and_analysis_fail_honestly_without_ai_client(tmp_path) -> None:
     client = TestClient(
         create_app(
             db_path=tmp_path / "reports.db",
@@ -30,14 +30,28 @@ def test_health_reports_docling_strategy_and_invalid_pdf_fails_clearly(tmp_path)
     response = client.post(
         "/analyze",
         files={"file": ("candidate.pdf", b"%PDF-1.7", "application/pdf")},
+        headers={"X-Analysis-Access-Token": "owner-token"},
     )
 
     assert health.json()["capabilities"]["base_analysis"] == {
-        "ready": True,
-        "strategy": "docling-luna",
+        "ready": False,
+        "strategy": None,
+        "reason": "ai_client_unavailable",
     }
-    assert response.status_code == 422
-    assert response.json()["detail"] == "document_conversion_failed"
+    assert health.json()["ready"] is False
+    assert response.status_code == 503
+    assert response.json()["detail"] == "analysis_strategy_unavailable"
+    analysis_id = response.headers["X-Analysis-ID"]
+    diagnostics = client.get(
+        f"/analyses/{analysis_id}/diagnostics",
+        headers={"X-Analysis-Access-Token": "owner-token"},
+    )
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["analysis"]["status"] == "unavailable"
+    assert client.get(
+        f"/analyses/{analysis_id}",
+        headers={"X-Analysis-Access-Token": "owner-token"},
+    ).status_code == 404
 
 
 def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:

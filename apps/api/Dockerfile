@@ -30,6 +30,6 @@ FROM base AS runtime
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 --start-period=5s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+    CMD python -c "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); sys.exit(0 if data.get('ready') is True else 1)"
 
 CMD ["uvicorn", "cv_validator.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

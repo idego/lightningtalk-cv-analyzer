@@ -1,4 +1,38 @@
 services:
+  feedback-init:
+    build:
+      context: ./apps/web
+      target: feedback-init
+    command: ["node", "scripts/init-feedback-access.mjs", "/config/feedback-access.json"]
+    environment:
+      BETTER_AUTH_DB_PATH: /app/data/docling_luna_auth.db
+      LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
+    volumes:
+      - web_auth_data:/app/data
+      - ./config/feedback-access.json:/config/feedback-access.json:ro
+    restart: "no"
+
+  geonames-init:
+    build:
+      context: ./apps/api
+      target: runtime
+    command: ["cv-geonames-bootstrap"]
+    environment:
+      GEONAMES_TARGET: /reference-data
+      GEONAMES_SNAPSHOT_VERSION: ${GEONAMES_SNAPSHOT_VERSION:-2026-09-02}
+      GEONAMES_CITIES500_URL: ${GEONAMES_CITIES500_URL:-https://download.geonames.org/export/dump/cities500.zip}
+      GEONAMES_COUNTRY_INFO_URL: ${GEONAMES_COUNTRY_INFO_URL:-https://download.geonames.org/export/dump/countryInfo.txt}
+      GEONAMES_ALTERNATE_NAMES_URL: ${GEONAMES_ALTERNATE_NAMES_URL:-https://download.geonames.org/export/dump/alternateNamesV2.zip}
+      GEONAMES_POSTAL_CODES_URL: ${GEONAMES_POSTAL_CODES_URL:-https://download.geonames.org/export/zip/allCountries.zip}
+    volumes:
+      - geonames_data:/reference-data
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   web:
     build:
       context: ./apps/web
@@ -22,6 +56,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      feedback-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     logging:
       driver: json-file
@@ -40,30 +76,31 @@ services:
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/docling_luna.db}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
-      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}
+      CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
       CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}
       CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS: ${CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS:-30}
       CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD: ${CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD:-500}
       CV_VALIDATOR_LINKEDIN_MAX_PROFILES: ${CV_VALIDATOR_LINKEDIN_MAX_PROFILES:-3}
-      CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3
-      CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json
-      CV_VALIDATOR_POSTAL_INDEX_PATH: ${CV_VALIDATOR_POSTAL_INDEX_PATH:-}
-      CV_VALIDATOR_POSTAL_MANIFEST_PATH: ${CV_VALIDATOR_POSTAL_MANIFEST_PATH:-}
+      CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/current/locations.sqlite3
+      CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/current/locations.manifest.json
+      CV_VALIDATOR_POSTAL_INDEX_PATH: /app/reference-data/current/postal-codes.sqlite3
+      CV_VALIDATOR_POSTAL_MANIFEST_PATH: /app/reference-data/current/postal-codes.manifest.json
       CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: "true"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
     volumes:
       - cv_validator_data:/app/data
-      - type: bind
-        source: ${CV_VALIDATOR_REFERENCE_DATA_DIR:-./data/geonames-build/2026-08-21}
+      - type: volume
+        source: geonames_data
         target: /app/reference-data
         read_only: true
-        bind:
-          create_host_path: false
+    depends_on:
+      geonames-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); sys.exit(0 if data.get('ready') is True else 1)"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -95,3 +132,4 @@ services:
 volumes:
   cv_validator_data:
   web_auth_data:
+  geonames_data:

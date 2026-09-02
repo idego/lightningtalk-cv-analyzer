@@ -222,6 +222,8 @@
         "status": { "$ref": "#/$defs/status" },
         "accepted_ids": { "type": "array", "items": { "type": "string" }, "maxItems": 300 },
         "rejected": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
+        "annotations": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
+        "merge_projections": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
         "merged_ids": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "maxItems": 300 },
         "relation_corrections": { "type": "array", "items": { "type": "object" }, "maxItems": 300 },
         "added_profile_fields": {

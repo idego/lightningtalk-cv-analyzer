@@ -38,7 +38,12 @@ class CompanyResearchService:
     ) -> dict[str, Any]:
         request = request or build_company_research_request(stored_report)
         payload, response_model, usage = self.researcher.research(request)
-        validate_company_research(payload, request=request)
+        try:
+            validate_company_research(payload, request=request)
+        except CompanyResearchInvalidResponse as exc:
+            exc.usage = usage
+            exc.model = response_model
+            raise
         result = deepcopy(payload)
         result.update({
             "status": "completed",

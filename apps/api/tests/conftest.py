@@ -1,4 +1,8 @@
+import os
+
 import pytest
+
+os.environ.setdefault("CV_VALIDATOR_AI_ENABLED", "false")
 
 from cv_validator.domain import ComponentVersion
 from cv_validator.location import (
@@ -86,7 +90,9 @@ def valid_report(
                 "status": "completed",
                 "accepted_ids": ["employment-1", "education-1"],
                 "rejected": [],
+                "annotations": [],
                 "merged_ids": [],
+                "merge_projections": [],
                 "relation_corrections": [],
                 "added_profile_fields": [],
                 "added_candidate_ids": ["education-1"],

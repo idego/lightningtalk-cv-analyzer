@@ -21,9 +21,9 @@ from cv_validator.research.subjects import (
     supported_profile_field,
 )
 
-DISCOVERY_VERSION = "linkedin-discovery-v2"
+DISCOVERY_VERSION = "linkedin-discovery-v3"
 COMPARISON_VERSION = "linkedin-comparison-v2"
-PROMPT_VERSION = "linkedin-research-prompt-v3"
+PROMPT_VERSION = "linkedin-research-prompt-v5"
 DISCOVERY_SCHEMA_VERSION = "linkedin-discovery-schema-v3"
 MAX_SEARCHES = 4
 DEFAULT_CONNECTION_THRESHOLD = 500
@@ -49,12 +49,17 @@ class LinkedInDiscoveryService:
                 payload["possible_profiles"],
                 key=lambda profile: str(profile.get("profile_url", "")) if isinstance(profile, dict) else "",
             )[: self.max_profiles]
-        validate_discovery(
-            payload,
-            request=request,
-            connection_threshold=self.connection_threshold,
-            max_profiles=self.max_profiles,
-        )
+        try:
+            validate_discovery(
+                payload,
+                request=request,
+                connection_threshold=self.connection_threshold,
+                max_profiles=self.max_profiles,
+            )
+        except LinkedInResearchInvalidResponse as exc:
+            exc.usage = usage
+            exc.model = response_model
+            raise
         return _completed(payload, DISCOVERY_VERSION, DISCOVERY_SCHEMA_VERSION, response_model, usage)
 
 

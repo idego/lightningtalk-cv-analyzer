@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class CompanyResearchError(Exception):
+class ResearchError(Exception):
+    def __init__(self, *args: Any, usage: Any = None, model: str | None = None) -> None:
+        super().__init__(*args)
+        self.usage = usage or {}
+        self.model = model
+
+
+class CompanyResearchError(ResearchError):
     pass
 
 
@@ -13,8 +20,14 @@ class CompanyResearchTimeout(CompanyResearchError):
 
 
 class CompanyResearchInvalidResponse(CompanyResearchError):
-    def __init__(self, reason: str = "invalid_response") -> None:
-        super().__init__(reason)
+    def __init__(
+        self,
+        reason: str = "invalid_response",
+        *,
+        usage: Any = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(reason, usage=usage, model=model)
         self.reason = reason
 
 
@@ -27,7 +40,7 @@ class CompanyResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
 
 
-class EducationResearchError(Exception):
+class EducationResearchError(ResearchError):
     pass
 
 
@@ -36,8 +49,14 @@ class EducationResearchTimeout(EducationResearchError):
 
 
 class EducationResearchInvalidResponse(EducationResearchError):
-    def __init__(self, reason: str = "invalid_response") -> None:
-        super().__init__(reason)
+    def __init__(
+        self,
+        reason: str = "invalid_response",
+        *,
+        usage: Any = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(reason, usage=usage, model=model)
         self.reason = reason
 
 
@@ -50,7 +69,7 @@ class EducationResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
 
 
-class LinkedInResearchError(Exception):
+class LinkedInResearchError(ResearchError):
     pass
 
 

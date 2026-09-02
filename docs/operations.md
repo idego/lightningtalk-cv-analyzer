@@ -6,11 +6,11 @@
   and version through health and every report.
 - `OPENAI_API_KEY` is required when public research or a Luna strategy is
   enabled. Never commit the key.
-- Mount the validated GeoNames index and manifest; runtime analysis never
-  downloads reference data.
-- Optionally mount the separately built GeoNames postal-code index and set both
-  `CV_VALIDATOR_POSTAL_INDEX_PATH` and `CV_VALIDATOR_POSTAL_MANIFEST_PATH`.
-  Without that pair postal validation remains explicitly unavailable.
+- Let the one-shot `geonames-init` service build and validate both GeoNames
+  index/manifest pairs in its persistent volume. The API mounts the promoted
+  release read-only, and runtime CV analysis never downloads reference data.
+- For an approved offline snapshot, use `REFERENCE_DATA_MODE=operator`; see
+  `docs/reference-data/geonames.md` for refresh and recovery procedures.
 - Keep only the web service public. The API stays on the internal Compose
   network.
 - Persist and back up the API and authentication SQLite volumes.
@@ -18,6 +18,41 @@
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.
+
+## Contextual feedback rollout
+
+Feedback is decision-neutral and never edits a report, analysis output,
+research result, retry state, or hiring action. Targets and responses live with
+the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
+`web_auth_data`. Comments are limited to 180 characters, contact details and
+URLs are rejected, and inbox entries contain no CV text, prompt/model output,
+research content, filenames, raw exceptions, request bodies, or logs.
+
+Access is initialized automatically by the one-shot `feedback-init` Compose
+service from `config/feedback-access.json`. It seeds the initial owners only
+when the access table is empty; later deploys never restore access changed in
+the UI.
+
+Use this production sequence:
+
+1. Back up both named volumes.
+2. Deploy and verify that `feedback-init` completed successfully.
+3. Sign in with one of the configured owner addresses and verify capture and
+   inbox access. Owners can then enable or disable new feedback in the panel.
+
+Owners grant or revoke `owner`/`reviewer` access by exact allowed-domain email
+in the Feedback access page; access applies when that address signs in. The
+same page controls collection of new feedback without disabling the historical
+inbox. The last active owner cannot be removed. The API bounds a pseudonymous
+actor to 30 writes per minute. Reviewers may use a correlation ID only to find
+separately protected operational logs; it is not an invitation to copy logs
+into feedback.
+
+Disabling collection in the owner panel preserves existing feedback and inbox
+access. For an application rollback, check out the previous reviewed SHA and
+run `make deploy`. Both paths preserve additive tables and both existing named volumes. Never use
+`docker compose down -v`, rename the Compose project, or delete/recreate either
+volume.
 
 ## Canonical commands
 

@@ -126,6 +126,7 @@ def merge_subject_results(
                 "normalized_subject": descriptor.normalized_subjects[0],
                 "status": status,
                 "accessed_at": result.get("accessed_at"),
+                "saved_usage": deepcopy(result.get("cache", {}).get("saved_usage", {})),
             }
             for descriptor, status, result in zip(descriptors, statuses, results, strict=True)
         ],
@@ -141,6 +142,7 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
         "search_limitations": deepcopy(result["search_limitations"]),
         "accessed_at": result["accessed_at"],
         "source": result["source"],
+        "source_usage": deepcopy(result.get("usage", {})),
     }
     if category == "company":
         common["organizations"] = []
@@ -158,8 +160,8 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
         for item in result["credentials"]:
             public_findings = [deepcopy(finding) for finding in item["findings"] if finding["kind"] not in {"dates", "cv_consistency"}]
             cached = {key: deepcopy(item[key]) for key in (
-                "institution", "program", "degree", "certificate", "institution_exists",
-                "program_exists", "degree_exists", "certificate_exists", "accreditation_status",
+                "institution", "program", "degree", "certificate",
+                "program_exists", "degree_exists", "certificate_exists",
                 "city", "country", "confidence", "uncertainty",
             )}
             cached.update({"dates": None, "cv_consistency": "evidence_unavailable", "location_difference_for_review": None, "findings": public_findings})
@@ -169,12 +171,17 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
 
 def materialize_cache_hit(category: CacheCategory, payload: dict[str, Any], *, descriptor: CacheDescriptor) -> dict[str, Any]:
     result = deepcopy(payload)
+    saved_usage = result.pop("source_usage", {})
     result.update({
         "status": "completed", "authority": "ai_research", "source": "openai_web_search_cache",
         "versions": {"research": descriptor.research_version, "prompt": descriptor.prompt_version, "schema": descriptor.schema_version},
         "model": {"provider": "openai", "configured": descriptor.model_version, "response": descriptor.model_version},
         "usage": {"input_tokens": 0, "output_tokens": 0, "cached": True},
-        "cache": {"status": "hit", "format_version": descriptor.cache_format_version},
+        "cache": {
+            "status": "hit",
+            "format_version": descriptor.cache_format_version,
+            "saved_usage": saved_usage,
+        },
     })
     return result
 

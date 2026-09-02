@@ -17,6 +17,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN ./node_modules/.bin/next build
 
+FROM deps AS feedback-init
+COPY scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+CMD ["node", "scripts/init-feedback-access.mjs"]
+
 FROM base AS runtime
 ENV NODE_ENV=production
 COPY --from=build /app/.next/standalone ./

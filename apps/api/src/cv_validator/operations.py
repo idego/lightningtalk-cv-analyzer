@@ -4,10 +4,26 @@ import json
 import logging
 import threading
 from collections import Counter
+from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
+
+from cv_validator.usage import PricingCatalog, normalize_usage
 
 logger = logging.getLogger("cv_validator.operations")
+
+
+def configure_structured_logging() -> None:
+    """Emit one JSON object per application log line in containers and tests."""
+
+    if getattr(logger, "_cv_json_configured", False):
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.handlers[:] = [handler]
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    logger._cv_json_configured = True  # type: ignore[attr-defined]
 
 
 class OperationsTelemetry:
@@ -32,14 +48,163 @@ class OperationsTelemetry:
             return {"counters": dict(self._counters), "latency_ms_totals": dict(self._latency_ms)}
 
 
+_SAFE_LOG_FIELDS = {
+    "correlation_id",
+    "analysis_id",
+    "operation",
+    "category",
+    "provider",
+    "configured_model",
+    "response_model",
+    "reasoning_effort",
+    "attempt",
+    "outcome",
+    "status_code",
+    "duration_ms",
+    "latency_ms",
+    "error_code",
+    "reason",
+    "raw_candidate_count",
+    "evidence_valid_count",
+    "accepted_count",
+    "ambiguous_count",
+    "rejected_count",
+    "evidence_invalid_count",
+    "extracted_count",
+    "annotated_count",
+    "corrected_count",
+    "added_count",
+    "suspected_hallucination_count",
+    "uncertain_count",
+    "research_eligible_count",
+    "coverage_gaps_count",
+    "input_tokens",
+    "cached_input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "cache_outcome",
+}
+
+
 def safe_log(event: str, **fields: Any) -> None:
     allowed = {"event": event}
-    for key in ("correlation_id", "analysis_id", "category", "outcome", "status_code", "duration_ms", "error_code", "reason"):
+    for key in _SAFE_LOG_FIELDS:
         value = fields.get(key)
         if isinstance(value, (str, int, float)):
             allowed[key] = value
+    histogram = fields.get("rejection_reason_histogram")
+    if isinstance(histogram, dict) and all(
+        isinstance(key, str) and isinstance(value, int)
+        for key, value in histogram.items()
+    ):
+        allowed["rejection_reason_histogram"] = histogram
     logger.info(json.dumps(allowed, sort_keys=True, separators=(",", ":")))
 
 
 def timer() -> float:
     return perf_counter()
+
+
+class AnalysisRecorder:
+    """Privacy-safe sink shared by conversion, AI passes, persistence, and research."""
+
+    def __init__(
+        self,
+        *,
+        analysis_id: str,
+        correlation_id: str,
+        diagnostic_sink: Callable[[dict[str, Any]], None],
+        usage_sink: Callable[[dict[str, Any]], None],
+        pricing: PricingCatalog,
+    ) -> None:
+        self.analysis_id = analysis_id
+        self.correlation_id = correlation_id
+        self._diagnostic_sink = diagnostic_sink
+        self._usage_sink = usage_sink
+        self._pricing = pricing
+
+    def emit(self, event: str, **fields: Any) -> None:
+        payload = {
+            "event": event,
+            "analysis_id": self.analysis_id,
+            "correlation_id": self.correlation_id,
+            **{key: value for key, value in fields.items() if key in _SAFE_LOG_FIELDS or key == "rejection_reason_histogram"},
+        }
+        self._diagnostic_sink(payload)
+        safe_log(event, **{key: value for key, value in payload.items() if key != "event"})
+
+    def record_ai_attempt(
+        self,
+        *,
+        operation: str,
+        category: str,
+        provider: str,
+        configured_model: str,
+        response_model: str | None,
+        reasoning_effort: str,
+        attempt: int,
+        outcome: str,
+        started_at: str,
+        completed_at: str,
+        latency_ms: int,
+        usage: Any,
+        error_code: str | None = None,
+        cache_outcome: str | None = None,
+        saved_usage: Any = None,
+    ) -> dict[str, Any]:
+        normalized = normalize_usage(usage)
+        estimate = self._pricing.estimate(response_model or configured_model, normalized)
+        saved = normalize_usage(saved_usage)
+        saved_estimate = self._pricing.estimate(
+            response_model or configured_model,
+            saved,
+        ) if saved_usage is not None else None
+        event = {
+            "analysis_id": self.analysis_id,
+            "correlation_id": self.correlation_id,
+            "operation": operation,
+            "category": category,
+            "provider": provider,
+            "configured_model": configured_model,
+            "response_model": response_model,
+            "reasoning_effort": reasoning_effort,
+            "attempt": attempt,
+            "outcome": outcome,
+            "error_code": error_code,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "latency_ms": latency_ms,
+            **normalized,
+            "estimated_cost_usd": estimate.estimated_cost_usd,
+            "pricing_version": estimate.pricing_version,
+            "pricing_reason": estimate.unavailable_reason,
+            "cache_outcome": cache_outcome,
+            "saved_input_tokens": saved["input_tokens"] if saved_usage is not None else 0,
+            "saved_cached_input_tokens": saved["cached_input_tokens"] if saved_usage is not None else 0,
+            "saved_output_tokens": saved["output_tokens"] if saved_usage is not None else 0,
+            "saved_total_tokens": saved["total_tokens"] if saved_usage is not None else 0,
+            "saved_cost_usd": (
+                saved_estimate.estimated_cost_usd if saved_estimate is not None else None
+            ),
+        }
+        self._usage_sink(event)
+        self.emit(
+            "ai_pass_completed" if outcome == "completed" else "ai_pass_failed",
+            operation=operation,
+            category=category,
+            provider=provider,
+            configured_model=configured_model,
+            response_model=response_model,
+            reasoning_effort=reasoning_effort,
+            attempt=attempt,
+            outcome=outcome,
+            error_code=error_code,
+            latency_ms=latency_ms,
+            cache_outcome=cache_outcome,
+            **normalized,
+        )
+        return event
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()

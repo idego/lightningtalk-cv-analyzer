@@ -11,13 +11,13 @@ from cv_validator.research.domain import CompanyResearchClientError, CompanyRese
 from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LIMIT
 
 
-# Twelve organizations or credentials with findings exceeded the previous 4096-token cap.
+
+# Larger batches with cited findings can exceed the old 4096-token ceiling.
 MAX_OUTPUT_TOKENS = {"company": 12000, "education": 12000, "linkedin": 6000}
 
 
-def _incomplete(response) -> bool:
+def _incomplete(response: Any) -> bool:
     return getattr(response, "status", None) == "incomplete"
-
 
 class OpenAIResponsesCompanyResearcher:
     def __init__(self, *, client=None, api_key: str | None = None, timeout_seconds: float = 120.0):
@@ -44,11 +44,15 @@ class OpenAIResponsesCompanyResearcher:
         except openai.APIError as exc:
             raise CompanyResearchClientError() from exc
         if _incomplete(response):
-            raise CompanyResearchInvalidResponse("truncated")
+            raise CompanyResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise CompanyResearchInvalidResponse("invalid_json") from exc
+            raise CompanyResearchInvalidResponse(
+                "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
@@ -85,15 +89,19 @@ class OpenAIResponsesEducationResearcher:
         except openai.APIError as exc:
             raise EducationResearchClientError() from exc
         if _incomplete(response):
-            raise EducationResearchInvalidResponse("truncated")
+            raise EducationResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise EducationResearchInvalidResponse("invalid_json") from exc
+            raise EducationResearchInvalidResponse(
+                "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise EducationResearchInvalidResponse()
+            raise EducationResearchInvalidResponse("search_count")
         payload["searches_performed"] = actual_queries
         if len(payload.get("credentials", [])) == len(request.input_facts):
             for credential, input_fact in zip(
@@ -150,11 +158,15 @@ class OpenAIResponsesLinkedInResearcher:
         except openai.APIError as exc:
             raise LinkedInResearchClientError() from exc
         if _incomplete(response):
-            raise LinkedInResearchInvalidResponse("truncated")
+            raise LinkedInResearchInvalidResponse(
+                "truncated", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            )
         try:
             payload = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:
-            raise LinkedInResearchInvalidResponse("json_parse") from exc
+            raise LinkedInResearchInvalidResponse(
+                "json_parse", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
+            ) from exc
         searches = _search_queries(response)
         if not searches or len(searches) > 4:
             raise LinkedInResearchInvalidResponse("search_count")
@@ -164,6 +176,7 @@ class OpenAIResponsesLinkedInResearcher:
             _retain_sourced_linkedin_profiles(
                 payload, sources, connection_threshold=self._connection_threshold
             )
+            _normalize_linkedin_confidence(payload, input_payload)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
 
@@ -250,6 +263,9 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
                 ),
             })
             normalized = True
+        elif organization.get("confidence") == "high" and len(retained_findings) < 2:
+            organization["confidence"] = "medium"
+            normalized = True
     if normalized:
         payload.setdefault("search_limitations", []).append(
             "Some URLs not supported by returned web-search origins were omitted."
@@ -280,7 +296,6 @@ def _retain_cited_education_findings(
         credential["findings"] = retained_findings
         retained_kinds = {finding["kind"] for finding in retained_findings}
         for field, kind in (
-            ("institution_exists", "institution"),
             ("program_exists", "program"),
             ("degree_exists", "degree"),
             ("certificate_exists", "certificate"),
@@ -289,8 +304,6 @@ def _retain_cited_education_findings(
                 credential[field] = "evidence_unavailable"
         if "dates" not in retained_kinds:
             credential["dates"] = None
-        if "accreditation" not in retained_kinds:
-            credential["accreditation_status"] = "evidence_unavailable"
         if "location" not in retained_kinds:
             credential["city"] = None
             credential["country"] = None
@@ -302,6 +315,9 @@ def _retain_cited_education_findings(
             credential["uncertainty"] = (
                 "The returned web sources did not support a retained finding."
             )
+        elif credential.get("confidence") == "high" and len(retained_findings) < 2:
+            credential["confidence"] = "medium"
+            normalized = True
     if normalized:
         payload.setdefault("search_limitations", []).append(
             "Some claims without support from returned web-search origins were omitted."
@@ -398,3 +414,20 @@ def _retain_sourced_linkedin_profiles(
         payload.setdefault("search_limitations", []).append(
             "Unsourced profile details were omitted from the retained result."
         )
+
+
+def _normalize_linkedin_confidence(payload: dict[str, Any], input_payload: dict[str, Any]) -> None:
+    hints = [
+        str(value).strip().casefold()
+        for hint in input_payload.get("search_hints", [])
+        if isinstance(hint, dict)
+        for value in hint.values()
+        if isinstance(value, str) and value.strip()
+    ]
+    conflict_words = ("conflict", "different", "does not match", "mismatch", "unrelated")
+    for profile in payload.get("possible_profiles", []):
+        uncertainty = str(profile.get("uncertainty", "")).casefold()
+        if any(word in uncertainty for word in conflict_words):
+            profile["confidence"] = "low"
+        elif profile.get("confidence") == "high" and not any(hint in uncertainty for hint in hints):
+            profile["confidence"] = "medium"

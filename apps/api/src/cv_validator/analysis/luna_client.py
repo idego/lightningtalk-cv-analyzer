@@ -22,9 +22,11 @@ MAX_OUTPUT_TOKENS = {
 
 
 class ModelPassError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, usage: Any = None, model: str | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.usage = usage or {}
+        self.model = model
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,8 @@ class LunaAnalysisClient(Protocol):
 
 
 class OpenAIResponsesLunaClient:
+    is_live = True
+
     def __init__(
         self,
         *,
@@ -90,7 +94,11 @@ class OpenAIResponsesLunaClient:
         except openai.APIError as exc:
             raise ModelPassError("client_error") from exc
         if getattr(response, "status", None) == "incomplete":
-            raise ModelPassError("truncated")
+            raise ModelPassError(
+                "truncated",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
         try:
             parsed = json.loads(response.output_text)
         except (TypeError, json.JSONDecodeError) as exc:

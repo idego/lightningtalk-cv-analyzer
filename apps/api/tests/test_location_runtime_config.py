@@ -136,7 +136,7 @@ def test_partial_postal_configuration_fails_loudly(monkeypatch) -> None:
         load_postal_code_resolver()
 
 
-def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
+def test_base_compose_bootstraps_persistent_read_only_reference_data() -> None:
     root = (
         Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
         if "CV_VALIDATOR_REPO_ROOT" in os.environ
@@ -148,18 +148,22 @@ def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
     gitignore = (root / ".gitignore").read_text(encoding="utf-8")
 
     assert "CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER: \"true\"" in compose
-    assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}" in compose
-    assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3" in compose
-    assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json" in compose
-    assert "CV_VALIDATOR_POSTAL_INDEX_PATH" in compose
-    assert "CV_VALIDATOR_POSTAL_MANIFEST_PATH" in compose
-    assert "create_host_path: false" in compose
+    assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}" in compose
+    assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/current/locations.sqlite3" in compose
+    assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/current/locations.manifest.json" in compose
+    assert "CV_VALIDATOR_POSTAL_INDEX_PATH: /app/reference-data/current/postal-codes.sqlite3" in compose
+    assert "CV_VALIDATOR_POSTAL_MANIFEST_PATH: /app/reference-data/current/postal-codes.manifest.json" in compose
+    assert "geonames-init:" in compose
+    assert "condition: service_completed_successfully" in compose
+    assert "geonames_data:/reference-data" in compose
+    assert "source: geonames_data" in compose
+    assert "read_only: true" in compose
     assert "reference-data" not in dockerfile
     assert "data" in dockerignore.splitlines()
     assert "data/" in gitignore.splitlines()
 
 
-def test_optional_compose_overlay_requires_read_only_operator_directory() -> None:
+def test_optional_compose_overlay_bypasses_initializer_with_read_only_directory() -> None:
     root = (
         Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
         if "CV_VALIDATOR_REPO_ROOT" in os.environ
@@ -170,6 +174,7 @@ def test_optional_compose_overlay_requires_read_only_operator_directory() -> Non
     )
 
     assert "CV_VALIDATOR_REFERENCE_DATA_DIR:?" in overlay
-    assert "Compatibility overlay" in overlay
+    assert 'command: ["true"]' in overlay
+    assert "volumes: !override" in overlay
     assert "read_only: true" in overlay
     assert "create_host_path: false" in overlay

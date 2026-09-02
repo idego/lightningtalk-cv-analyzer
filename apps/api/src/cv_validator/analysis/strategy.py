@@ -26,6 +26,9 @@ class AnalysisInput:
     source_format: SourceFormat
     report_language: str
     sha256: str
+    analysis_id: str | None = None
+    correlation_id: str | None = None
+    recorder: Any = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_upload(
@@ -59,6 +62,9 @@ class AnalysisStrategy(Protocol):
     @property
     def ready(self) -> bool: ...
 
+    @property
+    def readiness_reason(self) -> str | None: ...
+
     def analyze(self, request: AnalysisInput) -> dict[str, Any]: ...
 
 
@@ -70,6 +76,10 @@ class UnavailableAnalysisStrategy:
     @property
     def ready(self) -> bool:
         return False
+
+    @property
+    def readiness_reason(self) -> str:
+        return "analysis_strategy_unavailable"
 
     def analyze(self, request: AnalysisInput) -> dict[str, Any]:
         del request
