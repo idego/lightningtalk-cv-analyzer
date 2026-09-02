@@ -154,6 +154,34 @@ def test_docling_converts_text_pdf_and_docx_without_models(source_format) -> Non
         assert any(block.table_id and block.row_index == 0 for block in source.blocks)
 
 
+def test_pdf_wrapped_lines_merge_into_one_block_but_entries_stay_separate() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    canvas.setFont("Helvetica-Bold", 13)
+    canvas.drawString(72, 760, "EDUCATION")
+    canvas.setFont("Helvetica", 10)
+    canvas.drawString(72, 740, "Master of Computer Science 2017 - 2020 Example University of Science and")
+    canvas.drawString(72, 726, "Technology, Jilin, China")
+    canvas.drawString(72, 700, "Bachelor of Software Engineering 2013 - 2017 Example University,")
+    canvas.drawString(72, 686, "Faisalabad, Punjab, Pakistan")
+    canvas.drawString(90, 660, "- First bullet item")
+    canvas.drawString(90, 646, "- Second bullet item")
+    canvas.save()
+
+    source = DoclingTextConverter().convert(output.getvalue(), "wrapped.pdf", SourceFormat.PDF)
+    texts = [block.text for block in source.blocks]
+
+    assert texts == [
+        "EDUCATION",
+        "Master of Computer Science 2017 - 2020 Example University of Science and Technology, Jilin, China",
+        "Bachelor of Software Engineering 2013 - 2017 Example University, Faisalabad, Punjab, Pakistan",
+        "- First bullet item",
+        "- Second bullet item",
+    ]
+    assert [block.order for block in source.blocks] == list(range(len(source.blocks)))
+    assert all(block.bbox is not None and block.page_number == 1 for block in source.blocks)
+
+
 def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
     output = BytesIO()
     canvas = Canvas(output)
@@ -227,6 +255,61 @@ def test_evidence_excerpt_must_contain_the_semantic_value() -> None:
 
     assert state.employment == []
     assert {item["reason_code"] for item in state.rejected} >= {"missing_organization"}
+
+
+def test_value_spanning_adjacent_blocks_is_supported_by_ordered_excerpts() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Master of Computer Science 2017 - 2020 Changchun University of Science and", order=0),
+        SourceBlock("b-1", "Technology, Jilin, China", order=1),
+        SourceBlock("b-2", "filler", order=2),
+        SourceBlock("b-3", "University of Agriculture,", order=3),
+        SourceBlock("b-4", "Faisalabad, Punjab, Pakistan", order=4),
+    ), "pdf")
+    spanning = {
+        "id": "inst-1",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+            {"block_id": "b-1", "excerpt": "Technology"},
+        ],
+    }
+    partial_second = {
+        "id": "inst-2",
+        "value": "University of Agriculture",
+        "evidence": [
+            {"block_id": "b-3", "excerpt": "University of Agriculture,"},
+            {"block_id": "b-4", "excerpt": "Faisalabad, Punjab, Pakistan"},
+        ],
+    }
+    non_adjacent = {
+        "id": "inst-3",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+            {"block_id": "b-4", "excerpt": "Faisalabad, Punjab, Pakistan"},
+        ],
+    }
+    wrong_order = {
+        "id": "inst-4",
+        "value": "Changchun University of Science and Technology",
+        "evidence": [
+            {"block_id": "b-1", "excerpt": "Technology"},
+            {"block_id": "b-0", "excerpt": "Changchun University of Science and"},
+        ],
+    }
+    empty = {"institution": None, "program": None, "degree": None, "certificate": None,
+             "start_date": None, "end_date": None, "location": None}
+    state = validate_specialists(source, {}, {}, {"records": [
+        {"id": "edu-1", **empty, "institution": spanning},
+        {"id": "edu-2", **empty, "institution": partial_second},
+        {"id": "edu-3", **empty, "institution": non_adjacent},
+        {"id": "edu-4", **empty, "institution": wrong_order},
+    ]})
+
+    assert [record["id"] for record in state.education] == ["edu-1", "edu-2"]
+    assert state.education[0]["institution"]["value"] == "Changchun University of Science and Technology"
+    assert [item["source_id"] for item in state.education[0]["institution"]["evidence"]] == ["b-0", "b-1"]
+    assert {item["id"] for item in state.rejected} == {"edu-3", "edu-4"}
 
 
 def test_reviewer_unknown_ids_and_invalid_added_evidence_are_rejected() -> None:

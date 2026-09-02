@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
@@ -8,7 +9,7 @@ from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
 from docling.datamodel.base_models import DocumentStream, InputFormat
 from docling.document_converter import DocumentConverter, FormatOption, WordFormatOption
 from docling.pipeline.simple_pipeline import SimplePipeline
-from docling_core.types.doc import DocItemLabel, DoclingDocument, ProvenanceItem
+from docling_core.types.doc import BoundingBox, DocItemLabel, DoclingDocument, ProvenanceItem
 
 from cv_validator.analysis.source import SourceBlock, SourceDocument
 from cv_validator.analysis.strategy import AnalysisStrategyError, SourceFormat
@@ -54,24 +55,22 @@ class TextOnlyPdfBackend(DeclarativeDocumentBackend):
                 size = page.get_size()
                 page_number = page_index + 1
                 document.add_page(page_no=page_number, size=size)
-                cells = sorted(
-                    page.get_text_cells(),
-                    key=lambda cell: (
-                        round(cell.rect.to_bounding_box().t, 3),
-                        round(cell.rect.to_bounding_box().l, 3),
+                lines = sorted(
+                    (
+                        _Line(cell.text.strip(), cell.rect.to_bounding_box())
+                        for cell in page.get_text_cells()
+                        if cell.text.strip()
                     ),
+                    key=lambda line: (round(line.bbox.t, 3), round(line.bbox.l, 3)),
                 )
-                for cell in cells:
-                    text = cell.text.strip()
-                    if not text:
-                        continue
+                for paragraph in _merge_wrapped_lines(lines):
                     document.add_text(
                         label=DocItemLabel.TEXT,
-                        text=text,
+                        text=paragraph.text,
                         prov=ProvenanceItem(
                             page_no=page_number,
-                            bbox=cell.rect.to_bounding_box(),
-                            charspan=(0, len(text)),
+                            bbox=paragraph.bbox,
+                            charspan=(0, len(paragraph.text)),
                         ),
                     )
             finally:
@@ -81,6 +80,63 @@ class TextOnlyPdfBackend(DeclarativeDocumentBackend):
     def unload(self) -> None:
         self._pdf.unload()
         super().unload()
+
+
+@dataclass(frozen=True)
+class _Line:
+    text: str
+    bbox: BoundingBox
+
+    @property
+    def height(self) -> float:
+        return abs(float(self.bbox.b) - float(self.bbox.t))
+
+
+# A continuation line sits below the previous one by less than this share of the
+# line height; separate entries in CVs are typically spaced by a full line or more.
+MAX_WRAP_GAP_RATIO = 0.6
+MAX_HEIGHT_DRIFT_RATIO = 0.1
+MAX_INDENT_DRIFT_POINTS = 24.0
+BULLET_PREFIXES = ("●", "•", "◦", "○", "▪", "▫", "■", "‣", "-", "–", "—", "*", "·")
+
+
+def _merge_wrapped_lines(lines: list[_Line]) -> list[_Line]:
+    paragraphs: list[_Line] = []
+    for line in lines:
+        if paragraphs and _continues(paragraphs[-1], line):
+            previous = paragraphs[-1]
+            paragraphs[-1] = _Line(
+                text=f"{previous.text} {line.text}",
+                bbox=BoundingBox(
+                    l=min(previous.bbox.l, line.bbox.l),
+                    t=min(previous.bbox.t, line.bbox.t),
+                    r=max(previous.bbox.r, line.bbox.r),
+                    b=max(previous.bbox.b, line.bbox.b),
+                    coord_origin=previous.bbox.coord_origin,
+                ),
+            )
+        else:
+            paragraphs.append(line)
+    return paragraphs
+
+
+def _continues(previous: _Line, current: _Line) -> bool:
+    """Whether `current` is the wrapped continuation of `previous` (same paragraph)."""
+    if current.text.startswith(BULLET_PREFIXES):
+        return False
+    reference = max(previous.height, current.height)
+    if reference <= 0:
+        return False
+    if abs(previous.height - current.height) > MAX_HEIGHT_DRIFT_RATIO * reference:
+        return False
+    gap = float(current.bbox.t) - float(previous.bbox.b)
+    if gap < -0.5 * reference or gap > MAX_WRAP_GAP_RATIO * reference:
+        return False
+    # Guard multi-column layouts: the lines must share horizontal extent.
+    if float(current.bbox.l) >= float(previous.bbox.r) or float(current.bbox.r) <= float(previous.bbox.l):
+        return False
+    indent = float(current.bbox.l) - float(previous.bbox.l)
+    return -MAX_INDENT_DRIFT_POINTS <= indent <= MAX_INDENT_DRIFT_POINTS
 
 
 class DoclingTextConverter:

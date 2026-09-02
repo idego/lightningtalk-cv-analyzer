@@ -361,6 +361,8 @@ def _validate_field(source: SourceDocument, raw: Any) -> dict[str, Any] | None:
     blocks = source.by_id()
     final_evidence: list[dict[str, Any]] = []
     block_ids: list[str] = []
+    cited_blocks: list[SourceBlock] = []
+    excerpts: list[str] = []
     for citation in evidence:
         if not isinstance(citation, dict):
             return None
@@ -369,11 +371,13 @@ def _validate_field(source: SourceDocument, raw: Any) -> dict[str, Any] | None:
         block = blocks.get(block_id)
         if block is None or not isinstance(excerpt, str) or not excerpt or excerpt not in block.text:
             return None
-        if value not in excerpt:
-            return None
         start = block.text.find(excerpt)
         final_evidence.append(block.evidence(start, start + len(excerpt)))
         block_ids.append(block.id)
+        cited_blocks.append(block)
+        excerpts.append(excerpt)
+    if not _excerpts_cover_value(value, excerpts, cited_blocks):
+        return None
     return {
         "_id": field_id,
         "_block_ids": tuple(block_ids),
@@ -381,6 +385,26 @@ def _validate_field(source: SourceDocument, raw: Any) -> dict[str, Any] | None:
         "status": "supported",
         "evidence": final_evidence,
     }
+
+
+def _excerpts_cover_value(value: str, excerpts: list[str], blocks: list[SourceBlock]) -> bool:
+    """A value is literal when one excerpt contains it, or when it is spelled out by
+    the excerpts read in order across consecutive blocks (a wrapped line)."""
+    if any(value in excerpt for excerpt in excerpts):
+        return True
+    if len(excerpts) < 2:
+        return False
+    for previous, current in zip(blocks, blocks[1:]):
+        if current.order != previous.order + 1 or current.page_number != previous.page_number:
+            return False
+        if previous.table_id != current.table_id or previous.row_index != current.row_index:
+            return False
+    joined = _normalize_space(" ".join(excerpts))
+    return _normalize_space(value) in joined
+
+
+def _normalize_space(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _relation_status(source: SourceDocument, fields: list[dict[str, Any]]) -> str:
