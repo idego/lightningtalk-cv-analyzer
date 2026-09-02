@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createAutoResearchOrchestrator,
   eligibleAutoResearchKinds,
+  withAnalysisAccessToken,
 } from "./auto-research.ts";
 
 function field(value) {
@@ -91,6 +92,44 @@ test("automatic research honors settings and capabilities", async () => {
   );
 
   assert.deepEqual(calls, ["/api/analyses/analysis-1/research/company"]);
+});
+
+test("automatic research calls every eligible research endpoint after base analysis", async () => {
+  const calls = [];
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: storage(),
+    maxConcurrency: 3,
+    fetcher: async (url) => {
+      calls.push(url);
+      const resultKey = url.endsWith("/company")
+        ? "company_research"
+        : url.endsWith("/education")
+          ? "education_research"
+          : "linkedin_discovery";
+      return { ok: true, status: 200, json: async () => ({ [resultKey]: {} }) };
+    },
+  });
+
+  await orchestrator.schedule(report(), settings());
+
+  assert.deepEqual(calls.sort(), [
+    "/api/analyses/analysis-1/research/company",
+    "/api/analyses/analysis-1/research/education",
+    "/api/analyses/analysis-1/research/linkedin/discovery",
+  ]);
+});
+
+test("batch access token is attached before automatic research eligibility is checked", () => {
+  const value = report();
+  delete value.analysis_access_token;
+
+  const prepared = withAnalysisAccessToken(value, "batch-token");
+
+  assert.equal(prepared.analysis_access_token, "batch-token");
+  assert.deepEqual(
+    [...eligibleAutoResearchKinds(prepared)].sort(),
+    ["company", "education", "linkedin"],
+  );
 });
 
 test("rerender does not repeat completed automatic research", async () => {

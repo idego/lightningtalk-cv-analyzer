@@ -97,13 +97,12 @@ def test_batch_limits_are_enforced_before_analysis(tmp_path) -> None:
 
 
 def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:
-    client = TestClient(
-        create_app(
-            db_path=tmp_path / "reports.db",
-            openai_settings=OpenAISettings(enabled=False),
-            analysis_strategy=FakeStrategy(),
-        )
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=False),
+        analysis_strategy=FakeStrategy(),
     )
+    client = TestClient(app)
     owner_headers = {"X-Analysis-Access-Token": "owner-token"}
     created = client.post(
         "/analyze",
@@ -112,7 +111,19 @@ def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:
     ).json()
     analysis_id = created["analysis_id"]
 
-    assert client.get("/analyses", headers=owner_headers).json()[0]["analysis_id"] == analysis_id
+    purge_expired = app.state.store.purge_expired
+    purge_calls = 0
+
+    def tracked_purge_expired():
+        nonlocal purge_calls
+        purge_calls += 1
+        return purge_expired()
+
+    app.state.store.purge_expired = tracked_purge_expired
+    history = client.get("/analyses", headers=owner_headers)
+
+    assert history.json()["analyses"][0]["analysis_id"] == analysis_id
+    assert purge_calls == 1
     assert client.get(
         f"/analyses/{analysis_id}",
         headers={"X-Analysis-Access-Token": "another-owner"},

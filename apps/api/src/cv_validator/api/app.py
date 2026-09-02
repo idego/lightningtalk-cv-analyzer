@@ -509,7 +509,10 @@ def create_app(
     def list_analyses(
         x_analysis_access_token: str | None = Header(default=None),
     ) -> JSONResponse:
-        return JSONResponse(store.list_analyses(x_analysis_access_token))
+        store.purge_expired()
+        return JSONResponse(
+            {"analyses": store.list_analyses(x_analysis_access_token)}
+        )
 
     @app.delete("/analyses")
     def delete_all_analyses(

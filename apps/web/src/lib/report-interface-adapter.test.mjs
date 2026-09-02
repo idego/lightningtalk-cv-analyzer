@@ -66,13 +66,23 @@ function report() {
       review: {
         status: "partial",
         accepted_ids: ["employment-1", "education-1"],
-        rejected: [{ reason_code: "technology_as_employer", evidence: field("MongoDB").evidence }],
+        rejected: [
+          { id: "employment-ambiguous", reason_code: "invalid_literal_evidence" },
+          { id: "unknown-id", reason_code: "reviewer_added_candidate_invalid_evidence" },
+        ],
         merged_ids: [["employment-1", "employment-duplicate"]],
         relation_corrections: [],
         added_profile_fields: ["candidate_name"],
         added_candidate_ids: ["education-1"],
-        conflicts: [{ reason_code: "wrong_record_relation", evidence: field("Example Systems").evidence }],
-        coverage_gaps: [{ reason_code: "missing_education" }],
+        conflicts: [
+          { reason_code: "invalid_literal_evidence" },
+          { reason_code: "unknown_reviewer_patch_id" },
+        ],
+        coverage_gaps: [
+          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"] },
+          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"] },
+          { target: "education", reason_code: "invalid_addition", source_block_ids: [] },
+        ],
       },
     },
     mechanical: {
@@ -81,10 +91,18 @@ function report() {
       literal_links: [],
       postal_candidates: [],
       accepted_postal_addresses: [{ value: "00-001", possible_country_codes: ["PL"] }],
-      email_findings: [],
+      email_findings: [
+        { kind: "possible_common_provider_typo", observed_domain: "gmial.com", suggested_domain: "gmail.com", evidence: field("gmial.com").evidence },
+        { kind: "possible_common_provider_typo", observed_domain: "gmial.com", suggested_domain: "gmail.com", evidence: field("gmial.com").evidence },
+      ],
       location_resolution: [{ subject: "declared_location", canonical_name: "Warsaw", country_code: "PL" }],
       eu_status: { countries: ["PL"], inside_eu: ["PL"], outside_eu: [], informational_only: true },
-      comparisons: [{ kind: "declared_location_phone_country", relationship: "same" }],
+      comparisons: [
+        { kind: "declared_location_phone_country", relationship: "same", declared_country_codes: ["PL"], phone_country_codes: ["PL"] },
+        { kind: "declared_location_phone_country", relationship: "same", declared_country_codes: ["PL"], phone_country_codes: ["PL"] },
+        { kind: "declared_location_phone_country", relationship: "different", declared_country_codes: ["PL"], phone_country_codes: ["DE"] },
+        { kind: "declared_location_phone_country", relationship: "different", declared_country_codes: ["PL"], phone_country_codes: ["DE"] },
+      ],
     },
     research: {},
     limitations: [],
@@ -93,13 +111,15 @@ function report() {
   };
 }
 
-test("adapts base-analysis-v2 into the restored report sections", () => {
+test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 3);
-  assert.ok(presentation.worthKnowing.length >= 4);
-  assert.equal(presentation.remaining.length, 2);
-  assert.equal(presentation.attention[0].evidence[0].source_id, "block-1");
+  assert.equal(presentation.attention.length, 2);
+  assert.equal(presentation.worthKnowing.length, 1);
+  assert.equal(presentation.remaining.length, 1);
+  assert.equal(presentation.attention[1].evidence[0].source_id, "block-1");
+  const rendered = JSON.stringify(presentation);
+  assert.doesNotMatch(rendered, /invalid_literal_evidence|invalid addition|unknown reviewer|rejected/i);
 });
 
 test("CV overview includes accepted records and intentionally omits skills", () => {

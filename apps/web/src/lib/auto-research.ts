@@ -9,6 +9,14 @@ export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
 
+export function withAnalysisAccessToken(
+  report: AnalysisReport,
+  accessToken: string | undefined,
+): AnalysisReport {
+  if (report.analysis_access_token || !accessToken) return report;
+  return { ...report, analysis_access_token: accessToken };
+}
+
 function supported(field: { value: string; status: string } | null | undefined) {
   return field?.status === "supported" && field.value.trim().length > 0;
 }

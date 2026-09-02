@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { getAutoResearchOrchestrator } from "@/lib/auto-research";
+import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -52,7 +52,15 @@ export function UploadPanel() {
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
     const result = payload.results?.[0];
     if (!result) return { filename: file.name, status: "error", error: t("noResult") };
-    return result.status === "error" ? { ...result, error: t("analysisFailed") } : result;
+    return result.status === "error"
+      ? { ...result, error: t("analysisFailed") }
+      : {
+          ...result,
+          report: withAnalysisAccessToken(
+            result.report,
+            payload.analysis_access_token,
+          ),
+        };
   }
 
   async function submit() {
