@@ -8,6 +8,9 @@
   enabled. Never commit the key.
 - Mount the validated GeoNames index and manifest; runtime analysis never
   downloads reference data.
+- Optionally mount the separately built GeoNames postal-code index and set both
+  `CV_VALIDATOR_POSTAL_INDEX_PATH` and `CV_VALIDATOR_POSTAL_MANIFEST_PATH`.
+  Without that pair postal validation remains explicitly unavailable.
 - Keep only the web service public. The API stays on the internal Compose
   network.
 - Persist and back up the API and authentication SQLite volumes.

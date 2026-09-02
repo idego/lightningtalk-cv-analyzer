@@ -30,9 +30,13 @@ function FlagList({ flags }: { flags: ReportFinding[] }) {
             <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whatToCheck")}</dt><dd className="mt-1 leading-relaxed">{flag.whatToCheck}</dd></div>
           </dl>
           {flag.evidence.length ? (
-            <p className="mt-3 border-l-2 pl-2 text-xs text-muted-foreground">
-              {t("evidence")}: „{flag.evidence[0].excerpt}”
-            </p>
+            <div className="mt-3 space-y-1 border-l-2 pl-2 text-xs text-muted-foreground">
+              {flag.evidence.map((evidence, index) => (
+                <p key={`${evidence.source_id}:${evidence.excerpt}`}>
+                  {index === 0 ? `${t("evidence")}: ` : ""}„{evidence.excerpt}”
+                </p>
+              ))}
+            </div>
           ) : null}
         </HoverDisclosure>
       ))}

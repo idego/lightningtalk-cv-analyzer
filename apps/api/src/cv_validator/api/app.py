@@ -23,14 +23,19 @@ from cv_validator.analysis import (
 from cv_validator.analysis.docling_luna import DoclingLunaAnalysisStrategy
 from cv_validator.analysis.luna_client import OpenAIResponsesLunaClient
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
-from cv_validator.config import load_location_resolver
+from cv_validator.config import load_location_resolver, load_postal_code_resolver
 from cv_validator.errors import (
     AnalysisNotFoundPersistenceError,
     AnalysisRuntimeError,
     PersistenceError,
     UploadReadError,
 )
-from cv_validator.location import LocationResolver, SQLiteLocationResolver
+from cv_validator.location import (
+    LocationResolver,
+    PostalCodeResolver,
+    SQLiteLocationResolver,
+    SQLitePostalCodeResolver,
+)
 from cv_validator.openai_config import OpenAISettings, load_openai_settings
 from cv_validator.operations import OperationsTelemetry, safe_log
 from cv_validator.pipeline import analyze_cv_bytes_result
@@ -178,6 +183,7 @@ def create_app(
     db_path: Path | None = None,
     retention_days: int | None = None,
     location_resolver: LocationResolver | None = None,
+    postal_code_resolver: PostalCodeResolver | None = None,
     openai_settings: OpenAISettings | None = None,
     analysis_strategy: AnalysisStrategy | None = None,
     batch_max_files: int | None = None,
@@ -194,6 +200,7 @@ def create_app(
     resolver = location_resolver or load_location_resolver(
         required=require_location_resolver
     )
+    postal_resolver = postal_code_resolver or load_postal_code_resolver()
     strategy = analysis_strategy or DoclingLunaAnalysisStrategy(
         client=(
             OpenAIResponsesLunaClient(
@@ -204,6 +211,7 @@ def create_app(
             else None
         ),
         location_resolver=resolver,
+        postal_code_resolver=postal_resolver,
     )
 
     selected_company_researcher = company_researcher
@@ -283,6 +291,8 @@ def create_app(
             research_locks.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
+            if isinstance(postal_resolver, SQLitePostalCodeResolver):
+                postal_resolver.close()
 
     app = FastAPI(
         title="CV Analyzer",
@@ -310,6 +320,14 @@ def create_app(
                 "version": (
                     resolver.reference_data_version.version
                     if isinstance(resolver, SQLiteLocationResolver)
+                    else None
+                ),
+            },
+            "postal_reference_data": {
+                "ready": postal_resolver is not None,
+                "version": (
+                    postal_resolver.reference_data_version.version
+                    if postal_resolver is not None
                     else None
                 ),
             },

@@ -1,0 +1,4 @@
+# country code	postal code	place name	admin name
+PL	00-001	Warsaw	Mazovia
+PL	30-001	Krakow	Lesser Poland
+US	75001	Paris	Texas

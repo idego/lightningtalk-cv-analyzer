@@ -10,7 +10,7 @@ type Health = { status: string; ready: boolean; capabilities: Record<string, Cap
 type RefreshFeedback = "idle" | "refreshing" | "updated";
 
 const capabilityLabels: Record<string, CopyKey> = {
-  database: "database", geonames: "geoNamesResolver", base_analysis: "baseAnalysis",
+  database: "database", geonames: "geoNamesResolver", postal_reference_data: "postalReferenceData", base_analysis: "baseAnalysis",
   company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch",
 };
 

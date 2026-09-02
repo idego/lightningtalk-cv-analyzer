@@ -3,14 +3,25 @@ import os
 from pathlib import Path
 
 import pytest
-from cv_validator.config import LocationConfigurationError, load_location_resolver
-from cv_validator.location import ResolutionLevel, SQLiteLocationResolver
+from cv_validator.config import (
+    LocationConfigurationError,
+    load_location_resolver,
+    load_postal_code_resolver,
+)
+from cv_validator.location import (
+    ResolutionLevel,
+    SQLiteLocationResolver,
+    SQLitePostalCodeResolver,
+    build_postal_index,
+)
 from cv_validator.location.index import SourceSpec, build_location_index
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "geonames"
 INDEX_ENV = "CV_VALIDATOR_LOCATION_INDEX_PATH"
 MANIFEST_ENV = "CV_VALIDATOR_LOCATION_MANIFEST_PATH"
+POSTAL_INDEX_ENV = "CV_VALIDATOR_POSTAL_INDEX_PATH"
+POSTAL_MANIFEST_ENV = "CV_VALIDATOR_POSTAL_MANIFEST_PATH"
 
 
 def _build_pair(directory: Path) -> tuple[Path, Path]:
@@ -87,6 +98,44 @@ def test_invalid_pair_fails_during_configuration(monkeypatch, tmp_path) -> None:
         load_location_resolver()
 
 
+def test_optional_postal_pair_is_loaded_together(monkeypatch, tmp_path) -> None:
+    source = Path(__file__).parent / "fixtures" / "postal" / "allCountries.txt"
+    index = tmp_path / "postal-codes.sqlite3"
+    manifest = tmp_path / "postal-codes.manifest.json"
+    build_postal_index(
+        source_path=source,
+        source_url="https://example.test/postal",
+        snapshot_date="2026-09-02",
+        output_index=index,
+        output_manifest=manifest,
+    )
+    monkeypatch.setenv(POSTAL_INDEX_ENV, str(index))
+    monkeypatch.setenv(POSTAL_MANIFEST_ENV, str(manifest))
+
+    resolver = load_postal_code_resolver()
+
+    assert isinstance(resolver, SQLitePostalCodeResolver)
+    assert resolver.validate("00-001", city="Warsaw", country_code="PL").status == "resolved"
+    resolver.close()
+
+
+def test_missing_or_empty_postal_configuration_is_unavailable(monkeypatch) -> None:
+    monkeypatch.delenv(POSTAL_INDEX_ENV, raising=False)
+    monkeypatch.delenv(POSTAL_MANIFEST_ENV, raising=False)
+    assert load_postal_code_resolver() is None
+    monkeypatch.setenv(POSTAL_INDEX_ENV, "")
+    monkeypatch.setenv(POSTAL_MANIFEST_ENV, "")
+    assert load_postal_code_resolver() is None
+
+
+def test_partial_postal_configuration_fails_loudly(monkeypatch) -> None:
+    monkeypatch.setenv(POSTAL_INDEX_ENV, "/reference/postal.sqlite3")
+    monkeypatch.delenv(POSTAL_MANIFEST_ENV, raising=False)
+
+    with pytest.raises(LocationConfigurationError, match="must be set together"):
+        load_postal_code_resolver()
+
+
 def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
     root = (
         Path(os.environ["CV_VALIDATOR_REPO_ROOT"])
@@ -102,6 +151,8 @@ def test_base_compose_requires_but_image_does_not_copy_reference_data() -> None:
     assert "CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-false}" in compose
     assert "CV_VALIDATOR_LOCATION_INDEX_PATH: /app/reference-data/locations.sqlite3" in compose
     assert "CV_VALIDATOR_LOCATION_MANIFEST_PATH: /app/reference-data/locations.manifest.json" in compose
+    assert "CV_VALIDATOR_POSTAL_INDEX_PATH" in compose
+    assert "CV_VALIDATOR_POSTAL_MANIFEST_PATH" in compose
     assert "create_host_path: false" in compose
     assert "reference-data" not in dockerfile
     assert "data" in dockerignore.splitlines()

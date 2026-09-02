@@ -79,8 +79,8 @@ function report() {
           { reason_code: "unknown_reviewer_patch_id" },
         ],
         coverage_gaps: [
-          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"] },
-          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"] },
+          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"], evidence: field("Education section").evidence },
+          { target: "education", reason_code: "missing_education", source_block_ids: ["block-1"], evidence: field("Education section").evidence },
           { target: "education", reason_code: "invalid_addition", source_block_ids: [] },
         ],
       },
@@ -118,6 +118,11 @@ test("shows only deduplicated recruiter-facing signals", () => {
   assert.equal(presentation.worthKnowing.length, 1);
   assert.equal(presentation.remaining.length, 1);
   assert.equal(presentation.attention[1].evidence[0].source_id, "block-1");
+  assert.equal(
+    [...presentation.attention, ...presentation.worthKnowing, ...presentation.remaining]
+      .every((item) => item.evidence.length > 0),
+    true,
+  );
   const rendered = JSON.stringify(presentation);
   assert.doesNotMatch(rendered, /invalid_literal_evidence|invalid addition|unknown reviewer|rejected/i);
 });
@@ -131,4 +136,100 @@ test("CV overview includes accepted records and intentionally omits skills", () 
   assert.equal(overview.employment[0].value, "Engineer");
   assert.equal(overview.employment.length, 1);
   assert.equal(Object.hasOwn(overview, "skills"), false);
+});
+
+test("completed LinkedIn not-found result becomes one cautious checklist finding", () => {
+  const value = report();
+  value.linkedin_discovery = {
+    status: "completed",
+    outcome: "insufficient_evidence",
+    linkedin_not_found: true,
+    not_found_caveat: "Limited public search does not prove absence.",
+    searches_performed: [],
+    search_limitations: [],
+    possible_profiles: [],
+  };
+
+  const presentation = adaptReportInterface(value, "en");
+  const linkedin = presentation.attention.find((item) => item.id === "linkedin-not-found");
+
+  assert.match(linkedin.whatWeFound, /limited search/i);
+  assert.match(linkedin.whyItMatters, /does not mean.*does not exist/i);
+  assert.equal(linkedin.evidence[0].excerpt, "Alex Example");
+});
+
+test("outside-EU finding prioritizes declared location and combines named sources", () => {
+  const value = report();
+  value.mechanical.eu_status = {
+    countries: ["US", "CA"],
+    inside_eu: [],
+    outside_eu: ["CA", "US"],
+    primary_source: "declared_location",
+    informational_only: true,
+    sources: [{
+      kind: "declared_location",
+      country_code: "US",
+      evidence: field("Austin, United States").evidence,
+    }, {
+      kind: "phone_prefix",
+      country_code: "CA",
+      evidence: field("+1 416 555 0100", "block-phone").evidence,
+    }],
+  };
+
+  const presentation = adaptReportInterface(value, "en");
+  const outside = presentation.worthKnowing.find((item) => item.id === "outside-eu");
+
+  assert.match(outside.whatWeFound, /declared location: US.*phone prefix: CA/i);
+  assert.match(outside.whyItMatters, /does not establish physical residence, nationality, or right to work/i);
+  assert.equal(outside.evidence.length, 2);
+
+  value.mechanical.eu_status.sources[0].country_code = "PL";
+  value.mechanical.eu_status.inside_eu = ["PL"];
+  assert.equal(
+    adaptReportInterface(value, "en").worthKnowing.some((item) => item.id === "outside-eu"),
+    false,
+  );
+
+  value.mechanical.eu_status.sources = [value.mechanical.eu_status.sources[1]];
+  value.mechanical.eu_status.primary_source = "phone_prefix";
+  value.mechanical.eu_status.inside_eu = [];
+  value.mechanical.eu_status.outside_eu = ["CA"];
+  const phoneFallback = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id === "outside-eu");
+  assert.match(phoneFallback.whatWeFound, /phone prefix: CA/i);
+  assert.doesNotMatch(phoneFallback.whatWeFound, /declared location/i);
+});
+
+test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {
+  const value = report();
+  value.mechanical.location_resolution = [{
+    subject: "declared_location",
+    value: "Berlin, Poland",
+    city: "Berlin",
+    country: "Poland",
+    status: "resolved",
+    city_country_relationship: "different",
+    evidence: field("Berlin, Poland").evidence,
+  }];
+  value.mechanical.accepted_postal_addresses = [{
+    value: "00-001",
+    city: "Berlin",
+    country: "Poland",
+    evidence: field("00-001").evidence,
+    address_evidence: field("Berlin, Poland").evidence,
+    validation: { status: "unavailable" },
+  }];
+
+  const presentation = adaptReportInterface(value, "en");
+
+  assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
+  const postal = presentation.worthKnowing.find((item) => item.id.endsWith("-unavailable"));
+  assert.match(postal.whatWeFound, /index is not configured/i);
+  assert.equal(postal.evidence.length, 2);
+
+  value.mechanical.location_resolution[0].status = "unresolved";
+  value.mechanical.location_resolution[0].city_country_relationship = "unresolved";
+  const unresolved = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id.startsWith("location-"));
+  assert.match(unresolved.whatWeFound, /not confirmed in the limited GeoNames index/i);
+  assert.doesNotMatch(unresolved.whatWeFound, /does not exist/i);
 });
