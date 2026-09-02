@@ -46,6 +46,37 @@ def test_comment_validation_and_contact_rejection():
     assert FeedbackInput(comment="This result needs more context").rating is None
 
 
+def test_materializes_feedback_for_each_visible_signal(tmp_path):
+    store, _ = _store(tmp_path)
+    evidence = [{"source_id": "block-1", "excerpt": "Faisalabad, Pakistan"}]
+    payload = {
+        "base_analysis": {
+            "profile": {"candidate_name": {"value": "Candidate", "evidence": evidence}},
+            "review": {"coverage_gaps": []},
+        },
+        "mechanical": {
+            "location_resolution": [{
+                "subject": "declared_location",
+                "status": "resolved",
+                "city_country_relationship": "same",
+                "evidence": evidence,
+            }],
+            "comparisons": [{
+                "kind": "declared_vs_phone",
+                "relationship": "same",
+                "declared_country_codes": ["PK"],
+                "phone_country_codes": ["PK"],
+            }],
+            "email_findings": [],
+        },
+    }
+
+    targets = store.materialize("analysis-1", payload)
+    locations = {(target["source_category"], target["source_key"]) for target in targets}
+    assert ("worth_knowing", "location-resolved-same") in locations
+    assert ("remaining", "comparison-same-0") in locations
+
+
 def test_withdrawal_and_analysis_delete_remove_active_graph(tmp_path):
     store, db_path = _store(tmp_path)
     target = store.materialize("analysis-1", {"ruleset_version": "v1"})[0]

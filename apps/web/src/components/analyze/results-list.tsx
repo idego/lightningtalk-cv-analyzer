@@ -17,7 +17,7 @@ import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-s
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
-function FlagList({ flags }: { flags: ReportFinding[] }) {
+function FlagList({ flags, analysisId, feedbackManifest, section }: { flags: ReportFinding[]; analysisId: string; feedbackManifest?: FeedbackManifest; section: "attention" | "worth_knowing" | "remaining" }) {
   const { t } = useCopy();
   return (
     <div className="space-y-2">
@@ -27,6 +27,7 @@ function FlagList({ flags }: { flags: ReportFinding[] }) {
           className="rounded-md border bg-muted/15 p-3 text-sm"
           allowHover
           title={<span className="block font-medium leading-snug">{flag.whatWeFound}</span>}
+          action={feedbackTarget(feedbackManifest, "review_finding", section, flag.id) ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "review_finding", section, flag.id)!} /> : null}
           contentClassName="pt-3"
         >
           <dl className="space-y-3 border-t pt-3">
@@ -104,7 +105,7 @@ function joinDisplay(...values: Array<string | null | undefined>) {
   return values.filter(Boolean).join(" · ") || null;
 }
 
-function StructuredFacts({ overview }: { overview: ReportOverview }) {
+function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview: ReportOverview; analysisId: string; feedbackManifest?: FeedbackManifest }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
@@ -121,7 +122,7 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
   return (
-    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} contentClassName="pt-4">
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} action={feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
           {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
@@ -164,7 +165,7 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={educationTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
+                  action={href ? <GoogleSearchAction href={href} /> : null}
                 />;
               })}
             </div>
@@ -183,7 +184,7 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={employmentTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
+                  action={href ? <GoogleSearchAction href={href} /> : null}
                 />;
               })}
             </div>
@@ -274,23 +275,22 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
             </CardHeader>
             <CardContent className="space-y-3">
               {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.attention} />
+                <FlagList flags={presentation.attention} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="attention" />
               </HoverDisclosure> : null}
 
               {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("worthKnowing")} (${presentation.worthKnowing.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.worthKnowing} />
+                <FlagList flags={presentation.worthKnowing} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="worth_knowing" />
               </HoverDisclosure> : null}
 
-              <StructuredFacts overview={presentation.overview} />
+              <StructuredFacts overview={presentation.overview} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} />
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
               {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={`${t("remaining")} (${presentation.remaining.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.remaining} />
+                <FlagList flags={presentation.remaining} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="remaining" />
               </HoverDisclosure> : null}
-              {feedbackTarget(feedback[report.analysis_id], "report_overall", "report", "overall") ? <div className="flex justify-end"><FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "report", "overall")!} /></div> : null}
             </CardContent>
           </Card>
         );

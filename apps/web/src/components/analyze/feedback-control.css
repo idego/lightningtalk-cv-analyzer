@@ -19,9 +19,10 @@
   --fborder: oklch(0.9055 0.012 308.6758);
   --morph: cubic-bezier(0.77, 0, 0.175, 1);
   --out: cubic-bezier(0.23, 1, 0.32, 1);
-  position: absolute;
-  right: -10px;
-  top: -10px;
+  position: fixed;
+  z-index: 1000;
+  right: var(--cloud-right);
+  top: var(--cloud-top);
   width: 56px;
   height: 56px;
   overflow: hidden;
@@ -39,6 +40,20 @@
     border-color 160ms ease,
     color 160ms ease,
     box-shadow 160ms ease;
+  visibility: hidden;
+}
+.feedback-cloud.positioned {
+  visibility: visible;
+}
+.feedback-cloud.open-up {
+  top: auto;
+  bottom: var(--cloud-bottom);
+  transform-origin: 100% 100%;
+}
+.feedback-cloud.open-up .feedback-trigger,
+.feedback-cloud.open-up .feedback-send-stage {
+  top: auto;
+  bottom: 12px;
 }
 .feedback-cloud.open {
   width: var(--cloud-w);

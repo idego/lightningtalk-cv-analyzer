@@ -268,6 +268,7 @@ class FeedbackStore:
 def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
+    yield from _presentation_feedback_candidates(payload, versions)
     for finding in payload.get("review_findings") or payload.get("findings") or []:
         if isinstance(finding, dict) and isinstance(finding.get("id"), str):
             yield TargetKind.REVIEW_FINDING, "finding", finding["id"], versions, None
@@ -313,6 +314,85 @@ def _target_candidates(payload: dict[str, Any]):
     ai = payload.get("ai_analysis")
     if isinstance(ai, dict) and ai.get("status") == "failed":
         yield TargetKind.OPERATION_FAILURE, "ai_analysis", "failure", versions, _failure("ai_analysis", ai, versions)
+
+
+def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[str, str]):
+    base = payload.get("base_analysis") if isinstance(payload.get("base_analysis"), dict) else {}
+    profile = base.get("profile") if isinstance(base.get("profile"), dict) else {}
+    review = base.get("review") if isinstance(base.get("review"), dict) else {}
+    mechanical = payload.get("mechanical") if isinstance(payload.get("mechanical"), dict) else {}
+
+    def evidence(value: Any) -> list[Any]:
+        if not isinstance(value, dict):
+            return []
+        direct = value.get("evidence")
+        if isinstance(direct, list) and direct:
+            return direct
+        for nested in value.values():
+            if isinstance(nested, dict) and isinstance(nested.get("evidence"), list) and nested["evidence"]:
+                return nested["evidence"]
+        return []
+
+    locations = mechanical.get("location_resolution") if isinstance(mechanical.get("location_resolution"), list) else []
+    location = next((item for item in locations if isinstance(item, dict) and item.get("subject") == "declared_location"), None)
+    if isinstance(location, dict) and location.get("status") not in {None, "unavailable"} and evidence(location):
+        relationship = location.get("city_country_relationship") if isinstance(location.get("city_country_relationship"), str) else "null"
+        section = "attention" if relationship == "different" else "worth_knowing"
+        yield TargetKind.REVIEW_FINDING, section, f"location-{location['status']}-{relationship}", versions, None
+
+    comparisons = mechanical.get("comparisons") if isinstance(mechanical.get("comparisons"), list) else []
+    seen_comparisons: set[tuple[Any, ...]] = set()
+    grouped: dict[str, list[dict[str, Any]]] = {"same": [], "different": []}
+    for item in comparisons:
+        if not isinstance(item, dict) or item.get("relationship") not in grouped:
+            continue
+        key = (
+            item.get("kind"), item.get("relationship"),
+            tuple(item.get("declared_country_codes") or []),
+            tuple(item.get("phone_country_codes") or []),
+        )
+        if key in seen_comparisons:
+            continue
+        seen_comparisons.add(key)
+        grouped[item["relationship"]].append(item)
+    for relationship, items in grouped.items():
+        section = "remaining" if relationship == "same" else "attention"
+        for index, _item in enumerate(items):
+            yield TargetKind.REVIEW_FINDING, section, f"comparison-{relationship}-{index}", versions, None
+
+    email_findings = mechanical.get("email_findings") if isinstance(mechanical.get("email_findings"), list) else []
+    seen_emails: set[tuple[Any, ...]] = set()
+    email_index = 0
+    for item in email_findings:
+        if not isinstance(item, dict) or not evidence(item):
+            continue
+        key = (item.get("kind"), item.get("observed_domain"), item.get("suggested_domain"))
+        if key in seen_emails:
+            continue
+        seen_emails.add(key)
+        yield TargetKind.REVIEW_FINDING, "attention", f"email-{email_index}", versions, None
+        email_index += 1
+
+    gaps = review.get("coverage_gaps") if isinstance(review.get("coverage_gaps"), list) else []
+    seen_gaps: set[tuple[Any, ...]] = set()
+    gap_index = 0
+    for item in gaps:
+        if not isinstance(item, dict) or not evidence(item):
+            continue
+        reason = str(item.get("reason_code") or "")
+        if re.match(r"^(?:invalid|unknown|unsafe|reviewer)(?:_|$)", reason):
+            continue
+        key = (item.get("target"), item.get("reason_code"), tuple(item.get("source_block_ids") or []))
+        if key in seen_gaps:
+            continue
+        seen_gaps.add(key)
+        yield TargetKind.REVIEW_FINDING, "worth_knowing", f"gap-{gap_index}", versions, None
+        gap_index += 1
+
+    linkedin = payload.get("linkedin_discovery")
+    candidate = profile.get("candidate_name") if isinstance(profile.get("candidate_name"), dict) else {}
+    if isinstance(linkedin, dict) and linkedin.get("status") == "completed" and linkedin.get("linkedin_not_found") and evidence(candidate):
+        yield TargetKind.REVIEW_FINDING, "attention", "linkedin-not-found", versions, None
 
 
 def _failure(operation: str, value: dict[str, Any], versions: dict[str, str]) -> dict[str, Any]:
