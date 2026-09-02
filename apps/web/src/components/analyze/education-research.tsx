@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import type { AnalysisReport, EducationResearch } from "@/lib/analyze-types";
-import { Badge } from "@/components/ui/badge";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
@@ -10,26 +9,12 @@ import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
-import { useCopy, type CopyKey } from "@/lib/app-settings";
+import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { educationGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest, type FeedbackTarget } from "@/lib/feedback-types";
-
-function institutionStatusKey(status: string): CopyKey {
-  return ({
-    supported: "institutionConfirmed",
-    mismatch: "institutionMismatch",
-    evidence_unavailable: "institutionNotConfirmed",
-  }[status] ?? "institutionNotConfirmed") as CopyKey;
-}
-
-function accreditationStatusKey(status: string | null): CopyKey {
-  if (status === "established") return "accreditationConfirmed";
-  if (status === "not_established") return "accreditationNotConfirmed";
-  return "accreditationUnknown";
-}
 
 type Credential = EducationResearch["credentials"][number];
 
@@ -46,7 +31,7 @@ function EducationResult({ credential, analysisId, feedback }: { credential: Cre
     allowHover
     headerClassName="flex-wrap sm:flex-nowrap"
     actionClassName="w-full sm:w-auto"
-    title={<div className="flex min-w-0 flex-wrap items-center gap-2"><strong>{credential.institution}</strong><Badge variant="outline">{t(institutionStatusKey(credential.institution_exists))}</Badge><Badge variant="outline">{t(accreditationStatusKey(credential.accreditation_status))}</Badge></div>}
+    title={<strong className="block min-w-0 truncate">{credential.institution}</strong>}
     action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref && credential.institution ? <GoogleSearchAction href={searchHref} subject={credential.institution} variant="labeled" /> : null}{feedback ? <FeedbackControl analysisId={analysisId} target={feedback} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >

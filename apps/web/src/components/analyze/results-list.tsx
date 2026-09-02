@@ -103,7 +103,7 @@ function displayCountry(countryCode: string, language: "en" | "pl") {
 function StructuredFacts({ overview }: { overview: ReportOverview }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone);
-  const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.euStatus);
+  const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
   const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.employment.length > 0;
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
@@ -130,7 +130,8 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
                 {overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
                 {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} tone={locationTone} /> : null}
                 {overview.postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(overview.postalCountry, settings.uiLanguage)} tone={locationTone} /> : null}
-                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
+                {overview.postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")} tone={locationTone} /> : null}
+                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} detail={t("euStatusDisclaimer")} tone={locationTone} /> : null}
               </div>
             </section> : null}
           </div> : null}

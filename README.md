@@ -79,6 +79,13 @@ from accepted, evidence-supported base-analysis records. Reusable cache entries
 are keyed per public subject, support partial hits, and carry hit/miss
 provenance, original research timestamps, refresh, and cache audit entries.
 
+Research confidence is intentionally conservative: high confidence requires
+multiple consistent public signals, and LinkedIn discovery requires both name
+support and compatible experience or education context. Results remain possible
+matches, never identity verification. The LinkedIn Profiles header also provides
+one user-initiated people-search shortcut; it does not replace or trigger LinkedIn
+Research and no per-profile search shortcuts are shown.
+
 ## Supported documents and limitations
 
 Only text-bearing PDF and DOCX files are supported. Image-only or scan-only

@@ -1,6 +1,7 @@
 import { isSelfEmploymentLabel } from "./relationship-labels.js";
 
 const GOOGLE_SEARCH_URL = "https://www.google.com/search";
+const LINKEDIN_PEOPLE_SEARCH_URL = "https://www.linkedin.com/search/results/people/";
 
 function cleanPart(value: string | null | undefined): string {
   return (value ?? "").trim().replace(/\s+/g, " ");
@@ -39,4 +40,12 @@ export function educationGoogleSearchUrl({
   const subject = cleanPart(institution);
   if (!subject) return null;
   return buildGoogleSearchUrl([subject, cleanPart(program) || certificate]);
+}
+
+export function linkedinPeopleSearchUrl(query: string | null | undefined): string | null {
+  const keywords = cleanPart(query);
+  if (!keywords) return null;
+  const url = new URL(LINKEDIN_PEOPLE_SEARCH_URL);
+  url.searchParams.set("keywords", keywords);
+  return url.toString();
 }

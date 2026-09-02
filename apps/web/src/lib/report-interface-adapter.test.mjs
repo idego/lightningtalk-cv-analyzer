@@ -158,7 +158,7 @@ test("completed LinkedIn not-found result becomes one cautious checklist finding
   assert.equal(linkedin.evidence[0].excerpt, "Alex Example");
 });
 
-test("outside-EU finding prioritizes declared location and combines named sources", () => {
+test("outside-EU status is neutral overview information, not a finding", () => {
   const value = report();
   value.mechanical.eu_status = {
     countries: ["US", "CA"],
@@ -178,26 +178,19 @@ test("outside-EU finding prioritizes declared location and combines named source
   };
 
   const presentation = adaptReportInterface(value, "en");
-  const outside = presentation.worthKnowing.find((item) => item.id === "outside-eu");
-
-  assert.match(outside.whatWeFound, /declared location: US.*phone prefix: CA/i);
-  assert.match(outside.whyItMatters, /does not establish physical residence, nationality, or right to work/i);
-  assert.equal(outside.evidence.length, 2);
+  assert.equal(presentation.overview.euStatus, "outside");
+  assert.equal(presentation.attention.some((item) => item.id === "outside-eu"), false);
+  assert.equal(presentation.worthKnowing.some((item) => item.id === "outside-eu"), false);
 
   value.mechanical.eu_status.sources[0].country_code = "PL";
   value.mechanical.eu_status.inside_eu = ["PL"];
-  assert.equal(
-    adaptReportInterface(value, "en").worthKnowing.some((item) => item.id === "outside-eu"),
-    false,
-  );
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
 
   value.mechanical.eu_status.sources = [value.mechanical.eu_status.sources[1]];
   value.mechanical.eu_status.primary_source = "phone_prefix";
   value.mechanical.eu_status.inside_eu = [];
   value.mechanical.eu_status.outside_eu = ["CA"];
-  const phoneFallback = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id === "outside-eu");
-  assert.match(phoneFallback.whatWeFound, /phone prefix: CA/i);
-  assert.doesNotMatch(phoneFallback.whatWeFound, /declared location/i);
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
 });
 
 test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {
@@ -223,9 +216,13 @@ test("GeoNames and postal outcomes use evidence and cautious status-specific cop
   const presentation = adaptReportInterface(value, "en");
 
   assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
-  const postal = presentation.worthKnowing.find((item) => item.id.endsWith("-unavailable"));
-  assert.match(postal.whatWeFound, /index is not configured/i);
-  assert.equal(postal.evidence.length, 2);
+  assert.equal(presentation.overview.postalConsistency, null);
+  assert.equal(presentation.worthKnowing.some((item) => item.id.startsWith("postal-")), false);
+
+  value.mechanical.accepted_postal_addresses[0].validation.status = "resolved";
+  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "consistent");
+  value.mechanical.accepted_postal_addresses[0].validation.status = "mismatch";
+  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "mismatch");
 
   value.mechanical.location_resolution[0].status = "unresolved";
   value.mechanical.location_resolution[0].city_country_relationship = "unresolved";

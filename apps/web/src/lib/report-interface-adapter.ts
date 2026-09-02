@@ -30,6 +30,7 @@ export type ReportOverview = {
   resolvedLocation: string | null;
   postalCode: string | null;
   postalCountry: string | null;
+  postalConsistency: "consistent" | "mismatch" | null;
   euStatus: "inside" | "outside" | null;
   education: OverviewRecord[];
   employment: OverviewRecord[];
@@ -245,6 +246,7 @@ function overview(report: AnalysisReport): ReportOverview {
     ? postal.possible_country_codes.filter((item): item is string => typeof item === "string")
     : [];
   const eu = record(report.mechanical.eu_status);
+  const postalValidation = record(postal?.validation);
   const outsideEu = Array.isArray(eu?.outside_eu) ? eu.outside_eu : [];
   const insideEu = Array.isArray(eu?.inside_eu) ? eu.inside_eu : [];
   return {
@@ -255,6 +257,11 @@ function overview(report: AnalysisReport): ReportOverview {
     resolvedLocation: join([text(resolution?.canonical_name), text(resolution?.country_code)]),
     postalCode: text(postal?.value),
     postalCountry: postalCountries.length === 1 ? postalCountries[0] : null,
+    postalConsistency: postalValidation?.status === "resolved"
+      ? "consistent"
+      : postalValidation?.status === "mismatch"
+        ? "mismatch"
+        : null,
     euStatus: outsideEu.length ? "outside" : insideEu.length ? "inside" : null,
     education: report.base_analysis.education.filter((item) => item.status === "accepted").map(educationRecord),
     employment: report.base_analysis.employment.filter((item) => item.status === "accepted").map(employmentRecord),
@@ -319,55 +326,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         locationEvidence,
       )
     : null;
-  const postalFindings = report.mechanical.accepted_postal_addresses.flatMap((value, index) => {
-    const address = record(value);
-    const validation = record(address?.validation);
-    const status = text(validation?.status);
-    if (!address || !status) return [];
-    const observation = status === "resolved"
-      ? copy.postalResolved
-      : status === "mismatch"
-        ? copy.postalMismatch
-        : status === "unresolved"
-          ? copy.postalUnresolved
-          : copy.postalUnavailable;
-    const postalEvidence = [
-      ...evidenceFrom(address),
-      ...evidenceList(address.address_evidence),
-    ];
-    if (!postalEvidence.length) return [];
-    return [findingFromEvidence(
-      `postal-${index}-${status}`,
-      observation,
-      copy.postalWhy,
-      copy.postalCheck,
-      postalEvidence,
-    )];
-  });
-  const eu = record(report.mechanical.eu_status);
-  const euSources = Array.isArray(eu?.sources)
-    ? eu.sources.map(record).filter((item): item is UnknownRecord => Boolean(item))
-    : [];
-  const declaredEuSource = euSources.find((item) => item.kind === "declared_location");
-  const phoneEuSources = euSources.filter((item) => item.kind === "phone_prefix");
-  const primaryEuSource = declaredEuSource ?? phoneEuSources[0];
-  const primaryCountry = text(primaryEuSource?.country_code);
-  const outsideCountries = Array.isArray(eu?.outside_eu) ? eu.outside_eu : [];
-  const euEvidence = euSources.flatMap((item) => evidenceList(item.evidence));
-  const outsideEuFinding = primaryCountry
-    && outsideCountries.includes(primaryCountry)
-    && euEvidence.length > 0
-    ? findingFromEvidence(
-        "outside-eu",
-        `${copy.outsideEu} ${[
-          declaredEuSource ? `${copy.declaredSource}: ${text(declaredEuSource.country_code)}` : null,
-          ...phoneEuSources.map((item) => `${copy.phoneSource}: ${text(item.country_code)}`),
-        ].filter(Boolean).join("; ")}`,
-        copy.outsideEuWhy,
-        copy.outsideEuCheck,
-        euEvidence,
-      )
-    : null;
   const linkedinNotFound = report.linkedin_discovery?.status === "completed"
     && report.linkedin_discovery.linkedin_not_found;
   const linkedinEvidence = report.base_analysis.profile.candidate_name?.evidence ?? [];
@@ -383,7 +341,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
   const attention: ReportFinding[] = [
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-    ...postalFindings.filter((item) => item.id.endsWith("-mismatch")),
     ...comparisons
       .filter((item) => item.relationship === "different")
       .map((_item, index) => findingFromEvidence(
@@ -410,9 +367,7 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       copy.gapWhy,
       copy.gapCheck,
     )),
-    ...(outsideEuFinding ? [outsideEuFinding] : []),
     ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
-    ...postalFindings.filter((item) => !item.id.endsWith("-mismatch")),
   ];
 
   const remaining: ReportFinding[] = [

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Search } from "lucide-react";
 import type { AnalysisReport, LinkedInDiscovery } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
+import { linkedinPeopleSearchUrl } from "@/lib/google-search";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -95,6 +97,8 @@ export function LinkedInResearchPanel({
   const discoveryBusy = automatic?.status === "pending" || automatic?.status === "running";
   const discoveryCompleted = Boolean(report.linkedin_discovery) || automatic?.status === "succeeded";
   const hasContent = Boolean(visibleDiscovery || automatic?.message);
+  const searchKeyword = linkedinSearchKeyword(report);
+  const searchHref = linkedinPeopleSearchUrl(searchKeyword);
 
   useEffect(() => {
     onDiscoveryChangeRef.current = onDiscoveryChange;
@@ -114,7 +118,7 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="font-medium">{t("linkedinProfiles")}</span>}
+    title={<span className="flex items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref && searchKeyword ? <Tooltip><TooltipTrigger render={<Button variant="ghost" size="icon-sm" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedInFor", { subject: searchKeyword })}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     action={discoveryCompleted ? undefined : <ResearchAction
@@ -143,4 +147,15 @@ export function LinkedInResearchPanel({
     </div>
     {visibleDiscovery && (visibleDiscovery.searches_performed.length || visibleDiscovery.search_limitations.length) ? <HoverDisclosure className="text-xs text-muted-foreground" triggerClassName="w-fit flex-none" title={t("searchesAndLimitations")} contentClassName="space-y-1 pt-2">{visibleDiscovery.searches_performed.map(x=><p key={x}>{t("search")}: {x}</p>)}{visibleDiscovery.search_limitations.map(x=><p key={x}>{t("limit")}: {x}</p>)}</HoverDisclosure> : null}
   </HoverDisclosure>;
+}
+
+function fieldValue(field: { value?: string } | null | undefined): string | null {
+  return typeof field?.value === "string" && field.value.trim() ? field.value.trim() : null;
+}
+
+export function linkedinSearchKeyword(report: AnalysisReport): string | null {
+  const name = fieldValue(report.base_analysis.profile.candidate_name);
+  if (!name) return null;
+  const employment = report.base_analysis.employment.find((record) => record.status === "accepted");
+  return [name, fieldValue(employment?.organization), fieldValue(employment?.role)].filter(Boolean).join(" ");
 }
