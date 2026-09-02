@@ -24,9 +24,12 @@ research. It does not disable the selected base-analysis strategy.
 Feedback is decision-neutral and never edits a report, analysis output,
 research result, retry state, or hiring action. Targets and responses live with
 the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
-`web_auth_data`. Comments are limited to 180 characters, contact details and
-URLs are rejected, and inbox entries contain no CV text, prompt/model output,
-research content, filenames, raw exceptions, request bodies, or logs.
+`web_auth_data`. Feedback is enabled by default. Responses retain the signed-in
+author's email and a snapshot of the displayed CV/report section so maintainers
+can review the comment in its original context. Comments are limited to 180
+characters; team notes are limited to 500 characters; contact details and URLs
+are rejected from both. The inbox never stores the uploaded original, raw
+model output, raw exceptions, request bodies, or logs.
 
 Access is initialized automatically by the one-shot `feedback-init` Compose
 service from `config/feedback-access.json`. It seeds the initial owners only
