@@ -16,6 +16,7 @@ import { researchEligibility } from "@/lib/auto-research";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { linkedinPeopleKeyword, linkedinPeopleSearchUrl } from "@/lib/google-search";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -45,6 +46,7 @@ function LinkedInProfileCard({
       <HoverDisclosure
         className="rounded-md border bg-muted/20 p-3 text-sm"
         allowHover
+        feedbackSnapshotLabel={t("profile", { index: profileIndex + 1 })}
         title={<span className="font-medium">{t("profile", { index: profileIndex + 1 })}</span>}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -117,7 +119,7 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Button variant="outline" size="sm" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer"><Search aria-hidden data-icon="inline-start" />{t("searchLinkedIn")}<ExternalLink aria-hidden data-icon="inline-end" /></a>} /> : null}</span>}
+    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     action={discoveryCompleted ? undefined : <ResearchAction
