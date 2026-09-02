@@ -113,14 +113,16 @@ def apply_review(
         rejected_ids.add(record_id)
         review_rejected.append({"id": record_id, "reason_code": reason})
 
+    # Validated candidates are accepted by default; the reviewer may reject them.
+    # `accepted_record_ids` is an optional confirmation kept for contract stability.
+    accepted_ids: set[str] = {
+        record_id for record_id in known_records if record_id not in rejected_ids
+    }
     accepted_requested = payload.get("accepted_record_ids", [])
-    accepted_ids: set[str] = set()
     if isinstance(accepted_requested, list):
         for record_id in accepted_requested[:300]:
             if record_id not in known_records:
                 conflicts.append({"reason_code": "unknown_reviewer_record_id"})
-            elif record_id not in rejected_ids:
-                accepted_ids.add(record_id)
 
     corrections: list[dict[str, Any]] = []
     for patch in _safe_objects(payload.get("relation_patches"), 300):
@@ -327,9 +329,14 @@ def _validate_records(
             record[name] = _validate_field(source, raw.get(name))
             if raw.get(name) is not None and record[name] is None:
                 conflicts.append({"record_id": record_id, "field": name, "reason_code": "invalid_literal_evidence"})
-        required = "organization" if candidate_type == "employment" else "institution"
-        if record[required] is None:
-            rejected.append({"id": record_id, "reason_code": f"missing_{required}"})
+        if candidate_type == "employment":
+            anchored = record["organization"] is not None
+            missing_reason = "missing_organization"
+        else:
+            anchored = record["institution"] is not None or record["certificate"] is not None
+            missing_reason = "missing_institution_or_certificate"
+        if not anchored:
+            rejected.append({"id": record_id, "reason_code": missing_reason})
             continue
         relation = _relation_status(source, [record[name] for name in field_names if record[name]])
         record["relation_status"] = relation

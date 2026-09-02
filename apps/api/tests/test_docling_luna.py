@@ -547,3 +547,52 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
     assert specialist["store"] is reviewer["store"] is False
     assert "tools" not in specialist and "tools" not in reviewer
     assert specialist["text"]["format"]["strict"] is True
+
+
+def test_validated_records_are_accepted_by_default_and_reviewer_can_reject() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems — Developer", order=0),
+        SourceBlock("b-1", "Served 100+ clients", order=1),
+    ), "pdf")
+    empty = {"role": None, "start_date": None, "end_date": None, "location": None, "relationship_type": None}
+
+    def records() -> dict:
+        return {"records": [
+            {"id": "employment_1", **empty, "organization": field("org-1", "Example Systems", "b-0")},
+            {"id": "employment_2", **empty, "organization": field("org-2", "100+ clients", "b-1")},
+        ]}
+
+    without_review, review = apply_review(source, validate_specialists(source, {}, records(), {}), {})
+    assert [record["status"] for record in without_review.employment] == ["accepted", "accepted"]
+    assert review["accepted_ids"] == ["employment_1", "employment_2"]
+
+    reviewed, review = apply_review(source, validate_specialists(source, {}, records(), {}), {
+        "accepted_record_ids": [],
+        "rejected_records": [{"id": "employment_2", "reason_code": "client_count_not_employer"}],
+        "merge_groups": [], "relation_patches": [], "added_profile_fields": [],
+        "added_candidates": [], "conflicts": [], "coverage_gaps": [], "status": "completed",
+    })
+    assert {record["id"]: record["status"] for record in reviewed.employment} == {
+        "employment_1": "accepted",
+        "employment_2": "ambiguous",
+    }
+    assert review["accepted_ids"] == ["employment_1"]
+    assert {"id": "employment_2", "reason_code": "client_count_not_employer"} in review["rejected"]
+
+
+def test_certificate_only_education_record_is_kept() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "AWS Certified Cloud Practitioner (CLF-C02) - In Progress", order=0),
+        SourceBlock("b-1", "Computer Science", order=1),
+    ), "pdf")
+    empty = {"institution": None, "program": None, "degree": None, "certificate": None,
+             "start_date": None, "end_date": None, "location": None}
+    state = validate_specialists(source, {}, {}, {"records": [
+        {"id": "education_1", **empty, "certificate": field(
+            "cert", "AWS Certified Cloud Practitioner", "b-0", "AWS Certified Cloud Practitioner (CLF-C02)",
+        )},
+        {"id": "education_2", **empty, "program": field("prog", "Computer Science", "b-1")},
+    ]})
+
+    assert [record["id"] for record in state.education] == ["education_1"]
+    assert {"id": "education_2", "reason_code": "missing_institution_or_certificate"} in state.rejected
