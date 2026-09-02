@@ -86,10 +86,16 @@ class TextOnlyPdfBackend(DeclarativeDocumentBackend):
 class _Line:
     text: str
     bbox: BoundingBox
+    last_line: BoundingBox | None = None
+
+    @property
+    def tail(self) -> BoundingBox:
+        """Bounding box of the most recent physical line (for paragraphs, the last one)."""
+        return self.last_line or self.bbox
 
     @property
     def height(self) -> float:
-        return abs(float(self.bbox.b) - float(self.bbox.t))
+        return abs(float(self.tail.b) - float(self.tail.t))
 
 
 # A continuation line sits below the previous one by less than this share of the
@@ -114,6 +120,7 @@ def _merge_wrapped_lines(lines: list[_Line]) -> list[_Line]:
                     b=max(previous.bbox.b, line.bbox.b),
                     coord_origin=previous.bbox.coord_origin,
                 ),
+                last_line=line.bbox,
             )
         else:
             paragraphs.append(line)
@@ -129,13 +136,13 @@ def _continues(previous: _Line, current: _Line) -> bool:
         return False
     if abs(previous.height - current.height) > MAX_HEIGHT_DRIFT_RATIO * reference:
         return False
-    gap = float(current.bbox.t) - float(previous.bbox.b)
+    gap = float(current.bbox.t) - float(previous.tail.b)
     if gap < -0.5 * reference or gap > MAX_WRAP_GAP_RATIO * reference:
         return False
     # Guard multi-column layouts: the lines must share horizontal extent.
-    if float(current.bbox.l) >= float(previous.bbox.r) or float(current.bbox.r) <= float(previous.bbox.l):
+    if float(current.bbox.l) >= float(previous.tail.r) or float(current.bbox.r) <= float(previous.tail.l):
         return False
-    indent = float(current.bbox.l) - float(previous.bbox.l)
+    indent = float(current.bbox.l) - float(previous.tail.l)
     return -MAX_INDENT_DRIFT_POINTS <= indent <= MAX_INDENT_DRIFT_POINTS
 
 

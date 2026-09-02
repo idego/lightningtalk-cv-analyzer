@@ -162,10 +162,11 @@ def test_pdf_wrapped_lines_merge_into_one_block_but_entries_stay_separate() -> N
     canvas.setFont("Helvetica", 10)
     canvas.drawString(72, 740, "Master of Computer Science 2017 - 2020 Example University of Science and")
     canvas.drawString(72, 726, "Technology, Jilin, China")
-    canvas.drawString(72, 700, "Bachelor of Software Engineering 2013 - 2017 Example University,")
-    canvas.drawString(72, 686, "Faisalabad, Punjab, Pakistan")
-    canvas.drawString(90, 660, "- First bullet item")
-    canvas.drawString(90, 646, "- Second bullet item")
+    canvas.drawString(72, 712, "with distinction")
+    canvas.drawString(72, 686, "Bachelor of Software Engineering 2013 - 2017 Example University,")
+    canvas.drawString(72, 672, "Faisalabad, Punjab, Pakistan")
+    canvas.drawString(90, 646, "- First bullet item")
+    canvas.drawString(90, 632, "- Second bullet item")
     canvas.save()
 
     source = DoclingTextConverter().convert(output.getvalue(), "wrapped.pdf", SourceFormat.PDF)
@@ -173,7 +174,7 @@ def test_pdf_wrapped_lines_merge_into_one_block_but_entries_stay_separate() -> N
 
     assert texts == [
         "EDUCATION",
-        "Master of Computer Science 2017 - 2020 Example University of Science and Technology, Jilin, China",
+        "Master of Computer Science 2017 - 2020 Example University of Science and Technology, Jilin, China with distinction",
         "Bachelor of Software Engineering 2013 - 2017 Example University, Faisalabad, Punjab, Pakistan",
         "- First bullet item",
         "- Second bullet item",
