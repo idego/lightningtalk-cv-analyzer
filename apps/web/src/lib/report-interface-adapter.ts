@@ -18,6 +18,8 @@ export type OverviewRecord = {
   id: string;
   value: string;
   detail: string | null;
+  searchSubject: string | null;
+  searchContext: string | null;
 };
 
 export type ReportOverview = {
@@ -214,6 +216,8 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
       dateRange(item.start_date, item.end_date),
       value(item.location),
     ]),
+    searchSubject: value(item.institution),
+    searchContext: value(item.program),
   };
 }
 
@@ -226,6 +230,8 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
       value(item.organization),
       value(item.location),
     ]),
+    searchSubject: value(item.organization),
+    searchContext: value(item.location),
   };
 }
 

@@ -12,6 +12,8 @@ import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
 import { isSelfEmploymentLabel } from "@/lib/relationship-labels";
+import { GoogleSearchAction } from "@/components/analyze/google-search-action";
+import { companyGoogleSearchUrl } from "@/lib/google-search";
 
 function isResearchableCompany(value: string) {
   const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
@@ -111,6 +113,7 @@ type Organization = CompanyResearch["organizations"][number];
 
 function CompanyResult({ organization }: { organization: Organization }) {
   const { t } = useCopy();
+  const searchHref = companyGoogleSearchUrl({ organization: organization.query_subject, location: organization.location });
   const sources = Array.from(new Set([
     ...(organization.official_website ? [organization.official_website] : []),
     ...organization.company_pages,
@@ -127,6 +130,8 @@ function CompanyResult({ organization }: { organization: Organization }) {
     <HoverDisclosure
       className="rounded-md border bg-muted/20 p-3 text-sm"
       allowHover
+      headerClassName="flex-wrap sm:flex-nowrap"
+      actionClassName="w-full sm:w-auto"
       title={
         <div className="min-w-0">
           <strong className="block truncate">{organization.query_subject}</strong>
@@ -134,8 +139,9 @@ function CompanyResult({ organization }: { organization: Organization }) {
         </div>
       }
       action={
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
+          {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} variant="labeled" /> : null}
         </div>
       }
       contentClassName="pt-3"

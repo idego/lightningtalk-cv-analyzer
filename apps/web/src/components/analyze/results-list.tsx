@@ -12,6 +12,8 @@ import { CompanyResearchPanel } from "@/components/analyze/company-research";
 import { EducationResearchPanel } from "@/components/analyze/education-research";
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { useCopy } from "@/lib/app-settings";
+import { GoogleSearchAction } from "@/components/analyze/google-search-action";
+import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
 
 function FlagList({ flags }: { flags: ReportFinding[] }) {
   const { t } = useCopy();
@@ -69,20 +71,23 @@ function OverviewRow({
   value,
   detail,
   tone,
+  action,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   detail?: ReactNode;
   tone: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="flex min-w-0 items-start gap-3 py-1.5">
       <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
-      <div className="min-w-0 pt-0.5">
+      <div className="min-w-0 flex-1 pt-0.5">
         <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>
         {detail ? <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{detail}</p> : null}
       </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -131,14 +136,36 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
           {overview.education.length ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.education.map((item) => <OverviewRow key={item.id} icon={<GraduationCap className="size-4" />} label={t("educationEntry")} value={item.value} detail={item.detail} tone={educationTone} />)}
+              {overview.education.map((item) => {
+                const href = educationGoogleSearchUrl({ institution: item.searchSubject, program: item.searchContext });
+                return <OverviewRow
+                  key={item.id}
+                  icon={<GraduationCap className="size-4" />}
+                  label={t("educationEntry")}
+                  value={item.value}
+                  detail={item.detail}
+                  tone={educationTone}
+                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
+                />;
+              })}
             </div>
           </section> : null}
 
           {overview.employment.length ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.employment.map((item) => <OverviewRow key={item.id} icon={<BriefcaseBusiness className="size-4" />} label={t("employmentEntry")} value={item.value} detail={item.detail} tone={employmentTone} />)}
+              {overview.employment.map((item) => {
+                const href = companyGoogleSearchUrl({ organization: item.searchSubject, location: item.searchContext });
+                return <OverviewRow
+                  key={item.id}
+                  icon={<BriefcaseBusiness className="size-4" />}
+                  label={t("employmentEntry")}
+                  value={item.value}
+                  detail={item.detail}
+                  tone={employmentTone}
+                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
+                />;
+              })}
             </div>
           </section> : null}
         </div>
