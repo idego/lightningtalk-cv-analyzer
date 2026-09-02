@@ -25,4 +25,4 @@
 ## 5. Delivery
 
 - [x] 5.1 Split the completed work into logical Conventional Commits with informative bodies.
-- [ ] 5.2 Push branch `develop` to `origin` and verify the remote branch tip.
+- [x] 5.2 Push branch `develop` to `origin` and verify the remote branch tip.
