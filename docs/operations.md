@@ -6,11 +6,11 @@
   and version through health and every report.
 - `OPENAI_API_KEY` is required when public research or a Luna strategy is
   enabled. Never commit the key.
-- Mount the validated GeoNames index and manifest; runtime analysis never
-  downloads reference data.
-- Optionally mount the separately built GeoNames postal-code index and set both
-  `CV_VALIDATOR_POSTAL_INDEX_PATH` and `CV_VALIDATOR_POSTAL_MANIFEST_PATH`.
-  Without that pair postal validation remains explicitly unavailable.
+- Let the one-shot `geonames-init` service build and validate both GeoNames
+  index/manifest pairs in its persistent volume. The API mounts the promoted
+  release read-only, and runtime CV analysis never downloads reference data.
+- For an approved offline snapshot, use `REFERENCE_DATA_MODE=operator`; see
+  `docs/reference-data/geonames.md` for refresh and recovery procedures.
 - Keep only the web service public. The API stays on the internal Compose
   network.
 - Persist and back up the API and authentication SQLite volumes.
@@ -21,7 +21,7 @@ research. It does not disable the selected base-analysis strategy.
 
 ## Contextual feedback rollout
 
-Feedback is decision-neutral and never edits a report, score, AI output,
+Feedback is decision-neutral and never edits a report, analysis output,
 research result, retry state, or hiring action. Targets and responses live with
 the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
 `web_auth_data`. Comments are limited to 180 characters, contact details and

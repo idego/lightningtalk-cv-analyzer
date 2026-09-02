@@ -4,16 +4,10 @@ Canonical instructions for coding agents in this repository.
 
 ## Current architecture
 
-This branch is the clean shared base for two document-analysis experiments.
-Read `docs/cv-analyzer-architecture-reset-handoff.md` before changing the
-analysis pipeline. Variant-specific work uses:
-
-- `docs/handoffs/docling-luna.md`;
-- `docs/handoffs/luna-only.md`.
-
-The shared branch owns the `AnalysisStrategy` port, `base-analysis-v2`
-schema, persistence, mechanical primitives, UI, and research. It intentionally
-has no concrete analysis strategy.
+This branch runs the `docling-luna` strategy against the shared
+`base-analysis-v2` schema. Read `docs/architecture.md` before changing the
+analysis pipeline. The shared layer owns validation, persistence, mechanical
+primitives, UI, and research.
 
 Do not reintroduce the removed deterministic Document Understanding,
 Structural Audit, ESCO, national-ID redaction, score/band/weights, file
@@ -39,8 +33,7 @@ Old pilot reports are not a compatibility requirement.
 
 | Task | Command |
 | --- | --- |
-| Run shared base | `make dev ALLOW_DEGRADED=true` |
-| Run a strategy variant | `make dev` |
+| Run the stack | `make dev` |
 | Stop stack | `make dev-down` |
 | Backend tests | `cd apps/api && PYTHONPATH=src .venv/bin/pytest -q` |
 | Web tests | `cd apps/web && npm test` |
@@ -64,19 +57,7 @@ company/education/LinkedIn research.
 - Never push unless explicitly asked.
 - If elevated access is needed, use graphical Polkit rather than `sudo`.
 
-## Branching
-
-Do not use a `codex/` prefix. The planned experiment branches are:
-
-- `experiment/docling-luna-analysis`;
-- `experiment/luna-only-analysis`.
-
-They must start from the exact same authorized shared-base commit and run in
-separate worktrees with separate Compose project names, ports, databases,
-volumes, and local env files.
-
 ## OpenSpec
 
-The reset itself is not an OpenSpec change. Do not create one for it. Preserve
-unrelated active proposals and the owner's untracked contextual-feedback
-prototype files.
+Keep source-of-truth specs aligned when archiving completed changes. Do not
+restore archived contracts for removed analysis systems.

@@ -34,11 +34,8 @@ candidates, e-mail provider typos, geographic resolution, and informational EU
 status. A postal-looking token is not accepted as the candidate's address
 without supported context.
 
-See:
-
-- [shared reset handoff](docs/cv-analyzer-architecture-reset-handoff.md)
-- [Docling plus Luna handoff](docs/handoffs/docling-luna.md)
-- [Luna-only handoff](docs/handoffs/luna-only.md)
+See the current [architecture](docs/architecture.md) for durable boundaries and
+the authoritative executable contracts.
 
 ## Development
 
