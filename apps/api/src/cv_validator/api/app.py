@@ -12,7 +12,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -38,8 +38,14 @@ from cv_validator.location import (
     SQLiteLocationResolver,
     SQLitePostalCodeResolver,
 )
-from cv_validator.openai_config import OpenAISettings, load_openai_settings
-from cv_validator.operations import OperationsTelemetry, safe_log
+from cv_validator.openai_config import PINNED_OPENAI_MODEL, OpenAISettings, load_openai_settings
+from cv_validator.operations import (
+    AnalysisRecorder,
+    OperationsTelemetry,
+    configure_structured_logging,
+    safe_log,
+    utc_now,
+)
 from cv_validator.pipeline import analyze_cv_bytes_result
 from cv_validator.research.cache import (
     company_subject_descriptors,
@@ -83,6 +89,7 @@ from cv_validator.research.openai_client import (
     OpenAIResponsesLinkedInResearcher,
 )
 from cv_validator.serialization import serialize_analysis_payload
+from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/docling_luna.db")
 DEFAULT_BATCH_MAX_FILES = 4
@@ -198,6 +205,7 @@ def create_app(
     research_cache_ttl_days: int | None = None,
     require_location_resolver: bool = False,
 ) -> FastAPI:
+    configure_structured_logging()
     settings = openai_settings or load_openai_settings()
     resolver = location_resolver or load_location_resolver(
         required=require_location_resolver
@@ -294,6 +302,7 @@ def create_app(
     )
     research_locks = _ResearchLockRegistry()
     telemetry = OperationsTelemetry()
+    pricing = load_pricing_catalog()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -317,6 +326,7 @@ def create_app(
             "base_analysis": {
                 "ready": strategy.ready,
                 "strategy": strategy.name if strategy.ready else None,
+                "reason": getattr(strategy, "readiness_reason", None),
             },
             "company_research": {
                 "ready": selected_company_researcher is not None,
@@ -362,6 +372,60 @@ def create_app(
         if not requested or not settings.enabled:
             raise HTTPException(status_code=409, detail="ai_disabled_for_analysis")
 
+    def analysis_recorder(analysis_id: str) -> AnalysisRecorder:
+        return AnalysisRecorder(
+            analysis_id=analysis_id,
+            correlation_id=store.analysis_correlation_id(analysis_id) or str(uuid4()),
+            diagnostic_sink=store.record_diagnostic_event,
+            usage_sink=store.record_ai_usage_event,
+            pricing=pricing,
+        )
+
+    def record_research_result(
+        recorder: AnalysisRecorder,
+        category: str,
+        result: dict[str, Any],
+        started_at: str,
+        started: float,
+    ) -> None:
+        cache = result.get("cache", {})
+        cache_outcome = cache.get("status") if isinstance(cache, dict) else None
+        saved_usage: dict[str, int] = {}
+        if isinstance(cache, dict):
+            direct_saved = cache.get("saved_usage")
+            if isinstance(direct_saved, dict):
+                saved_usage = direct_saved
+            else:
+                for subject in cache.get("subjects", []):
+                    if isinstance(subject, dict) and isinstance(subject.get("saved_usage"), dict):
+                        for key, value in subject["saved_usage"].items():
+                            if isinstance(value, int):
+                                saved_usage[key] = saved_usage.get(key, 0) + value
+        model = result.get("model", {})
+        recorder.record_ai_attempt(
+            operation=f"{category}_research",
+            category="research",
+            provider="openai",
+            configured_model=str(model.get("configured") or settings.model),
+            response_model=model.get("response"),
+            reasoning_effort="medium",
+            attempt=1,
+            outcome="completed",
+            started_at=started_at,
+            completed_at=utc_now(),
+            latency_ms=int((perf_counter() - started) * 1000),
+            usage=result.get("usage", {}),
+            cache_outcome=cache_outcome,
+            saved_usage=saved_usage if saved_usage else None,
+        )
+        recorder.emit(
+            "research_completed",
+            operation=f"{category}_research",
+            category="research",
+            outcome="completed",
+            cache_outcome=cache_outcome,
+        )
+
     @app.middleware("http")
     async def observe_request(request, call_next):
         supplied = request.headers.get("X-Correlation-ID")
@@ -370,6 +434,7 @@ def create_app(
         except (ValueError, AttributeError):
             correlation_id = str(uuid4())
         started = perf_counter()
+        request.state.correlation_id = correlation_id
         try:
             response = await call_next(request)
         except Exception:
@@ -417,6 +482,7 @@ def create_app(
                 "name": strategy.name,
                 "version": strategy.version,
                 "ready": strategy.ready,
+                "reason": getattr(strategy, "readiness_reason", None),
             },
             "openai": {
                 "enabled": settings.enabled,
@@ -434,15 +500,57 @@ def create_app(
         filename: str,
         report_language: str,
         access_token: str,
+        correlation_id: str,
     ) -> dict:
+        analysis_id = str(uuid4())
+        try:
+            store.create_analysis_run(analysis_id, correlation_id, access_token)
+        except PersistenceError as exc:
+            raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
+        recorder = AnalysisRecorder(
+            analysis_id=analysis_id,
+            correlation_id=correlation_id,
+            diagnostic_sink=store.record_diagnostic_event,
+            usage_sink=store.record_ai_usage_event,
+            pricing=pricing,
+        )
+        if not strategy.ready:
+            recorder.emit(
+                "analysis_failed",
+                operation="base_analysis",
+                outcome="failed",
+                error_code="analysis_strategy_unavailable",
+            )
+            store.complete_analysis_run(analysis_id, "unavailable", "analysis_strategy_unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="analysis_strategy_unavailable",
+                headers={"X-Analysis-ID": analysis_id},
+            )
         try:
             result = analyze_cv_bytes_result(
                 content,
                 filename=filename,
                 strategy=strategy,
                 report_language=report_language,
+                analysis_id=analysis_id,
+                correlation_id=correlation_id,
+                recorder=recorder,
             )
-            analysis_id = str(uuid4())
+            base_status = result.report["base_analysis"]["status"]
+            if base_status in {"failed", "unavailable"}:
+                recorder.emit(
+                    "analysis_failed",
+                    operation="base_analysis",
+                    outcome="failed",
+                    error_code=f"analysis_{base_status}",
+                )
+                store.complete_analysis_run(analysis_id, base_status, f"analysis_{base_status}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"analysis_{base_status}",
+                    headers={"X-Analysis-ID": analysis_id},
+                )
             response_payload = serialize_analysis_payload(
                 result,
                 analysis_id=analysis_id,
@@ -458,24 +566,75 @@ def create_app(
             )
             if feedback_enabled:
                 feedback_store.materialize(analysis_id, response_payload, include_failures=feedback_failures_enabled)
+            recorder.emit(
+                "persistence_completed",
+                operation="report_persistence",
+                outcome="completed",
+            )
+            store.complete_analysis_run(analysis_id, base_status)
+            recorder.emit(
+                "analysis_completed",
+                operation="base_analysis",
+                outcome="completed",
+                accepted_count=sum(
+                    item.get("status") == "accepted"
+                    for key in ("employment", "education")
+                    for item in result.report["base_analysis"][key]
+                ),
+                ambiguous_count=sum(
+                    item.get("status") == "ambiguous"
+                    for key in ("employment", "education")
+                    for item in result.report["base_analysis"][key]
+                ),
+            )
             return response_payload
+        except HTTPException:
+            raise
         except AnalysisStrategyUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            store.complete_analysis_run(analysis_id, "unavailable", str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail=str(exc),
+                headers={"X-Analysis-ID": analysis_id},
+            ) from exc
         except AnalysisStrategyError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            store.complete_analysis_run(analysis_id, "failed", str(exc))
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+                headers={"X-Analysis-ID": analysis_id},
+            ) from exc
         except ValueError as exc:
+            store.complete_analysis_run(analysis_id, "failed", "analysis_strategy_invalid_output")
             raise HTTPException(
                 status_code=502,
                 detail="analysis_strategy_invalid_output",
+                headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except PersistenceError as exc:
+            store.complete_analysis_run(analysis_id, "failed", "analysis_persistence_error")
             raise HTTPException(
                 status_code=500,
                 detail="analysis_persistence_error",
+                headers={"X-Analysis-ID": analysis_id},
+            ) from exc
+        except Exception as exc:
+            store.complete_analysis_run(analysis_id, "failed", "analysis_unhandled_error")
+            recorder.emit(
+                "analysis_failed",
+                operation="base_analysis",
+                outcome="failed",
+                error_code="analysis_unhandled_error",
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="analysis_failed",
+                headers={"X-Analysis-ID": analysis_id},
             ) from exc
 
     @app.post("/analyze")
     async def analyze_single(
+        request: Request,
         file: UploadFile = File(...),
         x_analysis_access_token: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
@@ -492,11 +651,13 @@ def create_app(
                 filename,
                 _report_language(x_report_language),
                 access_token,
+                request.state.correlation_id,
             )
         )
 
     @app.post("/analyze/batch")
     async def analyze_batch(
+        request: Request,
         files: list[UploadFile] = File(...),
         x_analysis_access_token: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
@@ -522,6 +683,7 @@ def create_app(
                     filename,
                     language,
                     access_token,
+                    request.state.correlation_id,
                 )
             except HTTPException as exc:
                 results.append(
@@ -532,8 +694,13 @@ def create_app(
                     }
                 )
             else:
+                base_status = payload["base_analysis"]["status"]
                 results.append(
-                    {"filename": filename, "status": "ok", "report": payload}
+                    {
+                        "filename": filename,
+                        "status": "partial" if base_status == "partial" else "ok",
+                        "report": payload,
+                    }
                 )
         return JSONResponse(
             {"analysis_access_token": access_token, "results": results}
@@ -563,6 +730,18 @@ def create_app(
     ) -> JSONResponse:
         payload = _owned_payload(store, analysis_id, x_analysis_access_token)
         attach_capabilities(payload)
+        return JSONResponse(payload)
+
+    @app.get("/analyses/{analysis_id}/diagnostics")
+    def get_analysis_diagnostics(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        payload = store.get_analysis_diagnostics(analysis_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
         return JSONResponse(payload)
 
     @app.delete("/analyses/{analysis_id}")
@@ -649,6 +828,10 @@ def create_app(
         if selected_company_researcher is None:
             raise HTTPException(status_code=503, detail="company_research_disabled")
         stored = _owned_payload(store, analysis_id, x_analysis_access_token)
+        research_started_at = utc_now()
+        research_started = perf_counter()
+        recorder = analysis_recorder(analysis_id)
+        recorder.emit("research_started", operation="company_research", category="research", outcome="started")
         try:
             request = build_company_research_request(stored)
         except ValueError as exc:
@@ -660,6 +843,7 @@ def create_app(
                 for descriptor in descriptors:
                     store.invalidate_reusable_research(descriptor.cache_key)
             row = None if x_research_refresh else store.get_company_research(analysis_id)
+            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -694,6 +878,9 @@ def create_app(
                             504,
                             "company_research_timeout",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     except CompanyResearchInvalidResponse as exc:
                         _research_failure(
@@ -704,6 +891,9 @@ def create_app(
                             502,
                             "company_research_invalid_response",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     except CompanyResearchClientError as exc:
                         _research_failure(
@@ -714,6 +904,9 @@ def create_app(
                             502,
                             "company_research_client_error",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     for fresh_index, request_index in enumerate(missing):
                         descriptor = descriptors[request_index]
@@ -744,6 +937,8 @@ def create_app(
                 )
         response = deepcopy(stored)
         response["company_research"] = result
+        if performed:
+            record_research_result(recorder, "company", result, research_started_at, research_started)
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/education")
@@ -757,6 +952,10 @@ def create_app(
         if selected_education_researcher is None:
             raise HTTPException(status_code=503, detail="education_research_disabled")
         stored = _owned_payload(store, analysis_id, x_analysis_access_token)
+        research_started_at = utc_now()
+        research_started = perf_counter()
+        recorder = analysis_recorder(analysis_id)
+        recorder.emit("research_started", operation="education_research", category="research", outcome="started")
         try:
             request = build_education_research_request(stored)
         except ValueError as exc:
@@ -768,6 +967,7 @@ def create_app(
                 for descriptor in descriptors:
                     store.invalidate_reusable_research(descriptor.cache_key)
             row = None if x_research_refresh else store.get_education_research(analysis_id)
+            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -802,6 +1002,9 @@ def create_app(
                             504,
                             "education_research_timeout",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     except EducationResearchInvalidResponse as exc:
                         _research_failure(
@@ -812,6 +1015,9 @@ def create_app(
                             502,
                             "education_research_invalid_response",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     except EducationResearchClientError as exc:
                         _research_failure(
@@ -822,6 +1028,9 @@ def create_app(
                             502,
                             "education_research_client_error",
                             exc,
+                            recorder,
+                            research_started_at,
+                            research_started,
                         )
                     for fresh_index, request_index in enumerate(missing):
                         descriptor = descriptors[request_index]
@@ -857,6 +1066,8 @@ def create_app(
                 )
         response = deepcopy(stored)
         response["education_research"] = result
+        if performed:
+            record_research_result(recorder, "education", result, research_started_at, research_started)
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
@@ -869,8 +1080,13 @@ def create_app(
         if selected_linkedin_researcher is None:
             raise HTTPException(status_code=503, detail="linkedin_research_disabled")
         stored = _owned_payload(store, analysis_id, x_analysis_access_token)
+        research_started_at = utc_now()
+        research_started = perf_counter()
+        recorder = analysis_recorder(analysis_id)
+        recorder.emit("research_started", operation="linkedin_discovery", category="research", outcome="started")
         with research_locks.acquire(f"linkedin:{analysis_id}"):
             row = store.get_linkedin_discovery(analysis_id)
+            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -892,6 +1108,9 @@ def create_app(
                         504,
                         "linkedin_discovery_timeout",
                         exc,
+                        recorder,
+                        research_started_at,
+                        research_started,
                     )
                 except LinkedInResearchInvalidResponse as exc:
                     _research_failure(
@@ -902,6 +1121,9 @@ def create_app(
                         502,
                         "linkedin_discovery_invalid_response",
                         exc,
+                        recorder,
+                        research_started_at,
+                        research_started,
                     )
                 except LinkedInResearchClientError as exc:
                     _research_failure(
@@ -912,11 +1134,16 @@ def create_app(
                         502,
                         "linkedin_discovery_client_error",
                         exc,
+                        recorder,
+                        research_started_at,
+                        research_started,
                     )
                 except PersistenceError as exc:
                     _raise_research_persistence_error(exc)
         response = deepcopy(stored)
         response["linkedin_discovery"] = result
+        if performed:
+            record_research_result(recorder, "linkedin_discovery", result, research_started_at, research_started)
         return JSONResponse(response)
 
     app.state.store = store
@@ -944,12 +1171,31 @@ def _research_failure(
     status_code: int,
     detail: str,
     exc: Exception,
+    recorder: AnalysisRecorder,
+    started_at: str,
+    started: float,
 ) -> None:
     telemetry.increment("research_failures_total", category=category, outcome=outcome)
-    safe_log(
+    recorder.record_ai_attempt(
+        operation=f"{category}_research",
+        category="research",
+        provider="openai",
+        configured_model=PINNED_OPENAI_MODEL,
+        response_model=getattr(exc, "model", None),
+        reasoning_effort="medium",
+        attempt=1,
+        outcome="failed",
+        error_code=outcome,
+        started_at=started_at,
+        completed_at=utc_now(),
+        latency_ms=int((perf_counter() - started) * 1000),
+        usage=getattr(exc, "usage", {}),
+    )
+    recorder.emit(
         "research_failed",
-        analysis_id=analysis_id,
+        operation=f"{category}_research",
         category=category,
+        outcome="failed",
         error_code=outcome,
     )
     raise HTTPException(status_code=status_code, detail=detail) from exc

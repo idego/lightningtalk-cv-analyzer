@@ -22,6 +22,9 @@ function supported(field: { value: string; status: string } | null | undefined) 
 }
 
 export function researchEligibility(report: AnalysisReport) {
+  if (report.base_analysis.status === "failed" || report.base_analysis.status === "unavailable") {
+    return { company: false, education: false, linkedin: false };
+  }
   const employment = report.base_analysis.employment.some(
     (record) => record.status === "accepted" && supported(record.organization),
   );

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
+from jsonschema import Draft202012Validator
 
 from cv_validator.analysis.candidates import (
     EDUCATION_FIELDS,
@@ -24,6 +26,7 @@ from cv_validator.analysis.luna_client import (
     SPECIALIST_REASONING_EFFORT,
     LunaAnalysisClient,
     ModelPassError,
+    PASS_SCHEMAS,
 )
 from cv_validator.analysis.source import SourceDocument
 from cv_validator.analysis.strategy import AnalysisInput
@@ -36,11 +39,13 @@ from cv_validator.location import (
 )
 from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
+from cv_validator.operations import utc_now
+from cv_validator.usage import normalize_usage
 
 
 STRATEGY_NAME = "docling-luna"
-STRATEGY_VERSION = "docling-luna-analysis-v2"
-MAX_PASS_ATTEMPTS = 2
+STRATEGY_VERSION = "docling-luna-analysis-v3"
+MAX_PASS_ATTEMPTS = 1
 EU_COUNTRY_CODES = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
     "FR", "GR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL",
@@ -55,11 +60,12 @@ class _PassOutcome:
     attempt_count: int
     latency_ms: int
     failure_reason: str | None
-    usage: dict[str, Any]
+    usage: Any
     model: str | None
+    section_status: str | None = None
 
     def status_payload(self, effort: str) -> dict[str, Any]:
-        return {
+        payload = {
             "status": self.status,
             "attempt_count": self.attempt_count,
             "latency_ms": self.latency_ms,
@@ -68,6 +74,9 @@ class _PassOutcome:
             "model": self.model,
             "reasoning_effort": effort,
         }
+        if self.section_status is not None:
+            payload["section_status"] = self.section_status
+        return payload
 
 
 class DoclingLunaAnalysisStrategy:
@@ -89,18 +98,44 @@ class DoclingLunaAnalysisStrategy:
 
     @property
     def ready(self) -> bool:
-        return True
+        return self._client is not None
+
+    @property
+    def readiness_reason(self) -> str | None:
+        return None if self.ready else "ai_client_unavailable"
 
     def analyze(self, request: AnalysisInput) -> dict[str, Any]:
+        if not self.ready:
+            from cv_validator.analysis.strategy import AnalysisStrategyUnavailable
+            raise AnalysisStrategyUnavailable("analysis_strategy_unavailable")
         analysis_started = perf_counter()
-        source = self._converter.convert(
-            request.content,
-            request.filename,
-            request.source_format,
-        )
+        conversion_started = perf_counter()
+        try:
+            source = self._converter.convert(
+                request.content,
+                request.filename,
+                request.source_format,
+            )
+        except Exception:
+            if request.recorder:
+                request.recorder.emit(
+                    "conversion_failed",
+                    operation="docling_conversion",
+                    outcome="failed",
+                    error_code="conversion_failed",
+                    latency_ms=int((perf_counter() - conversion_started) * 1000),
+                )
+            raise
+        if request.recorder:
+            request.recorder.emit(
+                "conversion_completed",
+                operation="docling_conversion",
+                outcome="completed",
+                latency_ms=int((perf_counter() - conversion_started) * 1000),
+            )
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="cv-base") as pool:
             pass_futures = {
-                name: pool.submit(self._run_pass, name, source)
+                name: pool.submit(self._run_pass, name, source, None, request.recorder)
                 for name in ("profile", "employment", "education")
             }
             mechanical_future = pool.submit(extract_mechanical, source.blocks)
@@ -113,6 +148,69 @@ class DoclingLunaAnalysisStrategy:
             outcomes["employment"].payload,
             outcomes["education"].payload,
         )
+        if request.recorder:
+            rejection_histogram = Counter(
+                item.get("reason_code", "unknown") for item in state.rejected
+            )
+            request.recorder.emit(
+                "validation_completed",
+                operation="candidate_validation",
+                outcome="completed",
+                raw_candidate_count=sum(
+                    len(outcomes[name].payload.get("records", []))
+                    for name in ("employment", "education")
+                    if isinstance(outcomes[name].payload.get("records", []), list)
+                ),
+                evidence_valid_count=len(state.employment) + len(state.education),
+                evidence_invalid_count=len(state.rejected),
+                rejection_reason_histogram=dict(rejection_histogram),
+            )
+        rescue_outcomes: dict[str, _PassOutcome] = {}
+        for section in ("employment", "education"):
+            outcome = outcomes[section]
+            records = state.employment if section == "employment" else state.education
+            raw = outcome.payload.get("records", []) if isinstance(outcome.payload, dict) else []
+            if (
+                outcome.status != "completed"
+                or not isinstance(raw, list)
+                or not raw
+                or len(records) < len(raw)
+            ):
+                rescue = self._run_pass(f"{section}_rescue", source, None, request.recorder)
+                rescue_outcomes[section] = rescue
+                rescued_state = validate_specialists(
+                    source,
+                    {},
+                    rescue.payload if section == "employment" else {},
+                    rescue.payload if section == "education" else {},
+                )
+                additions = rescued_state.employment if section == "employment" else rescued_state.education
+                target = state.employment if section == "employment" else state.education
+                known_ids = {record["id"] for record in target}
+                known_signatures = {_record_signature(record) for record in target}
+                for record in additions:
+                    signature = _record_signature(record)
+                    if record["id"] in known_ids or signature in known_signatures:
+                        continue
+                    target.append(record)
+                    known_ids.add(record["id"])
+                    known_signatures.add(signature)
+                state.rejected.extend(rescued_state.rejected)
+                state.conflicts.extend(rescued_state.conflicts)
+        for section in ("employment", "education"):
+            records = state.employment if section == "employment" else state.education
+            rescue = rescue_outcomes.get(section)
+            if records:
+                section_status = "completed_with_records"
+            elif rescue is not None and rescue.status == "failed":
+                section_status = "failed"
+            elif rescue is not None and rescue.payload.get("section_status") == "not_present":
+                section_status = "not_present"
+            else:
+                section_status = "unresolved"
+            outcomes[section] = _PassOutcome(
+                **{**outcomes[section].__dict__, "section_status": section_status}
+            )
         review_context = {
             "profile": public_profile(state.profile),
             "employment": public_records(state.employment, EMPLOYMENT_FIELDS),
@@ -122,8 +220,35 @@ class DoclingLunaAnalysisStrategy:
             "mechanical": mechanical,
             "pass_statuses": {name: outcome.status for name, outcome in outcomes.items()},
         }
-        review_outcome = self._run_pass("review", source, review_context)
-        state, review = apply_review(source, state, review_outcome.payload)
+        review_outcome = self._run_pass("review", source, review_context, request.recorder)
+        state, review = apply_review(
+            source,
+            state,
+            review_outcome.payload,
+            review_status=review_outcome.status,
+        )
+        if request.recorder:
+            annotations = review["annotations"]
+            request.recorder.emit(
+                "review_completed",
+                operation="review",
+                outcome=review["status"],
+                extracted_count=len(state.employment) + len(state.education),
+                annotated_count=len(annotations),
+                corrected_count=len(review["relation_corrections"]),
+                added_count=len(review["added_candidate_ids"]),
+                suspected_hallucination_count=sum(
+                    item.get("kind") == "suspected_hallucination" for item in annotations
+                ),
+                uncertain_count=sum(
+                    item.get("kind") in {"uncertain_relation", "conflicting_relation", "unsupported_evidence"}
+                    for item in annotations
+                ),
+                research_eligible_count=sum(
+                    record.get("status") == "accepted" and record.get("relation_status") == "supported"
+                    for record in [*state.employment, *state.education]
+                ),
+            )
         mechanical = _enrich_mechanical(
             deepcopy(mechanical),
             public_profile(state.profile),
@@ -135,10 +260,16 @@ class DoclingLunaAnalysisStrategy:
             for name, outcome in outcomes.items()
         }
         pass_statuses["review"] = review_outcome.status_payload(REVIEWER_REASONING_EFFORT)
+        for section, outcome in rescue_outcomes.items():
+            pass_statuses[f"{section}_rescue"] = outcome.status_payload(SPECIALIST_REASONING_EFFORT)
         statuses = [outcome.status for outcome in outcomes.values()]
         status = _overall_status(statuses, review["status"])
-        total_usage = _aggregate_usage([*outcomes.values(), review_outcome])
-        return {
+        total_usage = _aggregate_usage([
+            *outcomes.values(),
+            *rescue_outcomes.values(),
+            review_outcome,
+        ])
+        report = {
             "contract_version": "base-analysis-v2",
             "strategy": {"name": self.name, "version": self.version},
             "source": {
@@ -175,23 +306,74 @@ class DoclingLunaAnalysisStrategy:
             "usage": {
                 **total_usage,
                 "latency_ms": int((perf_counter() - analysis_started) * 1000),
-                "live_model_calls": self._client is not None,
+                "live_model_calls": bool(getattr(self._client, "is_live", False)),
             },
         }
+        if request.recorder:
+            request.recorder.emit(
+                "assembly_completed",
+                operation="report_assembly",
+                outcome="completed",
+                accepted_count=len(review["accepted_ids"]),
+                ambiguous_count=sum(
+                    item.get("status") == "ambiguous"
+                    for item in [*report["base_analysis"]["employment"], *report["base_analysis"]["education"]]
+                ),
+                coverage_gaps_count=len(review["coverage_gaps"]),
+            )
+        return report
 
     def _run_pass(
         self,
         name: str,
         source: SourceDocument,
         context: dict[str, Any] | None = None,
+        recorder: Any = None,
     ) -> _PassOutcome:
         started = perf_counter()
         if self._client is None:
             return _PassOutcome({}, "unavailable", 0, 0, "ai_disabled", {}, None)
         failure = "pass_failed"
+        failure_usage: dict[str, Any] = {}
+        failure_model: str | None = None
         for attempt in range(1, MAX_PASS_ATTEMPTS + 1):
+            attempt_started_at = utc_now()
+            attempt_started = perf_counter()
+            if recorder:
+                recorder.emit(
+                    "ai_pass_started",
+                    operation=name,
+                    category="base_analysis",
+                    provider="openai",
+                    configured_model=PINNED_OPENAI_MODEL,
+                    reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                    attempt=attempt,
+                    outcome="started",
+                )
             try:
                 response = self._client.run(name, source, context)
+                if not Draft202012Validator(PASS_SCHEMAS[name]).is_valid(response.payload):
+                    raise ModelPassError(
+                        "invalid_schema",
+                        usage=response.usage,
+                        model=response.model,
+                    )
+                latency_ms = int((perf_counter() - attempt_started) * 1000)
+                if recorder:
+                    recorder.record_ai_attempt(
+                        operation=name,
+                        category="base_analysis",
+                        provider="openai",
+                        configured_model=PINNED_OPENAI_MODEL,
+                        response_model=response.model,
+                        reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                        attempt=attempt,
+                        outcome="completed",
+                        started_at=attempt_started_at,
+                        completed_at=utc_now(),
+                        latency_ms=latency_ms,
+                        usage=response.usage,
+                    )
                 return _PassOutcome(
                     response.payload,
                     "completed",
@@ -203,16 +385,36 @@ class DoclingLunaAnalysisStrategy:
                 )
             except ModelPassError as exc:
                 failure = exc.code
+                failure_usage = exc.usage
+                failure_model = exc.model
             except Exception:
                 failure = "client_error"
+                failure_usage = {}
+                failure_model = None
+            if recorder:
+                recorder.record_ai_attempt(
+                    operation=name,
+                    category="base_analysis",
+                    provider="openai",
+                    configured_model=PINNED_OPENAI_MODEL,
+                    response_model=failure_model,
+                    reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                    attempt=attempt,
+                    outcome="failed",
+                    error_code=failure,
+                    started_at=attempt_started_at,
+                    completed_at=utc_now(),
+                    latency_ms=int((perf_counter() - attempt_started) * 1000),
+                    usage=failure_usage,
+                )
         return _PassOutcome(
             {},
             "failed",
             MAX_PASS_ATTEMPTS,
             int((perf_counter() - started) * 1000),
             failure,
-            {},
-            None,
+            failure_usage,
+            failure_model,
         )
 
 
@@ -359,6 +561,14 @@ def _enrich_mechanical(
     return mechanical
 
 
+def _record_signature(record: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (name, " ".join(field["value"].casefold().split()))
+        for name, field in sorted(record.items())
+        if isinstance(field, dict) and isinstance(field.get("value"), str)
+    )
+
+
 def _declared_location_parts(value: str) -> tuple[str, str | None]:
     parts = [part.strip() for part in value.split(",") if part.strip()]
     if len(parts) < 2:
@@ -420,17 +630,17 @@ def _limitations(statuses: list[str], review: dict[str, Any]) -> list[str]:
     return limitations
 
 
-def _bounded_usage(usage: dict[str, Any]) -> dict[str, int]:
-    output: dict[str, int] = {}
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
-        value = usage.get(key)
-        if isinstance(value, int) and value >= 0:
-            output[key] = value
-    return output
+def _bounded_usage(usage: Any) -> dict[str, int]:
+    return normalize_usage(usage)
 
 
 def _aggregate_usage(outcomes: list[_PassOutcome]) -> dict[str, int]:
-    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    totals = {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
     for outcome in outcomes:
         for key, value in _bounded_usage(outcome.usage).items():
             totals[key] += value

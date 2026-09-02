@@ -70,19 +70,17 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v1",
+        "schema_version": "education-research-schema-v2",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
             "program": "Computer Science",
             "degree": None,
             "certificate": None,
-            "institution_exists": "supported",
             "program_exists": "supported",
             "degree_exists": "evidence_unavailable",
             "certificate_exists": "evidence_unavailable",
             "dates": None,
-            "accreditation_status": "evidence_unavailable",
             "city": None,
             "country": None,
             "cv_consistency": "evidence_unavailable",
@@ -97,7 +95,7 @@ def education_result() -> dict:
                     "confidence": "medium",
                     "uncertainty": "Public sources only.",
                 }
-                for kind in ("institution", "program")
+                for kind in ("program",)
             ],
         }],
         "searches_performed": ["Example University Computer Science"],

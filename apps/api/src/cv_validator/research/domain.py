@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class CompanyResearchError(Exception):
+class ResearchError(Exception):
+    def __init__(self, *args: Any, usage: Any = None, model: str | None = None) -> None:
+        super().__init__(*args)
+        self.usage = usage or {}
+        self.model = model
+
+
+class CompanyResearchError(ResearchError):
     pass
 
 
@@ -25,7 +32,7 @@ class CompanyResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
 
 
-class EducationResearchError(Exception):
+class EducationResearchError(ResearchError):
     pass
 
 
@@ -46,7 +53,7 @@ class EducationResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
 
 
-class LinkedInResearchError(Exception):
+class LinkedInResearchError(ResearchError):
     pass
 
 

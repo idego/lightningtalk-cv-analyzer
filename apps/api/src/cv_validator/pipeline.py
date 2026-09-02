@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +26,17 @@ def analyze_cv_bytes_result(
     *,
     strategy: AnalysisStrategy | None = None,
     report_language: str = "en",
+    analysis_id: str | None = None,
+    correlation_id: str | None = None,
+    recorder: Any = None,
 ) -> PipelineResult:
     request = AnalysisInput.from_upload(content, filename, report_language)
+    request = replace(
+        request,
+        analysis_id=analysis_id,
+        correlation_id=correlation_id,
+        recorder=recorder,
+    )
     selected_strategy = strategy or UnavailableAnalysisStrategy()
     payload = selected_strategy.analyze(request)
     _require_strategy_identity(payload, selected_strategy, request)

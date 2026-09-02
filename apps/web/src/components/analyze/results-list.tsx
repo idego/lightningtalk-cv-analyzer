@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { BriefcaseBusiness, Globe2, GraduationCap, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { BriefcaseBusiness, CircleAlert, Globe2, GraduationCap, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
@@ -100,11 +100,21 @@ function displayCountry(countryCode: string, language: "en" | "pl") {
   return name && name !== code ? `${name} (${code})` : code;
 }
 
+function joinDisplay(...values: Array<string | null | undefined>) {
+  return values.filter(Boolean).join(" · ") || null;
+}
+
 function StructuredFacts({ overview }: { overview: ReportOverview }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
-  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.employment.length > 0;
+  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
+  const reviewLabel = settings.uiLanguage === "pl" ? "Wymaga sprawdzenia" : "Needs review";
+  const emptySection = (sectionStatus: string | undefined) => {
+    if (sectionStatus === "not_present") return settings.uiLanguage === "pl" ? "Nie znaleziono wpisów w CV." : "No entries were found in the CV.";
+    if (sectionStatus === "failed") return settings.uiLanguage === "pl" ? "Nie udało się przeanalizować tej sekcji." : "This section could not be analyzed.";
+    return settings.uiLanguage === "pl" ? "Nie udało się jednoznacznie ustalić zawartości tej sekcji." : "This section could not be resolved confidently.";
+  };
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
@@ -114,6 +124,12 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
     <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={t("extracted")} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
+          {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
+            <h4 id="overview-attention" className="mb-2 text-xs font-semibold text-foreground">{settings.uiLanguage === "pl" ? "Dane wymagające uwagi" : "Data needing attention"}</h4>
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+              {overview.attentionRecords.map((item) => <OverviewRow key={item.id} icon={<CircleAlert className="size-4" />} label={reviewLabel} value={item.value} detail={item.detail} tone="bg-rose-500/10 text-rose-700 dark:text-rose-300" />)}
+            </div>
+          </section> : null}
           {hasContact || hasLocation ? <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
             {hasContact ? <section aria-labelledby="overview-contact">
               <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">{t("contact")}</h4>
@@ -136,7 +152,7 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
             </section> : null}
           </div> : null}
 
-          {overview.education.length ? <section aria-labelledby="overview-education" className="border-t pt-4">
+          {overview.education.length || overview.educationStatus ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {overview.education.map((item) => {
@@ -146,15 +162,16 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
                   icon={<GraduationCap className="size-4" />}
                   label={t("educationEntry")}
                   value={item.value}
-                  detail={item.detail}
+                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={educationTone}
                   action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
                 />;
               })}
             </div>
+            {!overview.education.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.educationStatus)}</p> : null}
           </section> : null}
 
-          {overview.employment.length ? <section aria-labelledby="overview-employment" className="border-t pt-4">
+          {overview.employment.length || overview.employmentStatus ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {overview.employment.map((item) => {
@@ -164,12 +181,13 @@ function StructuredFacts({ overview }: { overview: ReportOverview }) {
                   icon={<BriefcaseBusiness className="size-4" />}
                   label={t("employmentEntry")}
                   value={item.value}
-                  detail={item.detail}
+                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={employmentTone}
                   action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} variant="compact" /> : null}
                 />;
               })}
             </div>
+            {!overview.employment.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.employmentStatus)}</p> : null}
           </section> : null}
         </div>
       ) : <p className="text-sm text-muted-foreground">{t("noCvDetails")}</p>}
@@ -183,7 +201,10 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
   const [reportOverrides, setReportOverrides] = useState<Record<string, AnalysisReport>>({});
   const [feedback, setFeedback] = useState<Record<string, FeedbackManifest>>({});
   const feedbackLoads = useRef(new Set<string>());
-  const reportIds = items.filter((item): item is Extract<AnalyzeItemResult, { status: "ok" }> => item.status === "ok").map((item) => item.report.analysis_id).join(",");
+  const reportIds = items
+    .filter((item): item is Exclude<AnalyzeItemResult, { status: "error" }> => item.status !== "error")
+    .map((item) => item.report.analysis_id)
+    .join(",");
 
   useEffect(() => {
     let cancelled = false;

@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   const data = await upstream.json();
   if (Array.isArray(data.results)) {
     for (const item of data.results) {
-      if (item?.status === "ok" && item.report) item.report.analysis_access_token = analysisAccessToken;
+      if (item?.status !== "error" && item?.report) item.report.analysis_access_token = analysisAccessToken;
     }
   }
   return NextResponse.json(data, { status: upstream.status });

@@ -20,6 +20,7 @@ export type OverviewRecord = {
   detail: string | null;
   searchSubject: string | null;
   searchContext: string | null;
+  needsReview?: boolean;
 };
 
 export type ReportOverview = {
@@ -34,6 +35,9 @@ export type ReportOverview = {
   euStatus: "inside" | "outside" | null;
   education: OverviewRecord[];
   employment: OverviewRecord[];
+  attentionRecords: OverviewRecord[];
+  educationStatus?: string;
+  employmentStatus?: string;
 };
 
 export type ReportInterface = {
@@ -219,13 +223,14 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
     ]),
     searchSubject: value(item.institution),
     searchContext: value(item.program),
+    needsReview: item.status === "ambiguous",
   };
 }
 
 function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][number]): OverviewRecord {
   return {
     id: item.id,
-    value: value(item.role) ?? value(item.relationship_type) ?? "Employment entry",
+    value: value(item.role) ?? value(item.relationship_type) ?? value(item.organization) ?? "Employment entry",
     detail: join([
       dateRange(item.start_date, item.end_date),
       value(item.organization),
@@ -233,6 +238,7 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
     ]),
     searchSubject: value(item.organization),
     searchContext: value(item.location),
+    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -247,6 +253,11 @@ function overview(report: AnalysisReport): ReportOverview {
     : [];
   const eu = record(report.mechanical.eu_status);
   const postalValidation = record(postal?.validation);
+  const suspectedIds = new Set(
+    report.base_analysis.review.annotations
+      .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
+      .map((item) => item.record_id),
+  );
   const outsideEu = Array.isArray(eu?.outside_eu) ? eu.outside_eu : [];
   const insideEu = Array.isArray(eu?.inside_eu) ? eu.inside_eu : [];
   return {
@@ -263,8 +274,14 @@ function overview(report: AnalysisReport): ReportOverview {
         ? "mismatch"
         : null,
     euStatus: outsideEu.length ? "outside" : insideEu.length ? "inside" : null,
-    education: report.base_analysis.education.filter((item) => item.status === "accepted").map(educationRecord),
-    employment: report.base_analysis.employment.filter((item) => item.status === "accepted").map(employmentRecord),
+    education: report.base_analysis.education.filter((item) => !suspectedIds.has(item.id)).map(educationRecord),
+    employment: report.base_analysis.employment.filter((item) => !suspectedIds.has(item.id)).map(employmentRecord),
+    attentionRecords: [
+      ...report.base_analysis.education.filter((item) => suspectedIds.has(item.id)).map(educationRecord),
+      ...report.base_analysis.employment.filter((item) => suspectedIds.has(item.id)).map(employmentRecord),
+    ],
+    educationStatus: report.base_analysis.pass_statuses.education?.section_status,
+    employmentStatus: report.base_analysis.pass_statuses.employment?.section_status,
   };
 }
 
