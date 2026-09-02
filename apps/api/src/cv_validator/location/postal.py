@@ -192,7 +192,7 @@ def build_postal_index(
         raise ValueError("postal output already exists")
     source_sha256 = _sha256(source_path)
     reference_data_version = f"geonames-postal-{snapshot_date}-{source_sha256[:12]}"
-    records: set[tuple[str, str, str, str, str]] = set()
+    records: dict[tuple[str, str, str], tuple[str, str, str, str, str]] = {}
     for line_number, line in enumerate(source_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line or line.startswith("#"):
             continue
@@ -204,16 +204,19 @@ def build_postal_index(
             len(country_code) != 2
             or not country_code.isalpha()
             or not postal_code.strip()
-            or not place_name.strip()
         ):
             raise ValueError(f"invalid postal source row: {line_number}")
-        records.add((
+        if not place_name.strip():
+            continue
+        record = (
             country_code.upper(),
             postal_code,
             normalize_postal_code(postal_code),
             place_name,
             normalize_location(place_name),
-        ))
+        )
+        key = (record[0], record[2], record[4])
+        records[key] = min(record, records.get(key, record))
     if not records:
         raise ValueError("postal source contains no records")
     output_index.parent.mkdir(parents=True, exist_ok=True)
@@ -230,7 +233,7 @@ def build_postal_index(
         )
         connection.executemany(
             "INSERT INTO postal_record VALUES (?, ?, ?, ?, ?)",
-            sorted(records),
+            sorted(records.values()),
         )
         connection.execute(
             "CREATE INDEX postal_lookup ON postal_record(country_code, normalized_postal_code)"
