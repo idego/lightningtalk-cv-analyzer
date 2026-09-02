@@ -622,8 +622,16 @@ def _apply_merge_groups(
     return applied
 
 
+# Conflicts that describe a resolved, visible decision rather than unresolved doubt.
+INFORMATIONAL_CONFLICT_CODES = {"field_detached_from_record"}
+
+
 def _review_status(payload: dict[str, Any], conflicts: list[Any], gaps: list[Any]) -> str:
     declared = payload.get("status")
     if declared in {"failed", "unavailable"}:
         return declared
-    return "partial" if conflicts or gaps or declared == "partial" else "completed"
+    blocking = [
+        item for item in conflicts
+        if not isinstance(item, dict) or item.get("reason_code") not in INFORMATIONAL_CONFLICT_CODES
+    ]
+    return "partial" if blocking or gaps or declared == "partial" else "completed"

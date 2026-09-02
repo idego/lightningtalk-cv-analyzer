@@ -722,3 +722,26 @@ def test_reviewer_can_add_a_candidate_and_merge_it_in_one_pass() -> None:
     assert review["merged_ids"] == [["employment_1", "review_employment_1"]]
     assert review["added_candidate_ids"] == []
     assert not any(c["reason_code"] == "unknown_reviewer_merge_id" for c in review["conflicts"])
+
+
+def test_detached_fields_do_not_make_the_review_partial() -> None:
+    source = SourceDocument.create(tuple(
+        SourceBlock(f"b-{index}", text, order=index)
+        for index, text in enumerate(["Example Systems", "Developer", *["filler"] * 8, "2024"])
+    ), "pdf")
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "employment_1",
+        "organization": field("org", "Example Systems", "b-0"),
+        "role": field("role", "Developer", "b-1"),
+        "start_date": field("date", "2024", "b-10"),
+        "end_date": None, "location": None, "relationship_type": None,
+    }]}, {})
+    assert any(c["reason_code"] == "field_detached_from_record" for c in state.conflicts)
+
+    _, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [], "relation_patches": [],
+        "added_profile_fields": [], "added_candidates": [], "conflicts": [], "coverage_gaps": [],
+        "status": "completed",
+    })
+    assert review["status"] == "completed"
+    assert review["accepted_ids"] == ["employment_1"]
