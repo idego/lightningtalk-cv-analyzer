@@ -79,6 +79,34 @@ The reverse proxy terminates TLS and forwards only to the loopback-bound web
 port. Readiness requires the selected variant strategy; degraded optional
 research capabilities remain visible individually.
 
+## AI usage accounting
+
+The Dashboard shows authenticated deployment-wide lifetime accounting from the
+append-only usage ledger, not by summing mutable report or research rows. A
+completed base report increments `processed_report_events` once; failed AI
+attempts may still contribute tokens/cost without increasing report throughput.
+Each successful paid provider response is ledgered before mutable result/cache
+persistence. Provider retries therefore count as separate paid attempts, while
+an idempotent repeat of the same event key is ignored. Reusable company and
+education cache hits make no new paid usage event; the original cache-miss
+provider request remains counted once.
+
+Costs are estimates. Each usage row stores the pricing catalog version and its
+computed USD cost, plus the fixed conversion rate/version and derived PLN cost.
+The current fixed conversion is `1 USD = 3.75 PLN`; no live exchange-rate fetch
+is used and historical rows are never repriced when code/config changes. The
+pricing catalog can be overridden with `CV_VALIDATOR_PRICING_PATH`; changing it
+must use a new catalog version.
+
+Normal report deletion and retention intentionally preserve `ai_usage_events`
+and `processed_report_events`. Their retained `analysis_id` is only a
+pseudonymous accounting correlation key; report/audit/research rows are still
+deleted according to normal lifecycle rules. The ledger must never contain CV
+text, evidence, prompts, model responses, candidate data, e-mail addresses, or
+other PII. The API is internal-only; browser access to deployment totals goes
+through the authenticated web route, and per-report totals additionally use the
+existing owner-scoped analysis access token.
+
 ## Data and logs
 
 - Raw uploads are processed in memory and are not persisted.

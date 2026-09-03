@@ -48,6 +48,14 @@ disabled. Raw uploads are processed in memory, and raw CV text, evidence,
 model output, and secrets must not enter logs.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
+AI accounting is separate from mutable report/research rows: `ai_usage_events`
+is an append-only, non-PII ledger of provider/model, operation, token counts,
+pricing/FX snapshots, estimated cost, cache status, and a pseudonymous analysis
+identifier. `processed_report_events` records each completed base report once.
+Normal report deletion and retention remove the report association data but
+intentionally retain those pseudonymous accounting facts so deployment lifetime
+totals remain monotonic; retained accounting rows cannot reconstruct CV text,
+evidence, prompts, model responses, candidate details, or e-mail addresses.
 GeoNames locality and postal indexes are prepared by a one-shot Compose service
 and mounted read-only by the API. Operational setup, recovery, retention,
 feedback rollout, and backups are documented in `docs/operations.md` and
