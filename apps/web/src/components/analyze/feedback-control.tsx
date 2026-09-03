@@ -92,11 +92,9 @@ export function FeedbackControl({
     normalized = comment.trim().replace(/\s+/g, " "),
     valid =
       failure ||
-      rating === "helpful" ||
-      (normalized.length >= 12 && normalized.length <= 180),
-    disabledReason = normalized.length > 0
-      ? t("feedbackCommentTooShort")
-      : t("feedbackSelectionRequired");
+      rating !== null ||
+      (normalized.length > 0 && normalized.length <= 180),
+    disabledReason = t("feedbackSelectionRequired");
   const draw = useCallback(
     (value: number) =>
       path.current?.setAttribute(

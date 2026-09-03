@@ -93,9 +93,9 @@ export function FeedbackAccess() {
         return <li key={member.email} className="flex items-center justify-between p-3">
           <span>{member.email} · {t(member.role)}</span>
           <Button
-            variant={awaitingConfirmation ? "destructive" : "ghost"}
+            variant={awaitingConfirmation ? "destructive" : "outline"}
             size="sm"
-            className={awaitingConfirmation ? undefined : "text-destructive hover:text-destructive"}
+            className={awaitingConfirmation ? undefined : "border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"}
             onBlur={() => setConfirmRevoke(null)}
             onKeyDown={(event) => { if (event.key === "Escape") setConfirmRevoke(null); }}
             onClick={() => void revoke(member.email)}

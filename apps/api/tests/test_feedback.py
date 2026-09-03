@@ -58,10 +58,12 @@ def test_feedback_keeps_displayed_context_and_can_be_deleted_by_maintainer(tmp_p
 
 def test_comment_validation_and_contact_rejection():
     with pytest.raises(ValidationError):
-        FeedbackInput(rating="helpful", comment="too short")
-    with pytest.raises(ValidationError):
         FeedbackInput(comment="Contact me at user@example.com please")
-    assert FeedbackInput(comment="This result needs more context").rating is None
+    with pytest.raises(ValidationError):
+        FeedbackInput()
+    value = FeedbackInput(comment="Wrong")
+    assert value.rating is None
+    assert value.comment == "Wrong"
 
 
 def test_helpful_feedback_does_not_require_a_comment():

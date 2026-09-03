@@ -126,13 +126,10 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
           return (
             <article key={key} className="rounded-xl border bg-card transition-[border-color,box-shadow] duration-150 hover:border-foreground/20 hover:shadow-sm">
               <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <h2 className="text-sm font-semibold">{context.section}</h2>
-                    {item.rating ? <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{item.rating === "helpful" ? <ThumbsUp className="size-3" /> : <ThumbsDown className="size-3" />}{t(item.rating === "helpful" ? "helpful" : "needsImprovement")}</span> : null}
-                    {date ? <span className="text-xs text-muted-foreground">{date}</span> : null}
-                  </div>
-                  {!sameLabel(context.section, context.subject) ? <p className="mt-1 text-sm text-muted-foreground">{context.subject}</p> : null}
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                  <h2 className="text-sm font-semibold">{context.section}</h2>
+                  {item.rating ? <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{item.rating === "helpful" ? <ThumbsUp className="size-3" /> : <ThumbsDown className="size-3" />}{t(item.rating === "helpful" ? "helpful" : "needsImprovement")}</span> : null}
+                  {date ? <span className="text-xs text-muted-foreground">{date}</span> : null}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <DropdownMenu>

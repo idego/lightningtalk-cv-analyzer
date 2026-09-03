@@ -88,8 +88,6 @@ class FeedbackInput(BaseModel):
             raise ValueError("reason_requires_not_helpful")
         if self.reason == Reason.OPERATION_FAILED:
             return self
-        if self.comment is not None and len(self.comment) < 12:
-            raise ValueError("comment_too_short")
         if not self.comment and not (
             self.rating == Rating.HELPFUL
             or (self.rating == Rating.NOT_HELPFUL and self.reason)
