@@ -114,7 +114,7 @@ export function HoverDisclosure({
         <Collapsible.Trigger
           data-disclosure-trigger
           onClick={pinFromTrigger}
-          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[min(var(--radius-md),12px)] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[min(var(--radius-md),12px)] outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="sr-only">{title}</span>
           <ChevronDown
