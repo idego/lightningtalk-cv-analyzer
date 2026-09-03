@@ -47,6 +47,22 @@ def _persist_completed_report(store: PersistenceStore, analysis_id: str) -> None
     store.complete_analysis_run(analysis_id, "completed")
 
 
+def test_partial_report_counts_as_processed_and_is_backfilled(tmp_path) -> None:
+    path = tmp_path / "reports.db"
+    store = PersistenceStore(PersistenceConfig(path))
+    report = valid_report()
+    report["base_analysis"]["status"] = "partial"
+    store.persist_report("1" * 64, report, analysis_id="partial-analysis")
+
+    assert store.get_usage_summary()["reports_processed"] == 1
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM processed_report_events")
+
+    reopened = PersistenceStore(PersistenceConfig(path))
+    assert reopened.get_usage_summary()["reports_processed"] == 1
+
+
 def test_usage_summary_is_idempotent_and_survives_report_deletion(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     analysis_id = "analysis-1"

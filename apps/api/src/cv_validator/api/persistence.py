@@ -225,7 +225,7 @@ class PersistenceStore:
                 """INSERT OR IGNORE INTO processed_report_events
                    (event_id, analysis_id, completed_at, status)
                    SELECT 'legacy-report-' || analysis_id, analysis_id, created_at, 'completed'
-                   FROM reports WHERE status = 'completed'"""
+                   FROM reports WHERE status IN ('completed', 'partial')"""
             )
             init_feedback_schema(conn)
             conn.execute(
@@ -448,7 +448,7 @@ class PersistenceStore:
                         selected_analysis_id,
                     ),
                 )
-                if status == "completed":
+                if status in {"completed", "partial"}:
                     conn.execute(
                         """INSERT INTO processed_report_events
                            (event_id, analysis_id, completed_at, status)

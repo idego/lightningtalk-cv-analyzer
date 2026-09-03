@@ -51,7 +51,7 @@ The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`
 is an append-only, non-PII ledger of provider/model, operation, token counts,
 pricing/FX snapshots, estimated cost, cache status, and a pseudonymous analysis
-identifier. `processed_report_events` records each completed base report once.
+identifier. `processed_report_events` records each completed or partial base report once.
 Normal report deletion and retention remove the report association data but
 intentionally retain those pseudonymous accounting facts so deployment lifetime
 totals remain monotonic; retained accounting rows cannot reconstruct CV text,

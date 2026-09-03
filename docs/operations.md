@@ -94,7 +94,7 @@ research capabilities remain visible individually.
 
 The Dashboard shows authenticated deployment-wide lifetime accounting from the
 append-only usage ledger, not by summing mutable report or research rows. A
-completed base report increments `processed_report_events` once; failed AI
+completed or partial base report increments `processed_report_events` once; failed AI
 attempts may still contribute tokens/cost without increasing report throughput.
 Each successful paid provider response is ledgered before mutable result/cache
 persistence. Provider retries therefore count as separate paid attempts, while
