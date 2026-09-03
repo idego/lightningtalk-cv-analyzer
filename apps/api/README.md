@@ -1,11 +1,11 @@
-# CV Analyzer API — Docling + Luna
+# CV Analyzer API
 
-This variant installs `DoclingLunaAnalysisStrategy` as the default producer of
+The API installs `DocumentAnalysisStrategy` as the default producer of
 the `base-analysis-v2` contract. It accepts text-layer PDF and DOCX uploads,
-projects a real Docling document into evidence blocks, runs three parallel Luna
+projects a real Docling document into evidence blocks, runs three parallel model
 specialists, validates their candidates, and applies a sequential reviewer
 before deterministic report assembly. With AI disabled, conversion and
-mechanical extraction still run and the unavailable Luna passes are explicit.
+mechanical extraction still run and the unavailable model passes are explicit.
 
 Run tests:
 

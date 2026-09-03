@@ -11,7 +11,7 @@ function report() {
   return {
     contract_version: "base-analysis-v2",
     analysis_id: "analysis-1",
-    strategy: { name: "docling-luna", version: "test" },
+    strategy: { name: "document-analysis", version: "test" },
     source: { format: "pdf", sha256: "anonymous", identity: "anonymous", block_count: 1, conversion_status: "completed" },
     base_analysis: {
       status: "partial",

@@ -2,9 +2,9 @@
 
 ## Runtime
 
-- This branch installs exactly one `docling-luna` strategy and exposes its name
+- The API installs exactly one `document-analysis` strategy and exposes its name
   and version through health and every report.
-- `OPENAI_API_KEY` is required when public research or a Luna strategy is
+- `OPENAI_API_KEY` is required when public research or the model-backed analysis is
   enabled. Never commit the key.
 - Let the one-shot `geonames-init` service build and validate both GeoNames
   index/manifest pairs in its persistent volume. The API mounts the promoted
@@ -12,7 +12,8 @@
 - For an approved offline snapshot, use `REFERENCE_DATA_MODE=operator`; see
   `docs/reference-data/geonames.md` for refresh and recovery procedures.
 - Keep only the web service public. The API stays on the internal Compose
-  network.
+  network in production; `make dev` adds `docker-compose.dev.yml`, which
+  publishes it on `127.0.0.1:8001` for Swagger only.
 - Persist and back up the API and authentication SQLite volumes.
 - Configure retention with `CV_VALIDATOR_RETENTION_DAYS`.
 
@@ -25,16 +26,21 @@ Feedback is decision-neutral and never edits a report, analysis output,
 research result, retry state, or hiring action. Targets and responses live with
 the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
 `web_auth_data`. Feedback is enabled by default. Responses retain the signed-in
-author's email and a snapshot of the displayed CV/report section so maintainers
-can review the comment in its original context. Comments are limited to 180
-characters; team notes are limited to 500 characters; contact details and URLs
-are rejected from both. The inbox never stores the uploaded original, raw
+author's email and a snapshot of the displayed CV/report section (label up to
+200 characters, text up to 12000 characters) so maintainers can review the
+comment in its original context. Comments are 12 to 180 characters; team notes
+are limited to 500 characters; contact details and URLs are rejected from both.
+The web proxy caps a feedback write at 16 KiB and a triage note at 2 KiB. The inbox never stores the uploaded original, raw
 model output, raw exceptions, request bodies, or logs.
 
 Access is initialized automatically by the one-shot `feedback-init` Compose
 service from `config/feedback-access.json`. It seeds the initial owners only
 when the access table is empty; later deploys never restore access changed in
-the UI.
+the UI. Both `feedback-init` and `web` read `BETTER_AUTH_DB_PATH`, so an
+override applies to both. With `LOCAL_DEV_AUTH_BYPASS=true` (`make dev`), the
+service also grants `local-dev@localhost` an owner role on every run.
+Operations endpoints `GET /operations/metrics` and `GET /operations/status`
+expose telemetry counters and strategy status inside the Compose network.
 
 Use this production sequence:
 
@@ -64,9 +70,14 @@ make dev
 make dev-down
 ```
 
-The command uses Compose project `cv-analyzer-docling-luna`, loopback web port
-3021, API database `/app/data/docling_luna.db`, and auth database
-`/app/data/docling_luna_auth.db`.
+The command uses Compose project `cv-analyzer`, loopback web port 3001, API
+database `/app/data/cv_analyzer.db`, and auth database `/app/data/auth.db`.
+Named volumes are keyed by the project name, so do not change it casually. A
+stack created under the former project `cv-analyzer-document-analysis` with the
+former `docling_luna.db` / `docling_luna_auth.db` defaults keeps its data only
+if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths in the env
+file, or copy the volumes to the new project once while the stack is stopped.
 
 Production deploys an exact reviewed SHA:
 
@@ -97,5 +108,5 @@ A strategy failure returns a bounded per-document error. It must not silently
 fall back to a different strategy or the removed deterministic pipeline.
 
 For application rollback, deploy the previously recorded reviewed SHA. Named
-volumes remain intact. This variant uses `docling_luna.db` and does not migrate
+volumes remain intact. The API uses `cv_analyzer.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.

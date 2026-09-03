@@ -21,10 +21,10 @@ from cv_validator.analysis.docling_converter import (
     DOCLING_VERSION,
     DoclingTextConverter,
 )
-from cv_validator.analysis.luna_client import (
+from cv_validator.analysis.model_client import (
     REVIEWER_REASONING_EFFORT,
     SPECIALIST_REASONING_EFFORT,
-    LunaAnalysisClient,
+    AnalysisModelClient,
     ModelPassError,
     PASS_SCHEMAS,
 )
@@ -43,8 +43,8 @@ from cv_validator.operations import utc_now
 from cv_validator.usage import normalize_usage
 
 
-STRATEGY_NAME = "docling-luna"
-STRATEGY_VERSION = "docling-luna-analysis-v3"
+STRATEGY_NAME = "document-analysis"
+STRATEGY_VERSION = "document-analysis-v3"
 MAX_PASS_ATTEMPTS = 2
 EU_COUNTRY_CODES = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
@@ -79,7 +79,7 @@ class _PassOutcome:
         return payload
 
 
-class DoclingLunaAnalysisStrategy:
+class DocumentAnalysisStrategy:
     name = STRATEGY_NAME
     version = STRATEGY_VERSION
 
@@ -87,7 +87,7 @@ class DoclingLunaAnalysisStrategy:
         self,
         *,
         converter: DoclingTextConverter | None = None,
-        client: LunaAnalysisClient | None = None,
+        client: AnalysisModelClient | None = None,
         location_resolver: LocationResolver | None = None,
         postal_code_resolver: PostalCodeResolver | None = None,
     ) -> None:

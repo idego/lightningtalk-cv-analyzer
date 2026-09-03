@@ -123,7 +123,7 @@ export function LinkedInResearchPanel({
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     action={<div className="flex items-center gap-2">
-      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
+      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedInFor", { subject: searchKeyword ?? "" })}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedInFor", { subject: searchKeyword ?? "" })}</TooltipContent></Tooltip> : null}
       {!discoveryCompleted ? <ResearchAction
         busy={discoveryBusy}
         disabled={!enabled || discoveryBusy}

@@ -1,15 +1,15 @@
 # Architecture
 
-CV Analyzer runs one `docling-luna` document-analysis strategy and validates
+CV Analyzer runs one `document-analysis` document-analysis strategy and validates
 its output against the `base-analysis-v2` contract.
 
 ```text
 PDF or DOCX upload
     -> Docling native-text conversion with OCR disabled
     -> minimal SourceDocument evidence projection
-    -> concurrent profile, employment, and education Luna passes
+    -> concurrent profile, employment, and education model passes
     -> field, literal-evidence, and record-relation validation
-    -> sequential Luna reviewer using validated ID-based operations
+    -> sequential model reviewer using validated ID-based operations
     -> shared mechanical enrichment
     -> base-analysis-v2 validation and SQLite persistence
     -> recruiter UI and optional public research
@@ -58,4 +58,4 @@ The authoritative executable contracts are:
 - `apps/api/src/cv_validator/analysis/strategy.py`;
 - `apps/api/src/cv_validator/analysis/contracts/base-analysis.schema.json`;
 - `apps/api/src/cv_validator/analysis/validation.py`;
-- `apps/api/src/cv_validator/analysis/docling_luna.py`.
+- `apps/api/src/cv_validator/analysis/document_analysis.py`.

@@ -35,7 +35,7 @@
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
-        "name": { "const": "docling-luna" },
+        "name": { "const": "document-analysis" },
         "version": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },

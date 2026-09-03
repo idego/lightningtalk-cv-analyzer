@@ -166,7 +166,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={educationTone}
-                  action={href ? <GoogleSearchAction href={href} /> : null}
+                  action={href ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
                 />;
               })}
             </div>
@@ -185,7 +185,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={employmentTone}
-                  action={href ? <GoogleSearchAction href={href} /> : null}
+                  action={href ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
                 />;
               })}
             </div>

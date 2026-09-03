@@ -32,7 +32,7 @@ function EducationResult({ credential, analysisId, feedback }: { credential: Cre
     headerClassName="flex-wrap sm:flex-nowrap"
     actionClassName="w-full sm:w-auto"
     title={<strong className="block min-w-0 truncate">{credential.institution}</strong>}
-    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} /> : null}{feedback ? <FeedbackControl analysisId={analysisId} target={feedback} /> : null}</div>}
+    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} subject={credential.institution} /> : null}{feedback ? <FeedbackControl analysisId={analysisId} target={feedback} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
     <p className="text-muted-foreground">{[credential.program, credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ") || t("notEnoughPublicInformation")}</p>

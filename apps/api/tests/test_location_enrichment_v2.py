@@ -1,4 +1,4 @@
-from cv_validator.analysis.docling_luna import _enrich_mechanical
+from cv_validator.analysis.document_analysis import _enrich_mechanical
 from cv_validator.domain import ComponentVersion
 from cv_validator.location import (
     InMemoryLocationResolver,

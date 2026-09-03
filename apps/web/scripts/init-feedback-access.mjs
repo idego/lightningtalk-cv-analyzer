@@ -2,7 +2,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 
 const configPath = process.argv[2] ?? "/config/feedback-access.json";
-const dbPath = process.env.BETTER_AUTH_DB_PATH ?? "/app/data/docling_luna_auth.db";
+const dbPath = process.env.BETTER_AUTH_DB_PATH ?? "/app/data/auth.db";
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const owners = [...new Set((config.owners ?? []).map(email => String(email).trim().toLowerCase()))];
 

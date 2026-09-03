@@ -14,8 +14,8 @@ from cv_validator.pipeline import analyze_cv_bytes_result
 
 
 class FakeStrategy:
-    name = "docling-luna"
-    version = "docling-luna-test-v1"
+    name = "document-analysis"
+    version = "document-analysis-test-v1"
     ready = True
 
     def analyze(self, request):
@@ -36,7 +36,7 @@ def test_pipeline_delegates_original_upload_to_strategy() -> None:
     )
 
     assert result.input_hash == hashlib.sha256(content).hexdigest()
-    assert result.report["strategy"]["name"] == "docling-luna"
+    assert result.report["strategy"]["name"] == "document-analysis"
     assert result.report["source"]["format"] == "pdf"
 
 

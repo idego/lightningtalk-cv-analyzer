@@ -36,7 +36,7 @@ class ModelPassResponse:
     usage: dict[str, Any]
 
 
-class LunaAnalysisClient(Protocol):
+class AnalysisModelClient(Protocol):
     def run(
         self,
         pass_name: str,
@@ -45,7 +45,7 @@ class LunaAnalysisClient(Protocol):
     ) -> ModelPassResponse: ...
 
 
-class OpenAIResponsesLunaClient:
+class OpenAIResponsesAnalysisClient:
     is_live = True
 
     def __init__(
