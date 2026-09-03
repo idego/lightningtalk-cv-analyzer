@@ -93,7 +93,7 @@ from cv_validator.research.openai_client import (
 from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.usage import load_pricing_catalog
 
-DEFAULT_DB = Path("data/docling_luna.db")
+DEFAULT_DB = Path("data/cv_analyzer.db")
 DEFAULT_BATCH_MAX_FILES = 4
 DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
 

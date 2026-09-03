@@ -3,7 +3,7 @@
 DOCKER_CONTEXT ?= default
 ALLOW_DEGRADED ?= false
 COMPOSE_PROJECT_NAME ?= cv-analyzer-docling-luna
-WEB_PORT ?= 3021
+WEB_PORT ?= 3001
 REFERENCE_DATA_MODE ?= automatic
 
 ifeq ($(REFERENCE_DATA_MODE),operator)

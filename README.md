@@ -51,10 +51,12 @@ cd apps/web && pnpm build
 `make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
 through `docker-compose.dev.yml`; `make deploy` never does.
 
-The isolated web app is available at `http://127.0.0.1:3021/analyze`. Compose
-uses project `cv-analyzer-docling-luna`, API database
-`/app/data/docling_luna.db`, and auth database
-`/app/data/docling_luna_auth.db`.
+The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+project `cv-analyzer-docling-luna`, API database `/app/data/cv_analyzer.db`,
+and auth database `/app/data/auth.db`. Stacks created before these defaults
+changed hold `docling_luna.db` and `docling_luna_auth.db` in the same volumes;
+keep them by setting `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` in the
+env file, or rename the files inside the volumes while the stack is stopped.
 
 On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
 downloads the configured official GeoNames sources and builds both locality and
@@ -87,7 +89,7 @@ record zero current-call tokens and separate saved usage/cost provenance.
 - Access tokens are hashed for ownership and are not written into audit JSON.
 - Private CV fixtures and evaluation outputs belong under ignored `data/`.
 - Old pilot reports are not migrated. The new default database is
-  `data/docling_luna.db`; existing databases are never deleted implicitly.
+  `data/cv_analyzer.db`; existing databases are never deleted implicitly.
 
 Contextual feedback is enabled by default. It stores the signed-in author's
 email, target identity, classification, short sanitized comment, the displayed

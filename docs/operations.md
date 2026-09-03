@@ -71,8 +71,12 @@ make dev-down
 ```
 
 The command uses Compose project `cv-analyzer-docling-luna`, loopback web port
-3021, API database `/app/data/docling_luna.db`, and auth database
-`/app/data/docling_luna_auth.db`.
+3001, API database `/app/data/cv_analyzer.db`, and auth database
+`/app/data/auth.db`. Do not rename the Compose project: named volumes are keyed
+by it. A stack created while the defaults were `docling_luna.db` and
+`docling_luna_auth.db` keeps its data only if the env file pins
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths, or if the
+files are renamed inside the volumes while the stack is stopped.
 
 Production deploys an exact reviewed SHA:
 
@@ -103,5 +107,5 @@ A strategy failure returns a bounded per-document error. It must not silently
 fall back to a different strategy or the removed deterministic pipeline.
 
 For application rollback, deploy the previously recorded reviewed SHA. Named
-volumes remain intact. This variant uses `docling_luna.db` and does not migrate
+volumes remain intact. This variant uses `cv_analyzer.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.
