@@ -2,14 +2,14 @@
 
 import { useRef, useState } from "react";
 import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
-import type { AnalyzeItemResult } from "@/lib/analyze-types";
+import type { AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { ResultsList } from "@/components/analyze/results-list";
 import { DocumentPreview } from "@/components/analyze/document-preview";
 import { useCopy } from "@/lib/app-settings";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-export type AnalyzedFile = { file: File | null; result: AnalyzeItemResult };
+export type AnalyzedFile = { file: DocumentSource | null; result: AnalyzeItemResult };
 
 export function AnalysisWorkspace({
   entries,
@@ -66,7 +66,7 @@ export function AnalysisWorkspace({
           style={{ gridTemplateRows: previewVisible ? "minmax(0, 1fr)" : "minmax(0, 0fr)" }}
         >
           <div className="min-h-0 min-w-0 overflow-hidden">
-            <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
+            <DocumentPreview source={active.file} onHide={() => setPreviewVisible(false)} />
           </div>
         </div>
       </> : null}

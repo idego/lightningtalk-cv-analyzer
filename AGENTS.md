@@ -41,7 +41,7 @@ Old pilot reports are not a compatibility requirement.
 | Web build | `cd apps/web && pnpm build` |
 
 API endpoints include `GET /health`, `GET /operations/{metrics,status}`,
-`POST /analyze`, `POST /analyze/batch`, analysis lifecycle endpoints,
+`POST /analyze`, analysis lifecycle endpoints,
 settings/retention, per-analysis feedback, the `/internal/feedback` inbox
 (authorized only by the web proxy), and company/education/LinkedIn research.
 The browser reaches the API only through Next.js routes under
@@ -51,7 +51,7 @@ The browser reaches the API only through Next.js routes under
 
 - Core backend logic lives in `apps/api/src/cv_validator/`; FastAPI remains a
   thin boundary in `cv_validator/api/`.
-- Preserve auth, upload/batch limits, preview, ownership, retention, deletion,
+- Preserve auth, upload limits, preview, ownership, retention, deletion,
   recent analyses, GeoNames, and research unless the owner changes scope.
 - Match existing style and keep diffs focused.
 - Use environment variables for runtime configuration.

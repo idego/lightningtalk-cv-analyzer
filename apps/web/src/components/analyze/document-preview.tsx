@@ -3,16 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText, LoaderCircle, Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { DocumentSource } from "@/lib/analyze-types";
 import { useCopy } from "@/lib/app-settings";
 import { consumePreviewWheel, fitWidthTransform, measureRenderedDocx, pdfPageWidthUrl, wheelTransform, type ViewTransform } from "@/lib/document-preview";
 
 type ContentBounds = { width: number; height: number };
 
-export function DocumentPreview({ file, onHide }: { file: File; onHide: () => void }) {
-  return <DocumentPreviewContent key={`${file.name}:${file.size}:${file.lastModified}`} file={file} onHide={onHide} />;
+export function DocumentPreview({ source, onHide }: { source: DocumentSource; onHide: () => void }) {
+  const key = source instanceof File ? `file:${source.name}:${source.size}:${source.lastModified}` : `stored:${source.url}:${source.name}`;
+  return <DocumentPreviewContent key={key} source={source} onHide={onHide} />;
 }
 
-function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => void }) {
+function DocumentPreviewContent({ source, onHide }: { source: DocumentSource; onHide: () => void }) {
   const { t } = useCopy();
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -22,10 +24,14 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
   const userAdjustedRef = useRef(false);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [url] = useState(() => URL.createObjectURL(file));
-  const isPdf = file.name.toLowerCase().endsWith(".pdf");
-  const [loading, setLoading] = useState(!isPdf);
+  const name = source.name;
+  const isPdf = name.toLowerCase().endsWith(".pdf");
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(!(source instanceof File));
+  const [rendering, setRendering] = useState(!isPdf);
   const [error, setError] = useState<string | null>(null);
+  const loading = fetching || (rendering && !error);
 
   const clamp = useCallback((next: ViewTransform): ViewTransform => {
     const viewport = viewportRef.current;
@@ -71,20 +77,45 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
   }, [applyTransform, measureDocument]);
 
   useEffect(() => {
-    if (!isPdf && documentRef.current) {
-      documentRef.current.replaceChildren();
-      void import("docx-preview")
-        .then(({ renderAsync }) => renderAsync(file, documentRef.current!, undefined, {
-          breakPages: true, ignoreWidth: false, ignoreHeight: true, renderHeaders: true, renderFooters: true, ignoreLastRenderedPageBreak: false,
-        }))
-        .then(() => { setLoading(false); requestAnimationFrame(() => fitToWidth(false)); })
-        .catch(() => { setLoading(false); setError(t("docxPreviewFailed")); });
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const adopt = (resolved: Blob) => {
+      if (cancelled) return;
+      objectUrl = URL.createObjectURL(resolved);
+      setBlob(resolved);
+      setUrl(objectUrl);
+      setFetching(false);
+    };
+    if (source instanceof File) {
+      adopt(source);
+    } else {
+      setFetching(true);
+      fetch(source.url, { cache: "no-store" })
+        .then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.blob(); })
+        .then(adopt)
+        .catch(() => { if (cancelled) return; setFetching(false); setRendering(false); setError(t("documentFetchFailed")); });
     }
     return () => {
-      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      URL.revokeObjectURL(url);
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, fitToWidth, isPdf, t, url]);
+  }, [source, t]);
+
+  useEffect(() => {
+    if (isPdf || !blob || !documentRef.current) return;
+    let cancelled = false;
+    documentRef.current.replaceChildren();
+    void import("docx-preview")
+      .then(({ renderAsync }) => renderAsync(blob, documentRef.current!, undefined, {
+        breakPages: true, ignoreWidth: false, ignoreHeight: true, renderHeaders: true, renderFooters: true, ignoreLastRenderedPageBreak: false,
+      }))
+      .then(() => { if (cancelled) return; setRendering(false); requestAnimationFrame(() => fitToWidth(false)); })
+      .catch(() => { if (cancelled) return; setRendering(false); setError(t("docxPreviewFailed")); });
+    return () => {
+      cancelled = true;
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    };
+  }, [blob, fitToWidth, isPdf, t]);
 
   useEffect(() => {
     if (isPdf || !viewportRef.current) return;
@@ -154,13 +185,13 @@ function DocumentPreviewContent({ file, onHide }: { file: File; onHide: () => vo
     <aside className="sticky top-20 flex h-[calc(100svh-6.5rem)] min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/35">
       <div className="flex min-w-0 items-center gap-2 border-b bg-background px-3 py-2">
         <FileText className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         {!isPdf ? <Button variant="ghost" size="icon" className="size-8" onClick={() => fitToWidth()} aria-label={t("fitCvPreview")}><Maximize2 className="size-4" /></Button> : null}
-        <Button variant="ghost" size="icon" className="size-8" render={<a href={url} target="_blank" rel="noreferrer" aria-label={t("openOriginalFile")}><ExternalLink className="size-4" /></a>} />
+        {url ? <Button variant="ghost" size="icon" className="size-8" render={<a href={url} target="_blank" rel="noreferrer" aria-label={t("openOriginalFile")}><ExternalLink className="size-4" /></a>} /> : null}
         <Button variant="ghost" size="icon" className="size-8" onClick={onHide} aria-label={t("hideCvPreview")}><X className="size-4" /></Button>
       </div>
       {isPdf && url ? (
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={file.name} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={name} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
       ) : (
         <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
           {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80"><LoaderCircle className="size-6 animate-spin" /></div> : null}
