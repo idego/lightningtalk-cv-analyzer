@@ -23,8 +23,8 @@ from cv_validator.analysis import (
     AnalysisStrategyError,
     AnalysisStrategyUnavailable,
 )
-from cv_validator.analysis.docling_luna import DoclingLunaAnalysisStrategy
-from cv_validator.analysis.luna_client import OpenAIResponsesLunaClient
+from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import load_location_resolver, load_postal_code_resolver
@@ -213,9 +213,9 @@ def create_app(
         required=require_location_resolver
     )
     postal_resolver = postal_code_resolver or load_postal_code_resolver()
-    strategy = analysis_strategy or DoclingLunaAnalysisStrategy(
+    strategy = analysis_strategy or DocumentAnalysisStrategy(
         client=(
-            OpenAIResponsesLunaClient(
+            OpenAIResponsesAnalysisClient(
                 api_key=settings.api_key,
                 timeout_seconds=settings.timeout_seconds,
             )

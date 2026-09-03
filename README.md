@@ -1,7 +1,7 @@
 # CV Analyzer
 
-CV Analyzer analyzes CVs with Docling document conversion and GPT-5.6 Luna
-passes, producing reports in the `base-analysis-v2` contract.
+CV Analyzer analyzes CVs with Docling document conversion and pinned OpenAI
+model passes, producing reports in the `base-analysis-v2` contract.
 
 The previous deterministic Document Understanding, Structural Audit, ESCO,
 national-ID redaction, score/band, file metadata, and live-link checker have
@@ -13,9 +13,9 @@ been removed. They are not compatibility surfaces.
 PDF or DOCX upload
     -> Docling 2.124.0 native-text conversion (OCR disabled)
     -> thin SourceDocument evidence projection
-    -> concurrent profile, employment, and education Luna specialists
+    -> concurrent profile, employment, and education model specialists
     -> field and relation validation plus mechanical candidates
-    -> sequential Luna reviewer with validated ID-based operations
+    -> sequential model reviewer with validated ID-based operations
     -> base-analysis-v2 validation
     -> persistence and UI
     -> automatic company, education, and LinkedIn research
@@ -54,8 +54,8 @@ through `docker-compose.dev.yml`; `make deploy` never does.
 The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
 project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
 database `/app/data/auth.db`. A stack created under the former project name
-`cv-analyzer-docling-luna` keeps its volumes under that name; to reuse its
-data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-docling-luna` and pin
+`cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
+data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
 `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to the old `docling_luna*.db`
 paths in the env file, or copy the volumes once while the stack is stopped.
 
@@ -73,7 +73,7 @@ both index/manifest pairs and run `REFERENCE_DATA_MODE=operator make deploy` wit
 [`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for recovery,
 refresh, and rollback details.
 
-`GET /health` reports `ready: false` when the Luna analysis client is not
+`GET /health` reports `ready: false` when the analysis model client is not
 configured; uploads then fail with `analysis_strategy_unavailable` and are not
 persisted as successful reports. Each attempted analysis has owner-scoped,
 PII-safe diagnostics and an immutable AI token/cost ledger at

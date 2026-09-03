@@ -159,7 +159,7 @@ export type AnalysisReport = {
     linkedin_research: boolean;
   };
   strategy: {
-    name: "docling-luna";
+    name: "document-analysis";
     version: string;
   };
   source: {

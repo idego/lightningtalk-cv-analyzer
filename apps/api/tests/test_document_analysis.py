@@ -11,11 +11,11 @@ from reportlab.pdfgen.canvas import Canvas
 
 from cv_validator.analysis.candidates import apply_review, validate_specialists
 from cv_validator.analysis.docling_converter import DoclingTextConverter
-from cv_validator.analysis.docling_luna import DoclingLunaAnalysisStrategy
-from cv_validator.analysis.luna_client import (
+from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.model_client import (
     ModelPassError,
     ModelPassResponse,
-    OpenAIResponsesLunaClient,
+    OpenAIResponsesAnalysisClient,
 )
 from cv_validator.analysis.source import SourceBlock, SourceDocument
 from cv_validator.analysis.strategy import AnalysisInput, AnalysisStrategyError, SourceFormat
@@ -54,7 +54,7 @@ def docx_bytes() -> bytes:
     return output.getvalue()
 
 
-class FakeLuna:
+class FakeModel:
     def __init__(self, payloads: dict[str, dict], *, failing: set[str] | None = None, delay: float = 0) -> None:
         self.payloads = payloads
         self.failing = failing or set()
@@ -454,8 +454,8 @@ def test_specialists_run_concurrently_and_reviewer_runs_after_them() -> None:
         "Alex Example", "Developer in Opole, Poland", "Python MongoDB",
         "Example Systems Developer", "2022 - present", "Example University Computer Science",
     )
-    client = FakeLuna(complete_payloads(), delay=0.08)
-    strategy = DoclingLunaAnalysisStrategy(client=client)
+    client = FakeModel(complete_payloads(), delay=0.08)
+    strategy = DocumentAnalysisStrategy(client=client)
     request = AnalysisInput.from_upload(content, "candidate.pdf", "en")
     started = perf_counter()
     report = strategy.analyze(request)
@@ -467,7 +467,7 @@ def test_specialists_run_concurrently_and_reviewer_runs_after_them() -> None:
     ) < 0.05
     assert calls["review"] >= max(calls[name] for name in ("profile", "employment", "education"))
     assert elapsed < 0.28
-    assert report["strategy"]["name"] == "docling-luna"
+    assert report["strategy"]["name"] == "document-analysis"
     assert report["base_analysis"]["review"]["added_candidate_ids"] == ["review-education-1"]
     assert [item["id"] for item in report["base_analysis"]["education"]] == ["review-education-1"]
     assert "employment-tech" not in report["base_analysis"]["review"]["accepted_ids"]
@@ -479,8 +479,8 @@ def test_specialists_run_concurrently_and_reviewer_runs_after_them() -> None:
 def test_failed_specialist_does_not_remove_other_passes() -> None:
     payloads = complete_payloads()
     payloads["review"]["accepted_record_ids"] = ["review-education-1"]
-    client = FakeLuna(payloads, failing={"employment"})
-    strategy = DoclingLunaAnalysisStrategy(client=client)
+    client = FakeModel(payloads, failing={"employment"})
+    strategy = DocumentAnalysisStrategy(client=client)
     report = strategy.analyze(AnalysisInput.from_upload(
         pdf_bytes("Alex Example", "Developer in Opole, Poland", "Python MongoDB", "Example Systems Developer", "2022 - present", "Example University Computer Science"),
         "candidate.pdf", "en",
@@ -496,10 +496,10 @@ def test_failed_specialist_does_not_remove_other_passes() -> None:
 
 
 def test_upload_persistence_ownership_and_health_with_real_strategy(tmp_path) -> None:
-    client_impl = FakeLuna(complete_payloads())
-    strategy = DoclingLunaAnalysisStrategy(client=client_impl)
+    client_impl = FakeModel(complete_payloads())
+    strategy = DocumentAnalysisStrategy(client=client_impl)
     client = TestClient(create_app(
-        db_path=tmp_path / "docling-luna.db",
+        db_path=tmp_path / "document-analysis.db",
         openai_settings=OpenAISettings(enabled=False),
         analysis_strategy=strategy,
     ))
@@ -544,7 +544,7 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
             self.responses = Responses()
 
     raw_client = Client()
-    client = OpenAIResponsesLunaClient(client=raw_client)
+    client = OpenAIResponsesAnalysisClient(client=raw_client)
     source = SourceDocument.create((SourceBlock("b-1", "Alex Example", order=0),), "pdf")
 
     client.run("profile", source)
@@ -675,7 +675,7 @@ def test_truncated_model_output_is_reported_as_truncated() -> None:
 
     source = SourceDocument.create((SourceBlock("b-0", "Alex Example", order=0),), "pdf")
     with pytest.raises(ModelPassError, match="truncated"):
-        OpenAIResponsesLunaClient(client=Client()).run("profile", source)
+        OpenAIResponsesAnalysisClient(client=Client()).run("profile", source)
 
 
 def test_company_research_rejections_carry_rule_names() -> None:

@@ -2,9 +2,9 @@
 
 ## Runtime
 
-- The API installs exactly one `docling-luna` strategy and exposes its name
+- The API installs exactly one `document-analysis` strategy and exposes its name
   and version through health and every report.
-- `OPENAI_API_KEY` is required when public research or a Luna strategy is
+- `OPENAI_API_KEY` is required when public research or the model-backed analysis is
   enabled. Never commit the key.
 - Let the one-shot `geonames-init` service build and validate both GeoNames
   index/manifest pairs in its persistent volume. The API mounts the promoted
@@ -73,9 +73,9 @@ make dev-down
 The command uses Compose project `cv-analyzer`, loopback web port 3001, API
 database `/app/data/cv_analyzer.db`, and auth database `/app/data/auth.db`.
 Named volumes are keyed by the project name, so do not change it casually. A
-stack created under the former project `cv-analyzer-docling-luna` with the
+stack created under the former project `cv-analyzer-document-analysis` with the
 former `docling_luna.db` / `docling_luna_auth.db` defaults keeps its data only
-if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-docling-luna` and pin
+if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
 `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths in the env
 file, or copy the volumes to the new project once while the stack is stopped.
 

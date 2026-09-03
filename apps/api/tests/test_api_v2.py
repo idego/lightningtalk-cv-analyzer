@@ -6,8 +6,8 @@ from cv_validator.openai_config import OpenAISettings
 
 
 class FakeStrategy:
-    name = "docling-luna"
-    version = "docling-luna-test-v1"
+    name = "document-analysis"
+    version = "document-analysis-test-v1"
     ready = True
 
     def analyze(self, request):
@@ -70,7 +70,7 @@ def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["contract_version"] == "base-analysis-v2"
-    assert payload["strategy"]["name"] == "docling-luna"
+    assert payload["strategy"]["name"] == "document-analysis"
     assert "score" not in payload
     assert "document_understanding" not in payload
     loaded = client.get(
