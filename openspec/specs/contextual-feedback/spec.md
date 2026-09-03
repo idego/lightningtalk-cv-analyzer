@@ -11,7 +11,7 @@ state, or hiring action.
 ### Requirement: Feedback targets
 Every visible signal in a report SHALL be addressable by a deterministic target id derived from the analysis id and the signal's kind and key. Supported kinds are `review_finding`, `structured_fact`, `structural_observation`, `file_detail`, `link_result`, `company_research_result`, `education_research_result`, `linkedin_research_result`, `operation_failure`, and `report_overall`.
 
-Report controls SHALL expose feedback at the CV overview and whole-section level for company research, education research, LinkedIn profile research, and remaining signals. Research entries and individual findings SHALL NOT render separate feedback controls.
+Report controls SHALL expose feedback at the CV overview and whole-section level for worth-knowing findings, company research, education research, LinkedIn profile research, and remaining signals. Research entries and individual findings SHALL NOT render separate feedback controls.
 
 #### Scenario: Same signal, same target
 - **WHEN** the same analysis renders the same finding twice

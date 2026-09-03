@@ -299,6 +299,7 @@ class FeedbackStore:
 def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
+    yield TargetKind.REPORT_OVERALL, "worth_knowing", "section", versions, None
     yield TargetKind.REPORT_OVERALL, "remaining", "section", versions, None
     yield TargetKind.COMPANY_RESEARCH_RESULT, "company_research", "section", versions, None
     yield TargetKind.EDUCATION_RESEARCH_RESULT, "education_research", "section", versions, None
