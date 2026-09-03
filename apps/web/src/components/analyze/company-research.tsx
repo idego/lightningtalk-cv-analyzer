@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
-import { ExternalLink } from "lucide-react";
+import { Building2, ExternalLink } from "lucide-react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
@@ -68,7 +68,7 @@ export function CompanyResearchPanel({
     <HoverDisclosure
       className="rounded-md border p-3"
       triggerClassName="font-medium"
-      title={t("companyResearch")}
+      title={<span className="flex items-center gap-2 font-medium"><Building2 className="size-4 text-muted-foreground" aria-hidden />{t("companyResearch")}</span>}
       collapsible={hasContent}
       contentClassName="space-y-3 pt-3"
       feedbackSnapshotLabel={t("companyResearch")}
@@ -93,10 +93,10 @@ export function CompanyResearchPanel({
           {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => <CompanyResult key={organization.query_subject} organization={organization} />)}
           {visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? (
             <HoverDisclosure
-              className="pt-2 text-xs text-muted-foreground"
+              className="ml-2 pt-2 text-xs text-muted-foreground"
               triggerClassName="w-fit flex-none font-medium text-foreground"
               title={t("searchDetails")}
-              contentClassName="pt-2"
+              contentClassName="pl-3 pt-2"
             >
               <ul className="space-y-1">
                 {visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ExternalLink, Search } from "lucide-react";
 import type { AnalysisReport, LinkedInDiscovery } from "@/lib/analyze-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { linkedinPeopleKeyword, linkedinPeopleSearchUrl } from "@/lib/google-search";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { LinkedInIcon, ProviderActionIcon } from "@/components/analyze/search-provider-icon";
 
 type LinkedInProfile = LinkedInDiscovery["possible_profiles"][number];
 
@@ -62,7 +62,7 @@ function LinkedInProfileCard({
                         rel="noreferrer"
                         aria-label={t("openProfile")}
                       >
-                        <ExternalLink aria-hidden />
+                        <ProviderActionIcon provider="linkedin" defaultIcon="external-link" />
                       </a>
                     }
                   />
@@ -125,12 +125,12 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="font-medium">{t("linkedinProfiles")}</span>}
+    title={<span className="flex items-center gap-2 font-medium"><LinkedInIcon className="size-4 text-muted-foreground" />{t("linkedinProfiles")}</span>}
     collapsible={hasContent}
     feedbackSnapshotLabel={t("linkedinProfiles")}
     contentClassName="space-y-3 pt-3"
     action={<div className="flex items-center gap-2">
-      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
+      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><ProviderActionIcon provider="linkedin" /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
       {!discoveryCompleted ? <ResearchAction
         busy={discoveryBusy}
         disabled={!enabled || discoveryBusy}
@@ -154,7 +154,7 @@ export function LinkedInResearchPanel({
         />
       ))}
     </div>
-    {visibleDiscovery && (visibleDiscovery.searches_performed.length || visibleDiscovery.search_limitations.length) ? <HoverDisclosure className="text-xs text-muted-foreground" triggerClassName="w-fit flex-none" title={t("searchesAndLimitations")} contentClassName="space-y-1 pt-2">{visibleDiscovery.searches_performed.map(x=><p key={x}>{t("search")}: {x}</p>)}{visibleDiscovery.search_limitations.map(x=><p key={x}>{t("limit")}: {x}</p>)}</HoverDisclosure> : null}
+    {visibleDiscovery && (visibleDiscovery.searches_performed.length || visibleDiscovery.search_limitations.length) ? <HoverDisclosure className="ml-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none" title={t("searchesAndLimitations")} contentClassName="space-y-1 pl-3 pt-2">{visibleDiscovery.searches_performed.map(x=><p key={x}>{t("search")}: {x}</p>)}{visibleDiscovery.search_limitations.map(x=><p key={x}>{t("limit")}: {x}</p>)}</HoverDisclosure> : null}
   </HoverDisclosure>;
 }
 

@@ -51,7 +51,8 @@ export function HoverDisclosure({
   function toggleFromCard(event: MouseEvent<HTMLElement>) {
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (target.closest("[data-disclosure-trigger], [data-disclosure-panel], a, button, input, select, textarea")) return;
+    if (target.closest("a, button, input, select, textarea")) return;
+    if (target.closest("[data-disclosure-root]") !== event.currentTarget) return;
 
     if (open && !pinned && allowHover) {
       setPinned(true);
@@ -102,6 +103,7 @@ export function HoverDisclosure({
       onPointerEnter={() => setHoverOpen(true)}
       onPointerLeave={() => setHoverOpen(false)}
       className={cn("group/disclosure", !open && "cursor-pointer", className)}
+      data-disclosure-root
       data-feedback-snapshot={feedbackSnapshotLabel}
     >
       <div className={cn("flex items-center gap-3", headerClassName)}>

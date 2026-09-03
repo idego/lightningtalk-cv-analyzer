@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { GraduationCap } from "lucide-react";
 import type { AnalysisReport, EducationResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
@@ -88,7 +89,7 @@ export function EducationResearchPanel({
   return <HoverDisclosure
     className="rounded-md border p-3"
     triggerClassName="font-medium"
-    title={t("educationResearch")}
+    title={<span className="flex items-center gap-2 font-medium"><GraduationCap className="size-4 text-muted-foreground" aria-hidden />{t("educationResearch")}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     feedbackSnapshotLabel={t("educationResearch")}
@@ -107,6 +108,6 @@ export function EducationResearchPanel({
   >
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
     <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
-    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
+    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="ml-2 pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pl-3 pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
   </HoverDisclosure>;
 }
