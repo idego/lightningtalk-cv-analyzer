@@ -4,7 +4,7 @@ Canonical instructions for coding agents in this repository.
 
 ## Current architecture
 
-This branch runs the `docling-luna` strategy against the shared
+The API runs the `document-analysis` strategy against the shared
 `base-analysis-v2` schema. Read `docs/architecture.md` before changing the
 analysis pipeline. The shared layer owns validation, persistence, mechanical
 primitives, UI, and research.
@@ -36,28 +36,35 @@ Old pilot reports are not a compatibility requirement.
 | Run the stack | `make dev` |
 | Stop stack | `make dev-down` |
 | Backend tests | `cd apps/api && PYTHONPATH=src .venv/bin/pytest -q` |
-| Web tests | `cd apps/web && npm test` |
-| Web typecheck | `cd apps/web && npm run typecheck` |
-| Web build | `cd apps/web && npm run build` |
+| Web tests | `cd apps/web && pnpm test` (Node 22) |
+| Web typecheck | `cd apps/web && pnpm typecheck` |
+| Web build | `cd apps/web && pnpm build` |
 
-API endpoints include `GET /health`, `POST /analyze`,
-`POST /analyze/batch`, analysis lifecycle endpoints, settings/retention, and
-company/education/LinkedIn research.
+API endpoints include `GET /health`, `GET /operations/{metrics,status}`,
+`POST /analyze`, analysis lifecycle endpoints,
+settings/retention, per-analysis feedback, the `/internal/feedback` inbox
+(authorized only by the web proxy), and company/education/LinkedIn research.
+The browser reaches the API only through Next.js routes under
+`apps/web/src/app/api/`.
 
 ## Code conventions
 
 - Core backend logic lives in `apps/api/src/cv_validator/`; FastAPI remains a
   thin boundary in `cv_validator/api/`.
-- Preserve auth, upload/batch limits, preview, ownership, retention, deletion,
+- Preserve auth, upload limits, preview, ownership, retention, deletion,
   recent analyses, GeoNames, and research unless the owner changes scope.
 - Match existing style and keep diffs focused.
 - Use environment variables for runtime configuration.
-- Use Conventional Commits.
+- Use Conventional Commits (`<type>[scope]: <description>`).
 - Create commits only when explicitly asked.
 - Never push unless explicitly asked.
 - If elevated access is needed, use graphical Polkit rather than `sudo`.
 
 ## OpenSpec
 
-Keep source-of-truth specs aligned when archiving completed changes. Do not
-restore archived contracts for removed analysis systems.
+OpenSpec is optional. Use `/opsx:propose` → apply → archive for larger
+behavior changes where an upfront design helps; small fixes, refactors, and
+doc updates do not need a change proposal. When a change touches behavior
+that an `openspec/specs/*/spec.md` already describes, update that spec in the
+same commit so specs stay truthful. Do not restore archived contracts for
+removed analysis systems.

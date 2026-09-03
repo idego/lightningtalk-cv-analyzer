@@ -12,27 +12,16 @@ export async function POST(req: Request) {
   }
 
   const incoming = await req.formData();
-  const files = incoming.getAll("files");
-  const single = incoming.get("file");
+  const file = incoming.get("file") ?? incoming.getAll("files")[0];
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
 
   const payload = new FormData();
-  if (single instanceof File) {
-    payload.append("files", single, single.name);
-  }
-
-  for (const item of files) {
-    if (item instanceof File) {
-      payload.append("files", item, item.name);
-    }
-  }
-
-  const hasFiles = payload.getAll("files").length > 0;
-  if (!hasFiles) {
-    return NextResponse.json({ error: "No files provided" }, { status: 400 });
-  }
+  payload.append("file", file, file.name);
 
   const analysisAccessToken = analysisAccessTokenForUser(user.id);
-  const upstream = await fetch(`${INTERNAL_API_URL}/analyze/batch`, {
+  const upstream = await fetch(`${INTERNAL_API_URL}/analyze`, {
     method: "POST",
     body: payload,
     headers: {
@@ -42,10 +31,6 @@ export async function POST(req: Request) {
   });
 
   const data = await upstream.json();
-  if (Array.isArray(data.results)) {
-    for (const item of data.results) {
-      if (item?.status !== "error" && item?.report) item.report.analysis_access_token = analysisAccessToken;
-    }
-  }
+  if (upstream.ok && data && typeof data === "object") data.analysis_access_token = analysisAccessToken;
   return NextResponse.json(data, { status: upstream.status });
 }

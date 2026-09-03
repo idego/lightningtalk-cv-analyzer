@@ -12,10 +12,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from cv_validator.analysis import (
@@ -23,14 +25,13 @@ from cv_validator.analysis import (
     AnalysisStrategyError,
     AnalysisStrategyUnavailable,
 )
-from cv_validator.analysis.docling_luna import DoclingLunaAnalysisStrategy
-from cv_validator.analysis.luna_client import OpenAIResponsesLunaClient
+from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import load_location_resolver, load_postal_code_resolver
 from cv_validator.errors import (
     AnalysisNotFoundPersistenceError,
-    AnalysisRuntimeError,
     PersistenceError,
     UploadReadError,
 )
@@ -93,20 +94,12 @@ from cv_validator.research.openai_client import (
 from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.usage import load_pricing_catalog
 
-DEFAULT_DB = Path("data/docling_luna.db")
-DEFAULT_BATCH_MAX_FILES = 4
-DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_DB = Path("data/cv_analyzer.db")
+DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
 
 
 class _RetentionUpdate(BaseModel):
     days: int
-
-
-@dataclass(frozen=True)
-class _PreparedUpload:
-    upload: UploadFile
-    content: bytes | None
-    error: str | None = None
 
 
 @dataclass
@@ -197,8 +190,7 @@ def create_app(
     postal_code_resolver: PostalCodeResolver | None = None,
     openai_settings: OpenAISettings | None = None,
     analysis_strategy: AnalysisStrategy | None = None,
-    batch_max_files: int | None = None,
-    batch_max_bytes: int | None = None,
+    upload_max_bytes: int | None = None,
     company_researcher=None,
     education_researcher=None,
     linkedin_researcher=None,
@@ -213,9 +205,9 @@ def create_app(
         required=require_location_resolver
     )
     postal_resolver = postal_code_resolver or load_postal_code_resolver()
-    strategy = analysis_strategy or DoclingLunaAnalysisStrategy(
+    strategy = analysis_strategy or DocumentAnalysisStrategy(
         client=(
-            OpenAIResponsesLunaClient(
+            OpenAIResponsesAnalysisClient(
                 api_key=settings.api_key,
                 timeout_seconds=settings.timeout_seconds,
             )
@@ -283,17 +275,15 @@ def create_app(
         )
     )
     feedback_store = FeedbackStore(store.config.db_path)
-    max_files = (
-        batch_max_files
-        if batch_max_files is not None
-        else _positive_int_env("CV_VALIDATOR_BATCH_MAX_FILES", DEFAULT_BATCH_MAX_FILES)
-    )
-    max_bytes = (
-        batch_max_bytes
-        if batch_max_bytes is not None
-        else _positive_int_env("CV_VALIDATOR_BATCH_MAX_BYTES", DEFAULT_BATCH_MAX_BYTES)
+    max_upload_bytes = (
+        upload_max_bytes
+        if upload_max_bytes is not None
+        else _positive_int_env("CV_VALIDATOR_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
     )
     research_locks = _ResearchLockRegistry()
+    # Analyses run off the event loop so reads stay responsive, but the shared
+    # strategy (one document converter) still processes one CV at a time.
+    analysis_lock = threading.Lock()
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
@@ -491,10 +481,22 @@ def create_app(
             },
             "retention": {"days": store.config.retention_days},
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
-            "batch": {"max_files": max_files, "max_bytes": max_bytes},
+            "upload": {"max_bytes": max_upload_bytes},
         }
 
     def analyze_upload(
+        content: bytes,
+        filename: str,
+        report_language: str,
+        access_token: str,
+        correlation_id: str,
+    ) -> dict:
+        with analysis_lock:
+            return _analyze_upload(
+                content, filename, report_language, access_token, correlation_id
+            )
+
+    def _analyze_upload(
         content: bytes,
         filename: str,
         report_language: str,
@@ -569,6 +571,26 @@ def create_app(
                 operation="report_persistence",
                 outcome="completed",
             )
+            try:
+                store.persist_source_document(
+                    analysis_id,
+                    filename,
+                    _source_content_type(filename),
+                    content,
+                )
+            except PersistenceError:
+                recorder.emit(
+                    "persistence_failed",
+                    operation="source_document_persistence",
+                    outcome="failed",
+                    error_code="source_document_persistence_error",
+                )
+            else:
+                recorder.emit(
+                    "persistence_completed",
+                    operation="source_document_persistence",
+                    outcome="completed",
+                )
             store.complete_analysis_run(analysis_id, base_status)
             recorder.emit(
                 "analysis_completed",
@@ -642,66 +664,18 @@ def create_app(
             content = await _read_upload(file)
         except UploadReadError as exc:
             raise HTTPException(status_code=500, detail="upload_read_error") from exc
+        if len(content) > max_upload_bytes:
+            raise HTTPException(status_code=413, detail="upload_size_limit_exceeded")
         access_token = x_analysis_access_token or secrets.token_urlsafe(32)
         return JSONResponse(
-            analyze_upload(
+            await run_in_threadpool(
+                analyze_upload,
                 content,
                 filename,
                 _report_language(x_report_language),
                 access_token,
                 request.state.correlation_id,
             )
-        )
-
-    @app.post("/analyze/batch")
-    async def analyze_batch(
-        request: Request,
-        files: list[UploadFile] = File(...),
-        x_analysis_access_token: str | None = Header(default=None),
-        x_report_language: str = Header(default="en"),
-    ) -> JSONResponse:
-        prepared = await _prepare_batch(
-            files,
-            max_files=max_files,
-            max_bytes=max_bytes,
-        )
-        language = _report_language(x_report_language)
-        access_token = x_analysis_access_token or secrets.token_urlsafe(32)
-        results: list[dict] = []
-        for item in prepared:
-            filename = item.upload.filename or "upload.pdf"
-            if item.error is not None:
-                results.append(
-                    {"filename": filename, "status": "error", "error": item.error}
-                )
-                continue
-            try:
-                payload = analyze_upload(
-                    item.content or b"",
-                    filename,
-                    language,
-                    access_token,
-                    request.state.correlation_id,
-                )
-            except HTTPException as exc:
-                results.append(
-                    {
-                        "filename": filename,
-                        "status": "error",
-                        "error": exc.detail,
-                    }
-                )
-            else:
-                base_status = payload["base_analysis"]["status"]
-                results.append(
-                    {
-                        "filename": filename,
-                        "status": "partial" if base_status == "partial" else "ok",
-                        "report": payload,
-                    }
-                )
-        return JSONResponse(
-            {"analysis_access_token": access_token, "results": results}
         )
 
     @app.get("/analyses")
@@ -754,6 +728,25 @@ def create_app(
     @app.get("/internal/usage/summary")
     def get_usage_summary() -> JSONResponse:
         return JSONResponse(store.get_usage_summary())
+
+    @app.get("/analyses/{analysis_id}/document")
+    def get_analysis_document(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> Response:
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        document = store.get_source_document(analysis_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return Response(
+            content=document["content"],
+            media_type=document["content_type"],
+            headers={
+                "Content-Disposition": _inline_disposition(document["filename"]),
+                "Cache-Control": "private, no-store",
+            },
+        )
 
     @app.delete("/analyses/{analysis_id}")
     def delete_analysis(
@@ -1206,8 +1199,7 @@ def create_app(
     app.state.location_resolver = resolver
     app.state.openai_settings = settings
     app.state.analysis_strategy = strategy
-    app.state.batch_max_files = max_files
-    app.state.batch_max_bytes = max_bytes
+    app.state.upload_max_bytes = max_upload_bytes
     app.state.company_researcher = selected_company_researcher
     app.state.education_researcher = selected_education_researcher
     app.state.linkedin_researcher = selected_linkedin_researcher
@@ -1278,37 +1270,31 @@ async def _read_upload(upload: UploadFile) -> bytes:
         raise UploadReadError("upload read failed") from exc
 
 
-async def _prepare_batch(
-    files: list[UploadFile],
-    *,
-    max_files: int,
-    max_bytes: int,
-) -> list[_PreparedUpload]:
-    if len(files) > max_files:
-        raise HTTPException(status_code=413, detail="batch_file_limit_exceeded")
+_SOURCE_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 
-    prepared: list[_PreparedUpload] = []
-    total_bytes = 0
-    for upload in files:
-        try:
-            content = await _read_upload(upload)
-        except AnalysisRuntimeError:
-            prepared.append(
-                _PreparedUpload(
-                    upload=upload,
-                    content=None,
-                    error="upload_read_error",
-                )
-            )
-            continue
-        total_bytes += len(content)
-        if total_bytes > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail="batch_request_size_limit_exceeded",
-            )
-        prepared.append(_PreparedUpload(upload=upload, content=content))
-    return prepared
+
+def _source_content_type(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    return _SOURCE_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+
+def _inline_disposition(filename: str) -> str:
+    """Build an inline Content-Disposition with a header-safe filename.
+
+    The plain ``filename`` parameter keeps only printable ASCII without quotes
+    or backslashes; the original name travels in RFC 5987 ``filename*``.
+    """
+    ascii_name = "".join(
+        ch if 0x20 <= ord(ch) < 0x7F and ch not in '"\\' else "_"
+        for ch in filename
+    ).strip() or "document"
+    disposition = f'inline; filename="{ascii_name}"'
+    if ascii_name != filename:
+        disposition += f"; filename*=UTF-8''{quote(filename, safe='')}"
+    return disposition
 
 
 def _owned_payload(

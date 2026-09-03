@@ -10,10 +10,10 @@ export function ResearchSources({ urls }: { urls: Array<string | null | undefine
 
   return (
     <HoverDisclosure
-      className="text-xs"
+      className="ml-2 text-xs"
       triggerClassName="w-fit flex-none font-medium text-foreground"
       title={t("viewSources", { count: sources.length })}
-      contentClassName="pt-2"
+      contentClassName="pl-3 pt-2"
     >
       <ul className="space-y-1.5">
         {sources.map((url) => (

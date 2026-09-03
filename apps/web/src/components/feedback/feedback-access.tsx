@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useCopy } from "@/lib/app-settings";
+import { Button } from "@/components/ui/button";
 import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
+import { useCopy } from "@/lib/app-settings";
 
 type Member = { email: string; role: "owner" | "reviewer" };
 
@@ -13,6 +14,7 @@ export function FeedbackAccess() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Member["role"]>("reviewer");
   const [error, setError] = useState("");
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/feedback/access", { cache: "no-store" });
@@ -47,7 +49,12 @@ export function FeedbackAccess() {
   }
 
   async function revoke(memberEmail: string) {
+    if (confirmRevoke !== memberEmail) {
+      setConfirmRevoke(memberEmail);
+      return;
+    }
     setError("");
+    setConfirmRevoke(null);
     const response = await fetch("/api/feedback/access", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -69,7 +76,7 @@ export function FeedbackAccess() {
 
   return <section className="mx-auto w-full max-w-[1800px]">
     <PageBackToolbar href="/feedback" />
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div><h1 className="text-2xl font-semibold">{t("feedbackAccess")}</h1><p className="text-sm text-muted-foreground">{t("feedbackAccessDescription")}</p></div>
       <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
         <div><p className="font-medium">{t("feedbackCollection")}</p><p className="text-sm text-muted-foreground">{t("feedbackCollectionDescription")}</p></div>
@@ -81,7 +88,22 @@ export function FeedbackAccess() {
         <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>{t("grantAccess")}</button>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      <ul className="divide-y rounded-lg border">{members.map(member => <li key={member.email} className="flex items-center justify-between p-3"><span>{member.email} · {t(member.role)}</span><button className="text-sm text-destructive" onClick={() => revoke(member.email)}>{t("revokeAccess")}</button></li>)}</ul>
+      <ul className="divide-y rounded-lg border">{members.map(member => {
+        const awaitingConfirmation = confirmRevoke === member.email;
+        return <li key={member.email} className="flex items-center justify-between p-3">
+          <span>{member.email} · {t(member.role)}</span>
+          <Button
+            variant={awaitingConfirmation ? "destructive" : "ghost"}
+            size="sm"
+            className={awaitingConfirmation ? undefined : "text-destructive hover:text-destructive"}
+            onBlur={() => setConfirmRevoke(null)}
+            onKeyDown={(event) => { if (event.key === "Escape") setConfirmRevoke(null); }}
+            onClick={() => void revoke(member.email)}
+          >
+            {t(awaitingConfirmation ? "clickAgainToConfirm" : "revokeAccess")}
+          </Button>
+        </li>;
+      })}</ul>
     </div>
   </section>;
 }

@@ -25,7 +25,7 @@ def valid_report(
     sha256: str = "0" * 64,
     *,
     source_format: str = "pdf",
-    strategy_name: str = "docling-luna",
+    strategy_name: str = "document-analysis",
 ) -> dict:
     return {
         "contract_version": "base-analysis-v2",

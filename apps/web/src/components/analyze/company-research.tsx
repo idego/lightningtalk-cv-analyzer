@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
+import { Building2, ExternalLink } from "lucide-react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
@@ -67,37 +68,35 @@ export function CompanyResearchPanel({
     <HoverDisclosure
       className="rounded-md border p-3"
       triggerClassName="font-medium"
-      title={t("companyResearch")}
+      title={<span className="flex items-center gap-2 font-medium"><Building2 className="size-4 text-muted-foreground" aria-hidden />{t("companyResearch")}</span>}
       collapsible={hasContent}
       contentClassName="space-y-3 pt-3"
-      action={completed ? undefined : (
-        <ResearchAction
-          busy={busy}
-          disabled={!enabled || busy}
-          onClick={startResearch}
-          label={t("start")}
-          busyLabel={t("researching")}
-          busyAriaLabel={t("companyResearchInProgress")}
-          disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
-        />
-      )}
+      feedbackSnapshotLabel={t("companyResearch")}
+      action={<div className="flex items-center gap-2">
+        {!completed ? <ResearchAction
+            busy={busy}
+            disabled={!enabled || busy}
+            onClick={startResearch}
+            label={t("start")}
+            busyLabel={t("researching")}
+            busyAriaLabel={t("companyResearchInProgress")}
+            disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
+          /> : null}
+        {hasContent && feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section")!} /> : null}
+      </div>}
     >
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
       <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
 
       {visibleResearch ? (
         <div className="space-y-2">
-          {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => {
-            const index = visibleResearch.organizations.indexOf(organization);
-            const target = feedbackTarget(feedbackManifest, "company_research_result", "company_research", String(index));
-            return <CompanyResult key={organization.query_subject} organization={organization} feedback={target ? <FeedbackControl analysisId={report.analysis_id} target={target} /> : null} />;
-          })}
+          {sortByResearchConfidence(visibleResearch.organizations.filter((organization) => isResearchableCompany(organization.query_subject))).map((organization) => <CompanyResult key={organization.query_subject} organization={organization} />)}
           {visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? (
             <HoverDisclosure
-              className="pt-2 text-xs text-muted-foreground"
+              className="ml-2 pt-2 text-xs text-muted-foreground"
               triggerClassName="w-fit flex-none font-medium text-foreground"
               title={t("searchDetails")}
-              contentClassName="pt-2"
+              contentClassName="pl-3 pt-2"
             >
               <ul className="space-y-1">
                 {visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}
@@ -113,7 +112,7 @@ export function CompanyResearchPanel({
 
 type Organization = CompanyResearch["organizations"][number];
 
-function CompanyResult({ organization, feedback }: { organization: Organization; feedback?: ReactNode }) {
+function CompanyResult({ organization }: { organization: Organization }) {
   const { t } = useCopy();
   const searchHref = companyGoogleSearchUrl({ organization: organization.query_subject, location: organization.location });
   const sources = Array.from(new Set([
@@ -145,7 +144,6 @@ function CompanyResult({ organization, feedback }: { organization: Organization;
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
           {searchHref ? <GoogleSearchAction href={searchHref} /> : null}
-          {feedback}
         </div>
       }
       contentClassName="pt-3"
@@ -154,11 +152,11 @@ function CompanyResult({ organization, feedback }: { organization: Organization;
         <dl className="divide-y rounded-md border">
           <FactRow
             label={t("reportedOfficeOrLocation")}
-            value={organization.location ?? t("notConfirmed")}
+            value={organization.location ? <ExternalFactLink href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(organization.location)}`} value={organization.location} /> : t("notConfirmed")}
           />
           <FactRow
             label={t("officialWebsite")}
-            value={organization.official_website ? t("found") : t("notConfirmed")}
+            value={organization.official_website ? <ExternalFactLink href={organization.official_website} value={organization.official_website} /> : t("notConfirmed")}
           />
           {organization.activity ? <FactRow label={t("activity")} value={organization.activity} /> : null}
           {organization.operating_dates ? <FactRow label={t("operatingDates")} value={organization.operating_dates} /> : null}
@@ -182,7 +180,11 @@ function CompanyResult({ organization, feedback }: { organization: Organization;
   );
 }
 
-function FactRow({ label, value }: { label: string; value: string }) {
+function ExternalFactLink({ href, value }: { href: string; value: string }) {
+  return <a className="inline-flex items-center gap-1 break-all underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground" href={href} target="_blank" rel="noreferrer">{value}<ExternalLink className="size-3 shrink-0" aria-hidden /></a>;
+}
+
+function FactRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_1fr]">
       <dt className="text-muted-foreground">{label}</dt>

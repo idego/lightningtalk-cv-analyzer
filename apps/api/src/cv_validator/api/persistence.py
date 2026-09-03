@@ -145,6 +145,14 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS source_documents (
+                    analysis_id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    content BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -452,6 +460,44 @@ class PersistenceStore:
             raise PersistenceError("report persistence failed") from exc
         return selected_analysis_id
 
+    def persist_source_document(
+        self,
+        analysis_id: str,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> None:
+        try:
+            with self._connect() as conn:
+                self._require_report_parent(conn, analysis_id)
+                conn.execute(
+                    """INSERT INTO source_documents
+                       (analysis_id, filename, content_type, content, created_at)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(analysis_id) DO UPDATE SET
+                         filename = excluded.filename,
+                         content_type = excluded.content_type,
+                         content = excluded.content,
+                         created_at = excluded.created_at""",
+                    (analysis_id, filename, content_type, sqlite3.Binary(content), _utc_now()),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("source document persistence failed") from exc
+
+    def get_source_document(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT filename, content_type, content FROM source_documents WHERE analysis_id = ?",
+                (analysis_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "filename": row["filename"],
+            "content_type": row["content_type"],
+            "content": bytes(row["content"]),
+        }
+
     def get_audit_entries(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM audit_log ORDER BY id").fetchall()
@@ -473,7 +519,11 @@ class PersistenceStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT reports.analysis_id, reports.source_filename,
-                          reports.status, reports.created_at, audit_log.output_json
+                          reports.status, reports.created_at, audit_log.output_json,
+                          EXISTS (
+                            SELECT 1 FROM source_documents
+                            WHERE source_documents.analysis_id = reports.analysis_id
+                          ) AS has_document
                    FROM reports
                    JOIN audit_log USING (analysis_id)
                    WHERE reports.access_token_hash = ?
@@ -491,6 +541,7 @@ class PersistenceStore:
                     "status": row["status"],
                     "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
+                    "has_document": bool(row["has_document"]),
                 }
             )
         return history
@@ -539,6 +590,7 @@ class PersistenceStore:
                 "linkedin_discovery",
                 "linkedin_comparison",
                 "linkedin_confirmation",
+                "source_documents",
                 "audit_log",
             ):
                 conn.execute(
@@ -838,6 +890,7 @@ class PersistenceStore:
                 ("linkedin_discovery", "created_at"),
                 ("linkedin_comparison", "created_at"),
                 ("linkedin_confirmation", "confirmed_at"),
+                ("source_documents", "created_at"),
                 ("audit_log", "created_at"),
                 ("analysis_runs", "created_at"),
             ):
@@ -854,7 +907,7 @@ class PersistenceStore:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in ("research_cache_audit", "company_research", "education_research",
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation",
-                              "audit_log", "diagnostic_events"):
+                              "source_documents", "audit_log", "diagnostic_events"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount

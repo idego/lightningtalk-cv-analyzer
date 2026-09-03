@@ -1,15 +1,15 @@
 # Architecture
 
-CV Analyzer runs one `docling-luna` document-analysis strategy and validates
+CV Analyzer runs one `document-analysis` document-analysis strategy and validates
 its output against the `base-analysis-v2` contract.
 
 ```text
 PDF or DOCX upload
     -> Docling native-text conversion with OCR disabled
     -> minimal SourceDocument evidence projection
-    -> concurrent profile, employment, and education Luna passes
+    -> concurrent profile, employment, and education model passes
     -> field, literal-evidence, and record-relation validation
-    -> sequential Luna reviewer using validated ID-based operations
+    -> sequential model reviewer using validated ID-based operations
     -> shared mechanical enrichment
     -> base-analysis-v2 validation and SQLite persistence
     -> recruiter UI and optional public research
@@ -56,6 +56,10 @@ Normal report deletion and retention remove the report association data but
 intentionally retain those pseudonymous accounting facts so deployment lifetime
 totals remain monotonic; retained accounting rows cannot reconstruct CV text,
 evidence, prompts, model responses, candidate details, or e-mail addresses.
+
+After a report is persisted, the original uploaded PDF or DOCX is stored
+alongside it so the recruiter can preview it again; the copy is served only to
+the owning token and is deleted with the analysis or by retention purge.
 GeoNames locality and postal indexes are prepared by a one-shot Compose service
 and mounted read-only by the API. Operational setup, recovery, retention,
 feedback rollout, and backups are documented in `docs/operations.md` and
@@ -66,4 +70,4 @@ The authoritative executable contracts are:
 - `apps/api/src/cv_validator/analysis/strategy.py`;
 - `apps/api/src/cv_validator/analysis/contracts/base-analysis.schema.json`;
 - `apps/api/src/cv_validator/analysis/validation.py`;
-- `apps/api/src/cv_validator/analysis/docling_luna.py`.
+- `apps/api/src/cv_validator/analysis/document_analysis.py`.

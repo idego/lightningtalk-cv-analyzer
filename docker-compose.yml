@@ -5,7 +5,7 @@ services:
       target: feedback-init
     command: ["node", "scripts/init-feedback-access.mjs", "/config/feedback-access.json"]
     environment:
-      BETTER_AUTH_DB_PATH: /app/data/docling_luna_auth.db
+      BETTER_AUTH_DB_PATH: ${BETTER_AUTH_DB_PATH:-/app/data/auth.db}
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
     volumes:
       - web_auth_data:/app/data
@@ -43,14 +43,14 @@ services:
       context: ./apps/web
     ports:
       # Host port -> container port 3000 (Next.js always listens on 3000 inside)
-      - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-3021}:3000"
+      - "${WEB_HOST:-127.0.0.1}:${WEB_PORT:-3001}:3000"
     environment:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       BASE_URL: ${BASE_URL:-http://localhost:3000}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
-      BETTER_AUTH_DB_PATH: ${BETTER_AUTH_DB_PATH:-/app/data/docling_luna_auth.db}
+      BETTER_AUTH_DB_PATH: ${BETTER_AUTH_DB_PATH:-/app/data/auth.db}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-idego.io}
@@ -77,12 +77,11 @@ services:
     expose:
       - "8000"
     environment:
-      CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/docling_luna.db}
+      CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/cv_analyzer.db}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      CV_VALIDATOR_BATCH_MAX_FILES: ${CV_VALIDATOR_BATCH_MAX_FILES:-4}
-      CV_VALIDATOR_BATCH_MAX_BYTES: ${CV_VALIDATOR_BATCH_MAX_BYTES:-20971520}
+      CV_VALIDATOR_UPLOAD_MAX_BYTES: ${CV_VALIDATOR_UPLOAD_MAX_BYTES:-20971520}
       CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS: ${CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS:-30}
       CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD: ${CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD:-500}
       CV_VALIDATOR_LINKEDIN_MAX_PROFILES: ${CV_VALIDATOR_LINKEDIN_MAX_PROFILES:-3}

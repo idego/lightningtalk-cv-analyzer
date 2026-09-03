@@ -9,12 +9,14 @@ pnpm dev
 ```
 
 The root-level `make dev` command runs the complete Docker stack on
-`http://localhost:3001` with local-only authentication bypassed.
+`http://127.0.0.1:3001/analyze` with local-only authentication bypassed.
 
 ## Build
 
 ```bash
 pnpm typecheck
+pnpm test        # node --test on .mjs files importing .ts; needs Node 22
+pnpm lint
 pnpm build
 ```
 
@@ -39,3 +41,10 @@ Copy `.env.example` to `.env.local` and set:
 - `LOCAL_DEV_AUTH_BYPASS` (`true` only for a loopback `BASE_URL`; defaults to `false`)
 
 Unauthenticated access to `/analyze` redirects to `/sign-in`.
+
+## Feedback
+
+`/feedback` (inbox) and `/feedback/access` (roles) are visible only to users
+with an active `owner` or `reviewer` role in `feedback_access_by_email`,
+seeded by `scripts/init-feedback-access.mjs` from the root
+`config/feedback-access.json`. See `openspec/specs/contextual-feedback/spec.md`.

@@ -26,7 +26,8 @@ existing test suite SHALL pass from the new location.
 
 #### Scenario: API contract unchanged
 - **WHEN** the relocated backend is started
-- **THEN** `GET /health`, `POST /analyze`, and `POST /analyze/batch` behave identically to before the move
+- **THEN** `GET /health` and `POST /analyze` behave identically to before the move
+- **AND** later additions (analysis lifecycle, retention, feedback, operations, and research endpoints) are specified in their own capability specs rather than here
 
 ### Requirement: Build and run wiring resolves from new locations
 Backend build, test, and container wiring SHALL reference the new `apps/api` paths so the service builds and runs without relying on the old root layout.
