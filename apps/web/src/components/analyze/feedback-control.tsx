@@ -1,6 +1,8 @@
 "use client";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FeedbackResponse, FeedbackTarget } from "@/lib/feedback-types";
+import { useCopy } from "@/lib/app-settings";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import "./feedback-control.css";
 type Rating = "helpful" | "not_helpful" | null;
 type Phase =
@@ -63,6 +65,7 @@ export function FeedbackControl({
   target: FeedbackTarget;
   failure?: boolean;
 }) {
+  const { t } = useCopy();
   const [phase, setPhase] = useState<Phase>("idle"),
     [rating, setRating] = useState<Rating>(
       failure ? "not_helpful" : (target.response?.rating ?? null),
@@ -81,14 +84,19 @@ export function FeedbackControl({
     timers = useRef<number[]>([]),
     lastWidth = useRef(0),
     openingUntil = useRef(0);
-  const tooltip = useId(),
-    draftKey = `cv-feedback-draft:${analysisId}:${target.target_id}`,
+  const draftKey = `cv-feedback-draft:${analysisId}:${target.target_id}`,
     open = phase === "open",
     sending = ["collapsing", "launching", "delivered", "resetting"].includes(
       phase,
     ),
     normalized = comment.trim().replace(/\s+/g, " "),
-    valid = failure || (normalized.length >= 12 && normalized.length <= 180);
+    valid =
+      failure ||
+      rating === "helpful" ||
+      (normalized.length >= 12 && normalized.length <= 180),
+    disabledReason = normalized.length > 0
+      ? t("feedbackCommentTooShort")
+      : t("feedbackSelectionRequired");
   const draw = useCallback(
     (value: number) =>
       path.current?.setAttribute(
@@ -290,36 +298,24 @@ export function FeedbackControl({
           "--comment-h": `${height}px`,
         } as React.CSSProperties}
       >
-        <button
-          ref={trigger}
-          className="feedback-trigger"
-          type="button"
-          onClick={toggle}
-          aria-label={
-            open ? "Zamknij feedback" : failure ? "Zgłoś problem" : "Oceń wynik"
-          }
-          aria-expanded={open}
-          aria-describedby={!open ? tooltip : undefined}
-        >
-          <svg
-            className="feedback-morph-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+        <Tooltip disabled={open || sending}>
+          <TooltipTrigger render={<button
+            ref={trigger}
+            className="feedback-trigger"
+            type="button"
+            onClick={toggle}
+            aria-label={open ? t("closeFeedback") : failure ? t("reportProblem") : t("rateResult")}
+            aria-expanded={open}
           >
-            <path
-              ref={path}
-              d="M13 2L17 2.8L20 5.5L22 9L21.5 13L19 16.5L15 18L11 18M11 18L8 20L8.5 17.2L5.5 15L4 11L4.8 7L7 4L13 2"
-            />
-          </svg>
-        </button>
+            <svg className="feedback-morph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path ref={path} d="M13 2L17 2.8L20 5.5L22 9L21.5 13L19 16.5L15 18L11 18M11 18L8 20L8.5 17.2L5.5 15L4 11L4.8 7L7 4L13 2" />
+            </svg>
+          </button>} />
+          <TooltipContent>{failure ? t("reportProblem") : t("giveFeedback")}</TooltipContent>
+        </Tooltip>
         <section
           className="feedback-panel"
-          aria-label="Feedback do wyniku"
+          aria-label={t("resultFeedback")}
           aria-hidden={!open}
         >
           {!failure ? (
@@ -328,7 +324,7 @@ export function FeedbackControl({
                 className={`feedback-vote ${rating === "helpful" ? "selected" : ""}`}
                 type="button"
                 onClick={() => select("helpful")}
-                aria-label="Pomocny"
+                aria-label={t("helpful")}
                 aria-pressed={rating === "helpful"}
               >
                 <Thumb up />
@@ -337,7 +333,7 @@ export function FeedbackControl({
                 className={`feedback-vote ${rating === "not_helpful" ? "selected" : ""}`}
                 type="button"
                 onClick={() => select("not_helpful")}
-                aria-label="Do poprawy"
+                aria-label={t("needsImprovement")}
                 aria-pressed={rating === "not_helpful"}
               >
                 <Thumb />
@@ -345,7 +341,7 @@ export function FeedbackControl({
             </div>
           ) : (
             <div className="feedback-actions feedback-failure-label">
-              Zgłoś problem
+              {t("reportProblem")}
             </div>
           )}
           <div className="feedback-comment-wrap">
@@ -356,7 +352,7 @@ export function FeedbackControl({
               value={comment}
               maxLength={180}
               placeholder={
-                rating === "not_helpful" ? "Co poprawić?" : "Napisz…"
+                rating === "not_helpful" ? t("whatToImprove") : t("writeFeedback")
               }
               onChange={(event) =>
                 setComment(event.target.value.replace(/\s*\n+\s*/g, " "))
@@ -367,7 +363,7 @@ export function FeedbackControl({
                 event.preventDefault();
                 if ((event.ctrlKey || event.metaKey) && valid) void send();
               }}
-              aria-label="Komentarz"
+              aria-label={t("feedbackComment")}
             />
             <span
               className="feedback-counter"
@@ -375,33 +371,35 @@ export function FeedbackControl({
             >
               {remaining}
             </span>
-            <button
-              className="feedback-send"
-              type="button"
-              disabled={!valid || sending}
-              onClick={() => void send()}
-              aria-label="Wyślij"
-              aria-keyshortcuts="Control+Enter Meta+Enter"
-            >
-              <Plane />
-            </button>
+            <Tooltip disabled={valid || sending}>
+              <TooltipTrigger
+                render={
+                  <span className="feedback-send-tooltip-trigger">
+                    <button
+                      className="feedback-send"
+                      type="button"
+                      disabled={!valid || sending}
+                      onClick={() => void send()}
+                      aria-label={t("sendFeedback")}
+                      aria-keyshortcuts="Control+Enter Meta+Enter"
+                    >
+                      <Plane />
+                    </button>
+                  </span>
+                }
+              />
+              <TooltipContent>{disabledReason}</TooltipContent>
+            </Tooltip>
           </div>
           {error ? (
-            <span className="feedback-error">Nie udało się zapisać</span>
+            <span className="feedback-error">{t("feedbackSaveFailed")}</span>
           ) : null}
         </section>
         <div className="feedback-send-stage" role="status">
           <Plane className="feedback-stage-plane" />
-          <span className="feedback-sent-tooltip">Wysłano!</span>
+          <span className="feedback-sent-tooltip">{t("feedbackSent")}</span>
         </div>
       </div>
-      <span
-        id={tooltip}
-        className="feedback-tooltip"
-        role="tooltip"
-      >
-        {failure ? "Zgłoś problem" : "Przekaż opinię"}
-      </span>
     </div>
   );
 }
