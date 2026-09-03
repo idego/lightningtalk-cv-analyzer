@@ -107,7 +107,7 @@ class OpenAIResponsesEducationResearcher:
             for credential, input_fact in zip(
                 payload["credentials"], request.input_facts, strict=True
             ):
-                for field in ("institution", "program", "certificate"):
+                for field in ("institution", "program"):
                     credential[field] = input_fact.get(field)
         _retain_cited_education_findings(payload, source_urls)
         usage = response.usage.model_dump() if response.usage is not None else {}
@@ -298,7 +298,6 @@ def _retain_cited_education_findings(
         for field, kind in (
             ("program_exists", "program"),
             ("degree_exists", "degree"),
-            ("certificate_exists", "certificate"),
         ):
             if kind not in retained_kinds:
                 credential[field] = "evidence_unavailable"

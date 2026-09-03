@@ -70,16 +70,14 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v2",
+        "schema_version": "education-research-schema-v3",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
             "program": "Computer Science",
             "degree": None,
-            "certificate": None,
             "program_exists": "supported",
             "degree_exists": "evidence_unavailable",
-            "certificate_exists": "evidence_unavailable",
             "dates": None,
             "city": None,
             "country": None,

@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCopy } from "@/lib/app-settings";
 
 type Member = { email: string; role: "owner" | "reviewer" };
 
 export function FeedbackAccess() {
+  const { t } = useCopy();
   const [members, setMembers] = useState<Member[]>([]);
   const [collectionEnabled, setCollectionEnabled] = useState(true);
   const [email, setEmail] = useState("");
@@ -69,19 +71,19 @@ export function FeedbackAccess() {
 
   return <section className="mx-auto max-w-3xl space-y-6">
     <div className="space-y-3">
-      <Button variant="ghost" nativeButton={false} className="-ml-2 w-fit" render={<Link href="/feedback"><ArrowLeft />Back</Link>} />
-      <div><h1 className="text-2xl font-semibold">Dostęp do feedbacku</h1><p className="text-sm text-muted-foreground">Zarządzaj osobami, które mogą przeglądać i obsługiwać feedback.</p></div>
+      <Button variant="ghost" nativeButton={false} className="-ml-2 w-fit" render={<Link href="/feedback"><ArrowLeft />{t("back")}</Link>} />
+      <div><h1 className="text-2xl font-semibold">{t("feedbackAccess")}</h1><p className="text-sm text-muted-foreground">{t("feedbackAccessDescription")}</p></div>
     </div>
     <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
-      <div><p className="font-medium">Zbieranie feedbacku</p><p className="text-sm text-muted-foreground">Steruje przyciskami i nowymi odpowiedziami. Inbox pozostaje dostępny.</p></div>
-      <button type="button" role="switch" aria-checked={collectionEnabled} onClick={toggleCollection} className={`shrink-0 rounded-full px-4 py-2 text-sm ${collectionEnabled ? "bg-primary text-primary-foreground" : "border"}`}>{collectionEnabled ? "Włączone" : "Wyłączone"}</button>
+      <div><p className="font-medium">{t("feedbackCollection")}</p><p className="text-sm text-muted-foreground">{t("feedbackCollectionDescription")}</p></div>
+      <button type="button" role="switch" aria-checked={collectionEnabled} onClick={toggleCollection} className={`shrink-0 rounded-full px-4 py-2 text-sm ${collectionEnabled ? "bg-primary text-primary-foreground" : "border"}`}>{t(collectionEnabled ? "enabled" : "disabled")}</button>
     </div>
     <div className="flex gap-2">
-      <input className="flex-1 rounded-md border px-3" value={email} onChange={event => setEmail(event.target.value)} placeholder="Firmowy adres e-mail" />
-      <select className="rounded-md border px-3" value={role} onChange={event => setRole(event.target.value as Member["role"])}><option value="reviewer">reviewer</option><option value="owner">owner</option></select>
-      <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>Nadaj</button>
+      <input className="flex-1 rounded-md border px-3" value={email} onChange={event => setEmail(event.target.value)} placeholder={t("companyEmail")} aria-label={t("companyEmail")} />
+      <select className="rounded-md border px-3" value={role} onChange={event => setRole(event.target.value as Member["role"])} aria-label={t("feedbackAccess")}><option value="reviewer">{t("reviewer")}</option><option value="owner">{t("owner")}</option></select>
+      <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>{t("grantAccess")}</button>
     </div>
     {error ? <p className="text-sm text-destructive">{error}</p> : null}
-    <ul className="divide-y rounded-lg border">{members.map(member => <li key={member.email} className="flex items-center justify-between p-3"><span>{member.email} · {member.role}</span><button className="text-sm text-destructive" onClick={() => revoke(member.email)}>Cofnij</button></li>)}</ul>
+    <ul className="divide-y rounded-lg border">{members.map(member => <li key={member.email} className="flex items-center justify-between p-3"><span>{member.email} · {t(member.role)}</span><button className="text-sm text-destructive" onClick={() => revoke(member.email)}>{t("revokeAccess")}</button></li>)}</ul>
   </section>;
 }

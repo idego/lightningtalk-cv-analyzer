@@ -26,6 +26,11 @@ services:
       GEONAMES_POSTAL_CODES_URL: ${GEONAMES_POSTAL_CODES_URL:-https://download.geonames.org/export/zip/allCountries.zip}
     volumes:
       - geonames_data:/reference-data
+    # The runtime image normally serves the API and therefore has an image-level
+    # HTTP healthcheck. This one-shot job only builds reference data, so that
+    # healthcheck would always fail while the job is working.
+    healthcheck:
+      disable: true
     restart: "no"
     logging:
       driver: json-file

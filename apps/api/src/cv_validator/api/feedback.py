@@ -90,7 +90,10 @@ class FeedbackInput(BaseModel):
             return self
         if self.comment is not None and len(self.comment) < 12:
             raise ValueError("comment_too_short")
-        if not self.comment and not (self.rating == Rating.NOT_HELPFUL and self.reason):
+        if not self.comment and not (
+            self.rating == Rating.HELPFUL
+            or (self.rating == Rating.NOT_HELPFUL and self.reason)
+        ):
             raise ValueError("comment_or_negative_reason_required")
         return self
 

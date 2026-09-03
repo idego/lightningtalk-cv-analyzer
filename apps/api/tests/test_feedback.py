@@ -64,6 +64,12 @@ def test_comment_validation_and_contact_rejection():
     assert FeedbackInput(comment="This result needs more context").rating is None
 
 
+def test_helpful_feedback_does_not_require_a_comment():
+    value = FeedbackInput(rating="helpful")
+    assert value.rating.value == "helpful"
+    assert value.comment is None
+
+
 def test_materializes_feedback_for_each_visible_signal(tmp_path):
     store, _ = _store(tmp_path)
     evidence = [{"source_id": "block-1", "excerpt": "Faisalabad, Pakistan"}]

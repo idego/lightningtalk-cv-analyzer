@@ -44,3 +44,27 @@ def test_research_uses_only_accepted_supported_records() -> None:
         "organization": "Example Systems",
         "role": "Software Engineer",
     }
+
+
+def test_education_research_ignores_certificate_only_records() -> None:
+    report = valid_report()
+    report["base_analysis"]["education"].append({
+        "id": "certificate-only",
+        "status": "accepted",
+        "relation_status": "supported",
+        "added_by_reviewer": False,
+        "institution": None,
+        "program": None,
+        "degree": None,
+        "certificate": supported("AWS Cloud Practitioner"),
+        "start_date": None,
+        "end_date": None,
+        "location": None,
+    })
+
+    education = build_education_research_request(report)
+
+    assert education.input_facts == ({
+        "institution": "Example University",
+        "program": "Computer Science",
+    },)

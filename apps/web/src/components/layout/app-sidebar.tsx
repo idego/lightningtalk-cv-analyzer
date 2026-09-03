@@ -13,7 +13,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { NavGroup } from "@/components/layout/sidebar-data";
+import { isSidebarItemActive, type NavGroup } from "@/components/layout/sidebar-data";
 import { IDEGO_LOGO_URL } from "@/lib/idego";
 import { useCopy } from "@/lib/app-settings";
 
@@ -65,7 +65,7 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
-                    isActive={pathname.replace(/\/+$/, "") === item.url.replace(/\/+$/, "")}
+                    isActive={isSidebarItemActive(pathname, item.url)}
                     tooltip={item.title}
                     className="group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0! [&>svg]:size-5!"
                     render={

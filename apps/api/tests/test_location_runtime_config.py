@@ -154,10 +154,12 @@ def test_base_compose_bootstraps_persistent_read_only_reference_data() -> None:
     assert "CV_VALIDATOR_POSTAL_INDEX_PATH: /app/reference-data/current/postal-codes.sqlite3" in compose
     assert "CV_VALIDATOR_POSTAL_MANIFEST_PATH: /app/reference-data/current/postal-codes.manifest.json" in compose
     assert "geonames-init:" in compose
+    assert "healthcheck:\n      disable: true" in compose
     assert "condition: service_completed_successfully" in compose
     assert "geonames_data:/reference-data" in compose
     assert "source: geonames_data" in compose
     assert "read_only: true" in compose
+    assert '"127.0.0.1:8001:8000"' not in compose
     assert "reference-data" not in dockerfile
     assert "data" in dockerignore.splitlines()
     assert "data/" in gitignore.splitlines()

@@ -30,7 +30,7 @@ export function researchEligibility(report: AnalysisReport) {
   );
   const education = report.base_analysis.education.some(
     (record) => record.status === "accepted"
-      && (supported(record.institution) || supported(record.certificate)),
+      && supported(record.institution),
   );
   const linkedin = supported(report.base_analysis.profile.candidate_name);
   return {

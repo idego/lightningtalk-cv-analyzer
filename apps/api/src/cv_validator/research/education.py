@@ -14,9 +14,9 @@ from cv_validator.location import Ambiguous, LocationResolver, Resolved, Resolut
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
 from cv_validator.research.subjects import accepted_records, supported_field
 
-RESEARCH_VERSION = "education-research-v3"
-PROMPT_VERSION = "education-research-prompt-v4"
-SCHEMA_VERSION = "education-research-schema-v2"
+RESEARCH_VERSION = "education-research-v4"
+PROMPT_VERSION = "education-research-prompt-v5"
+SCHEMA_VERSION = "education-research-schema-v3"
 MAX_CREDENTIALS = 12
 
 
@@ -139,24 +139,17 @@ def apply_owner_scoped_education_context(
 
 def build_education_research_request(stored_report: dict[str, Any]) -> EducationResearchRequest:
     facts: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str]] = set()
     for record in accepted_records(stored_report, "education"):
         institution = supported_field(record, "institution")
         program = supported_field(record, "program")
-        certificate = supported_field(record, "certificate")
         if institution is not None and not _safe_subject(institution):
             continue
-        if certificate is not None and not _safe_subject(certificate):
-            certificate = None
-        if institution is None and certificate is None:
+        if institution is None:
             continue
-        fact: dict[str, Any] = {}
-        if institution is not None:
-            fact["institution"] = institution
+        fact: dict[str, Any] = {"institution": institution}
         if program is not None and _safe_subject(program):
             fact["program"] = program[:200]
-        if certificate is not None:
-            fact["certificate"] = certificate
         key = _key(fact)
         if key in seen:
             continue
@@ -180,7 +173,7 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
     for credential in payload["credentials"]:
         kinds = {finding["kind"] for finding in credential["findings"]}
         required: set[str] = set()
-        for field, kind in (("program_exists", "program"), ("degree_exists", "degree"), ("certificate_exists", "certificate")):
+        for field, kind in (("program_exists", "program"), ("degree_exists", "degree")):
             if credential[field] != "evidence_unavailable": required.add(kind)
         if credential["dates"] is not None: required.add("dates")
         if credential["city"] is not None or credential["country"] is not None: required.add("location")
@@ -191,8 +184,8 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
             raise EducationResearchInvalidResponse()
 
 
-def _key(item: dict[str, Any]) -> tuple[str, str, str]:
-    return tuple(str(item.get(field) or "").strip().casefold() for field in ("institution", "program", "certificate"))
+def _key(item: dict[str, Any]) -> tuple[str, str]:
+    return tuple(str(item.get(field) or "").strip().casefold() for field in ("institution", "program"))
 
 
 def _safe_subject(value: str) -> bool:
