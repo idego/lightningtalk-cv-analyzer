@@ -23,7 +23,6 @@ function EducationResult({ credential, analysisId, feedback }: { credential: Cre
   const searchHref = educationGoogleSearchUrl({
     institution: credential.institution,
     program: credential.program,
-    certificate: credential.certificate,
   });
 
   return <HoverDisclosure
@@ -36,7 +35,7 @@ function EducationResult({ credential, analysisId, feedback }: { credential: Cre
     action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} /> : null}{feedback ? <FeedbackControl analysisId={analysisId} target={feedback} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
-    <p className="text-muted-foreground">{[credential.program, credential.degree, credential.certificate, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ") || t("notEnoughPublicInformation")}</p>
+    <p className="text-muted-foreground">{[credential.program, credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ") || t("notEnoughPublicInformation")}</p>
     {credential.location_difference_for_review ? <p className="rounded border border-amber-500/30 p-2 text-xs">{t("forReview")} {credential.location_difference_for_review} {t("doesNotVerifyCandidateLocation")}</p> : null}
     <p className="text-xs text-muted-foreground">{credential.uncertainty}</p>
     {credential.findings.map((finding, index) => <p key={`${finding.kind}-${index}`}>{finding.summary}</p>)}

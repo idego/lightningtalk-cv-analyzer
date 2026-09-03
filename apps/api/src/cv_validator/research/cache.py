@@ -54,7 +54,7 @@ def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheD
 
 def education_cache_descriptor(request: EducationResearchRequest) -> CacheDescriptor:
     subjects = tuple(sorted(
-        "|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program", "certificate"))
+        "|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program"))
         for fact in request.input_facts
     ))
     return _descriptor("education", subjects, EDUCATION_RESEARCH_VERSION, EDUCATION_PROMPT_VERSION, EDUCATION_SCHEMA_VERSION)
@@ -64,7 +64,7 @@ def education_subject_descriptors(request: EducationResearchRequest) -> tuple[Ca
     return tuple(
         _descriptor(
             "education",
-            ("|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program", "certificate")),),
+            ("|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program")),),
             EDUCATION_RESEARCH_VERSION,
             EDUCATION_PROMPT_VERSION,
             EDUCATION_SCHEMA_VERSION,
@@ -160,8 +160,8 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
         for item in result["credentials"]:
             public_findings = [deepcopy(finding) for finding in item["findings"] if finding["kind"] not in {"dates", "cv_consistency"}]
             cached = {key: deepcopy(item[key]) for key in (
-                "institution", "program", "degree", "certificate",
-                "program_exists", "degree_exists", "certificate_exists",
+                "institution", "program", "degree",
+                "program_exists", "degree_exists",
                 "city", "country", "confidence", "uncertainty",
             )}
             cached.update({"dates": None, "cv_consistency": "evidence_unavailable", "location_difference_for_review": None, "findings": public_findings})

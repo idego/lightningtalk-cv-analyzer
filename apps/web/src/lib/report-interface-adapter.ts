@@ -217,7 +217,6 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
     detail: join([
       value(item.program),
       value(item.degree),
-      value(item.certificate),
       dateRange(item.start_date, item.end_date),
       value(item.location),
     ]),
@@ -274,10 +273,10 @@ function overview(report: AnalysisReport): ReportOverview {
         ? "mismatch"
         : null,
     euStatus: outsideEu.length ? "outside" : insideEu.length ? "inside" : null,
-    education: report.base_analysis.education.filter((item) => !suspectedIds.has(item.id)).map(educationRecord),
+    education: report.base_analysis.education.filter((item) => !suspectedIds.has(item.id) && value(item.institution)).map(educationRecord),
     employment: report.base_analysis.employment.filter((item) => !suspectedIds.has(item.id)).map(employmentRecord),
     attentionRecords: [
-      ...report.base_analysis.education.filter((item) => suspectedIds.has(item.id)).map(educationRecord),
+      ...report.base_analysis.education.filter((item) => suspectedIds.has(item.id) && value(item.institution)).map(educationRecord),
       ...report.base_analysis.employment.filter((item) => suspectedIds.has(item.id)).map(employmentRecord),
     ],
     educationStatus: report.base_analysis.pass_statuses.education?.section_status,

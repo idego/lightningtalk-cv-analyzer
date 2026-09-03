@@ -54,29 +54,27 @@ test("omits missing company context and rejects ineligible company values", () =
   assert.equal(companyGoogleSearchUrl({ organization: "samozatrudnienie" }), null);
 });
 
-test("uses education program before certificate", () => {
+test("uses the education institution and program", () => {
   assert.equal(
     parsed(educationGoogleSearchUrl({
       institution: "Politechnika Gdańska",
       program: "Informatyka",
-      certificate: "AWS Cloud Practitioner",
     })).searchParams.get("q"),
     "Politechnika Gdańska Informatyka",
   );
 });
 
-test("falls back from program to certificate and then institution only", () => {
+test("falls back to the institution only", () => {
   assert.equal(
     parsed(educationGoogleSearchUrl({
       institution: "Coursera",
       program: " ",
-      certificate: "Google Data Analytics & BI",
     })).searchParams.get("q"),
-    "Coursera Google Data Analytics & BI",
+    "Coursera",
   );
   assert.equal(
     parsed(educationGoogleSearchUrl({ institution: "MIT" })).searchParams.get("q"),
     "MIT",
   );
-  assert.equal(educationGoogleSearchUrl({ institution: null, certificate: "Certificate" }), null);
+  assert.equal(educationGoogleSearchUrl({ institution: null }), null);
 });

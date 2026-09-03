@@ -142,6 +142,23 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 
+test("CV overview omits certificates, including certificate-only education records", () => {
+  const value = report();
+  value.base_analysis.education[0].certificate = field("AWS Cloud Practitioner");
+  value.base_analysis.education.push({
+    ...value.base_analysis.education[0],
+    id: "certificate-only",
+    institution: null,
+    program: null,
+    certificate: field("Azure Fundamentals"),
+  });
+
+  const overview = adaptReportInterface(value, "en").overview;
+
+  assert.equal(overview.education.length, 1);
+  assert.doesNotMatch(JSON.stringify(overview.education), /AWS|Azure/);
+});
+
 test("CV overview renders when optional review annotations are absent", () => {
   const value = report();
   delete value.base_analysis.review.annotations;
