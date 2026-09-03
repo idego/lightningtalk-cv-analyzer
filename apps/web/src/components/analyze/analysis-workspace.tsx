@@ -42,15 +42,13 @@ export function AnalysisWorkspace({
     : `minmax(0, ${100 - previewShare}fr) 16px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
-    <div className="mb-3 flex min-h-10 items-start justify-between gap-4">
-      <div className="flex items-center gap-4">
+    <div className="mb-3 grid min-h-10 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-2 sm:gap-4">
+      <div className="flex min-w-0 items-center gap-4 justify-self-start">
         {onBack ? <Button variant="outline" onClick={onBack}><ArrowLeft data-icon="inline-start" />{t("back")}</Button> : null}
         {analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
       </div>
-      {!hasOriginalFiles ? <div className="flex flex-col items-end gap-1.5">
-        <p className="text-sm text-foreground/75">{t("originalNotRetained")}</p>
-        <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button>
-      </div> : <Button variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
+      {!hasOriginalFiles ? <p className="min-w-0 truncate text-center text-xs text-foreground/75 sm:text-sm" title={t("originalNotRetained")}>{t("originalNotRetained")}</p> : <span />}
+      {!hasOriginalFiles ? <Button className="justify-self-end" variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button> : <Button className="justify-self-end" variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
         {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
         {t(previewVisible ? "hideCv" : "showCv")}
       </Button>}

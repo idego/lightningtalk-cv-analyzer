@@ -299,6 +299,10 @@ class FeedbackStore:
 def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
+    yield TargetKind.REPORT_OVERALL, "remaining", "section", versions, None
+    yield TargetKind.COMPANY_RESEARCH_RESULT, "company_research", "section", versions, None
+    yield TargetKind.EDUCATION_RESEARCH_RESULT, "education_research", "section", versions, None
+    yield TargetKind.LINKEDIN_RESEARCH_RESULT, "linkedin_discovery", "section", versions, None
     yield from _presentation_feedback_candidates(payload, versions)
     for finding in payload.get("review_findings") or payload.get("findings") or []:
         if isinstance(finding, dict) and isinstance(finding.get("id"), str):

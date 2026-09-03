@@ -17,7 +17,7 @@ import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-s
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 
-function FlagList({ flags, analysisId, feedbackManifest, section }: { flags: ReportFinding[]; analysisId: string; feedbackManifest?: FeedbackManifest; section: "attention" | "worth_knowing" | "remaining" }) {
+function FlagList({ flags }: { flags: ReportFinding[] }) {
   const { t } = useCopy();
   return (
     <div className="space-y-2">
@@ -28,7 +28,6 @@ function FlagList({ flags, analysisId, feedbackManifest, section }: { flags: Rep
           allowHover
           feedbackSnapshotLabel={flag.whatWeFound}
           title={<span className="block font-medium leading-snug">{flag.whatWeFound}</span>}
-          action={feedbackTarget(feedbackManifest, "review_finding", section, flag.id) ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "review_finding", section, flag.id)!} /> : null}
           contentClassName="pt-3"
         >
           <dl className="space-y-3 border-t pt-3">
@@ -85,9 +84,9 @@ function OverviewRow({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-3 py-1.5">
+    <div className={`flex min-w-0 gap-3 py-1.5 ${detail ? "items-start" : "items-center"}`}>
       <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
-      <div className="min-w-0 flex-1 pt-0.5">
+      <div className={`min-w-0 flex-1 ${detail ? "pt-0.5" : ""}`}>
         <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>
         {detail ? <p className="mt-0.5 break-words text-xs leading-relaxed text-muted-foreground">{detail}</p> : null}
       </div>
@@ -166,7 +165,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={educationTone}
-                  action={href ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
+                  action={href ? <GoogleSearchAction href={href} /> : null}
                 />;
               })}
             </div>
@@ -185,7 +184,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={employmentTone}
-                  action={href ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
+                  action={href ? <GoogleSearchAction href={href} /> : null}
                 />;
               })}
             </div>
@@ -276,11 +275,11 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
             </CardHeader>
             <CardContent className="space-y-3">
               {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.attention} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="attention" />
+                <FlagList flags={presentation.attention} />
               </HoverDisclosure> : null}
 
               {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("worthKnowing")} (${presentation.worthKnowing.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.worthKnowing} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="worth_knowing" />
+                <FlagList flags={presentation.worthKnowing} />
               </HoverDisclosure> : null}
 
               <StructuredFacts overview={presentation.overview} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} />
@@ -289,8 +288,8 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
-              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={`${t("remaining")} (${presentation.remaining.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.remaining} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} section="remaining" />
+              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={`${t("remaining")} (${presentation.remaining.length})`} feedbackSnapshotLabel={t("remaining")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
+                <FlagList flags={presentation.remaining} />
               </HoverDisclosure> : null}
             </CardContent>
           </Card>

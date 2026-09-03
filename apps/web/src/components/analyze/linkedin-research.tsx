@@ -31,13 +31,9 @@ function profileNote(uncertainty: string) {
 function LinkedInProfileCard({
   profile,
   profileIndex,
-  feedbackManifest,
-  analysisId,
 }: {
   profile: LinkedInProfile;
   profileIndex: number;
-  feedbackManifest?: FeedbackManifest;
-  analysisId: string;
 }) {
   const { t } = useCopy();
   const note = profileNote(profile.uncertainty);
@@ -51,23 +47,33 @@ function LinkedInProfileCard({
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <ResearchConfidenceBadge confidence={profile.confidence} />
-            {feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", String(profileIndex)) ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", String(profileIndex))!} /> : null}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="active:scale-[0.92]"
+                    nativeButton={false}
+                    render={
+                      <a
+                        href={profile.profile_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={t("openProfile")}
+                      >
+                        <ExternalLink aria-hidden />
+                      </a>
+                    }
+                  />
+                }
+              />
+              <TooltipContent>{t("openProfile")}</TooltipContent>
+            </Tooltip>
           </div>
         }
         contentClassName="space-y-2 pt-3"
       >
-        <div className="pb-1">
-          <Button
-            variant="outline"
-            size="sm"
-            render={
-              <a href={profile.profile_url} target="_blank" rel="noreferrer">
-                {t("openProfile")}
-                <ExternalLink data-icon="inline-end" />
-              </a>
-            }
-          />
-        </div>
         {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
         <ResearchSources
           urls={[
@@ -121,9 +127,10 @@ export function LinkedInResearchPanel({
     className="rounded-md border p-3"
     title={<span className="font-medium">{t("linkedinProfiles")}</span>}
     collapsible={hasContent}
+    feedbackSnapshotLabel={t("linkedinProfiles")}
     contentClassName="space-y-3 pt-3"
     action={<div className="flex items-center gap-2">
-      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedInFor", { subject: searchKeyword ?? "" })}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedInFor", { subject: searchKeyword ?? "" })}</TooltipContent></Tooltip> : null}
+      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
       {!discoveryCompleted ? <ResearchAction
         busy={discoveryBusy}
         disabled={!enabled || discoveryBusy}
@@ -133,6 +140,7 @@ export function LinkedInResearchPanel({
         busyAriaLabel={t("linkedinDiscoveryInProgress")}
         disabledReason={!enabled ? t("noCandidateDetails") : undefined}
       /> : null}
+      {hasContent && feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section")!} /> : null}
     </div>}
   >
     {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}
@@ -143,8 +151,6 @@ export function LinkedInResearchPanel({
           key={profile.profile_url}
           profile={profile}
           profileIndex={profileIndex}
-          feedbackManifest={feedbackManifest}
-          analysisId={report.analysis_id}
         />
       ))}
     </div>

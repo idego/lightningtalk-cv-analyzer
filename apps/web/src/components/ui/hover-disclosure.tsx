@@ -71,6 +71,16 @@ export function HoverDisclosure({
     setOpen(nextOpen);
   }
 
+  function pinFromTrigger(event: MouseEvent<HTMLElement>) {
+    if (open && !pinned && allowHover && previewFindingsOnHover) {
+      event.preventDefault();
+      setPinned(true);
+      setOpen(true);
+      return;
+    }
+    setPinned(!open);
+  }
+
   if (!collapsible) {
     return (
       <div className={className} data-feedback-snapshot={feedbackSnapshotLabel}>
@@ -95,23 +105,16 @@ export function HoverDisclosure({
       data-feedback-snapshot={feedbackSnapshotLabel}
     >
       <div className={cn("flex items-center gap-3", headerClassName)}>
+        <div className={cn("flex min-w-0 flex-1 items-center text-left", triggerClassName)}>
+          <span className="min-w-0 flex-1">{title}</span>
+        </div>
+        {action ? <div className={cn("shrink-0", actionClassName)}>{action}</div> : null}
         <Collapsible.Trigger
           data-disclosure-trigger
-          onClick={(event) => {
-            if (open && !pinned && allowHover && previewFindingsOnHover) {
-              event.preventDefault();
-              setPinned(true);
-              setOpen(true);
-              return;
-            }
-            setPinned(!open);
-          }}
-          className={cn(
-            "flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            triggerClassName,
-          )}
+          onClick={pinFromTrigger}
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[min(var(--radius-md),12px)] outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="min-w-0 flex-1">{title}</span>
+          <span className="sr-only">{title}</span>
           <ChevronDown
             aria-hidden="true"
             className={cn(
@@ -120,7 +123,6 @@ export function HoverDisclosure({
             )}
           />
         </Collapsible.Trigger>
-        {action ? <div className={cn("shrink-0", actionClassName)}>{action}</div> : null}
       </div>
       <Collapsible.Panel
         data-disclosure-panel
