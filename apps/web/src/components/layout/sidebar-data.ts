@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { MessageSquareText, Search, Settings } from "lucide-react";
+import { LayoutDashboard, Search, Settings } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -12,14 +12,14 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-export function buildSidebarNav(showFeedback=false): NavGroup[] {
+export function buildSidebarNav(): NavGroup[] {
   return [
     {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
+        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "Settings", url: "/settings", icon: Settings },
-        ...(showFeedback?[{title:"Feedback",url:"/feedback",icon:MessageSquareText}]:[]),
       ],
     },
   ];
@@ -34,6 +34,7 @@ export function isSidebarItemActive(pathname: string, itemUrl: string): boolean 
 export function titleFromPathname(pathname: string): string {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/analyze") return "Analyze";
+  if (normalized === "/dashboard") return "Dashboard";
   if (normalized === "/settings") return "Settings";
   if (normalized.startsWith("/feedback")) return "Feedback";
   return "CV Analyzer";

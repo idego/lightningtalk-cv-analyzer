@@ -5,7 +5,7 @@ import { BriefcaseBusiness, CircleAlert, Globe2, GraduationCap, Map as MapIcon, 
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
@@ -16,6 +16,7 @@ import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
+import { ReportAiCost } from "@/components/analyze/report-ai-cost";
 
 function FlagList({ flags, analysisId, feedbackManifest, section }: { flags: ReportFinding[]; analysisId: string; feedbackManifest?: FeedbackManifest; section: "attention" | "worth_knowing" | "remaining" }) {
   const { t } = useCopy();
@@ -272,7 +273,8 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         return (
           <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
-              <CardTitle className="text-base">{item.filename}</CardTitle>
+              <CardTitle className="min-w-0 truncate text-base">{item.filename}</CardTitle>
+              <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction>
             </CardHeader>
             <CardContent className="space-y-3">
               {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">

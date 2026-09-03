@@ -13,7 +13,7 @@ export function AppHeader() {
   const pathname = usePathname();
   const { t } = useCopy();
   const fallbackTitle = titleFromPathname(pathname);
-  const title = pathname.startsWith("/settings") ? t("settings") : pathname.startsWith("/analyze") ? t("analyze") : fallbackTitle;
+  const title = pathname.startsWith("/settings") ? t("settings") : pathname.startsWith("/dashboard") ? t("dashboard") : pathname.startsWith("/analyze") ? t("analyze") : fallbackTitle;
 
   return (
     <header className="sticky top-0 z-30 flex h-14 min-h-14 shrink-0 w-full min-w-0 items-center gap-2 border-b bg-background/85 px-4 py-0 backdrop-blur sm:gap-3 sm:px-6">

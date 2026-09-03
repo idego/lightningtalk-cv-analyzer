@@ -123,7 +123,7 @@ export function useAppSettings() {
 
 const copy = {
   en: {
-    analysis: "Analysis", analyze: "Analyze", settings: "Settings",
+    analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings",
     uploadTitle: "Upload CV files",
     drop: "Drag and drop files here, or click to select", accepted: "Accepted: PDF, DOCX",
     queued: "Queued files", valid: "valid", analyzeFiles: "Analyze files", reset: "Reset",
@@ -165,7 +165,7 @@ const copy = {
     welcomeBack: "Welcome back", signInDescription: "Sign in to CV Analyzer with your Idego Google account.", signIn: "Sign in", continueWithGoogle: "Continue with Google", signInWithGoogle: "Sign in with Google", signingIn: "Signing in...", googleSsoOnly: "Google SSO only", googleOAuthNotConfigured: "Google OAuth is not configured.", unableToSignIn: "Unable to sign in.",
   },
   pl: {
-    analysis: "Analiza", analyze: "Analizuj", settings: "Ustawienia",
+    analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia",
     uploadTitle: "Dodaj pliki CV",
     drop: "Przeciągnij pliki tutaj lub kliknij, aby je wybrać", accepted: "Obsługiwane: PDF, DOCX",
     queued: "Pliki w kolejce", valid: "poprawnych", analyzeFiles: "Analizuj pliki", reset: "Wyczyść",
