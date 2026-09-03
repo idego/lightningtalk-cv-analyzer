@@ -32,7 +32,6 @@ from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import load_location_resolver, load_postal_code_resolver
 from cv_validator.errors import (
     AnalysisNotFoundPersistenceError,
-    AnalysisRuntimeError,
     PersistenceError,
     UploadReadError,
 )
@@ -96,19 +95,11 @@ from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/cv_analyzer.db")
-DEFAULT_BATCH_MAX_FILES = 4
-DEFAULT_BATCH_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
 
 
 class _RetentionUpdate(BaseModel):
     days: int
-
-
-@dataclass(frozen=True)
-class _PreparedUpload:
-    upload: UploadFile
-    content: bytes | None
-    error: str | None = None
 
 
 @dataclass
@@ -199,8 +190,7 @@ def create_app(
     postal_code_resolver: PostalCodeResolver | None = None,
     openai_settings: OpenAISettings | None = None,
     analysis_strategy: AnalysisStrategy | None = None,
-    batch_max_files: int | None = None,
-    batch_max_bytes: int | None = None,
+    upload_max_bytes: int | None = None,
     company_researcher=None,
     education_researcher=None,
     linkedin_researcher=None,
@@ -285,15 +275,10 @@ def create_app(
         )
     )
     feedback_store = FeedbackStore(store.config.db_path)
-    max_files = (
-        batch_max_files
-        if batch_max_files is not None
-        else _positive_int_env("CV_VALIDATOR_BATCH_MAX_FILES", DEFAULT_BATCH_MAX_FILES)
-    )
-    max_bytes = (
-        batch_max_bytes
-        if batch_max_bytes is not None
-        else _positive_int_env("CV_VALIDATOR_BATCH_MAX_BYTES", DEFAULT_BATCH_MAX_BYTES)
+    max_upload_bytes = (
+        upload_max_bytes
+        if upload_max_bytes is not None
+        else _positive_int_env("CV_VALIDATOR_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
     )
     research_locks = _ResearchLockRegistry()
     # Analyses run off the event loop so reads stay responsive, but the shared
@@ -490,7 +475,7 @@ def create_app(
             },
             "retention": {"days": store.config.retention_days},
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
-            "batch": {"max_files": max_files, "max_bytes": max_bytes},
+            "upload": {"max_bytes": max_upload_bytes},
         }
 
     def analyze_upload(
@@ -673,6 +658,8 @@ def create_app(
             content = await _read_upload(file)
         except UploadReadError as exc:
             raise HTTPException(status_code=500, detail="upload_read_error") from exc
+        if len(content) > max_upload_bytes:
+            raise HTTPException(status_code=413, detail="upload_size_limit_exceeded")
         access_token = x_analysis_access_token or secrets.token_urlsafe(32)
         return JSONResponse(
             await run_in_threadpool(
@@ -683,58 +670,6 @@ def create_app(
                 access_token,
                 request.state.correlation_id,
             )
-        )
-
-    @app.post("/analyze/batch")
-    async def analyze_batch(
-        request: Request,
-        files: list[UploadFile] = File(...),
-        x_analysis_access_token: str | None = Header(default=None),
-        x_report_language: str = Header(default="en"),
-    ) -> JSONResponse:
-        prepared = await _prepare_batch(
-            files,
-            max_files=max_files,
-            max_bytes=max_bytes,
-        )
-        language = _report_language(x_report_language)
-        access_token = x_analysis_access_token or secrets.token_urlsafe(32)
-        results: list[dict] = []
-        for item in prepared:
-            filename = item.upload.filename or "upload.pdf"
-            if item.error is not None:
-                results.append(
-                    {"filename": filename, "status": "error", "error": item.error}
-                )
-                continue
-            try:
-                payload = await run_in_threadpool(
-                    analyze_upload,
-                    item.content or b"",
-                    filename,
-                    language,
-                    access_token,
-                    request.state.correlation_id,
-                )
-            except HTTPException as exc:
-                results.append(
-                    {
-                        "filename": filename,
-                        "status": "error",
-                        "error": exc.detail,
-                    }
-                )
-            else:
-                base_status = payload["base_analysis"]["status"]
-                results.append(
-                    {
-                        "filename": filename,
-                        "status": "partial" if base_status == "partial" else "ok",
-                        "report": payload,
-                    }
-                )
-        return JSONResponse(
-            {"analysis_access_token": access_token, "results": results}
         )
 
     @app.get("/analyses")
@@ -1196,8 +1131,7 @@ def create_app(
     app.state.location_resolver = resolver
     app.state.openai_settings = settings
     app.state.analysis_strategy = strategy
-    app.state.batch_max_files = max_files
-    app.state.batch_max_bytes = max_bytes
+    app.state.upload_max_bytes = max_upload_bytes
     app.state.company_researcher = selected_company_researcher
     app.state.education_researcher = selected_education_researcher
     app.state.linkedin_researcher = selected_linkedin_researcher
@@ -1266,39 +1200,6 @@ async def _read_upload(upload: UploadFile) -> bytes:
         return await upload.read()
     except OSError as exc:
         raise UploadReadError("upload read failed") from exc
-
-
-async def _prepare_batch(
-    files: list[UploadFile],
-    *,
-    max_files: int,
-    max_bytes: int,
-) -> list[_PreparedUpload]:
-    if len(files) > max_files:
-        raise HTTPException(status_code=413, detail="batch_file_limit_exceeded")
-
-    prepared: list[_PreparedUpload] = []
-    total_bytes = 0
-    for upload in files:
-        try:
-            content = await _read_upload(upload)
-        except AnalysisRuntimeError:
-            prepared.append(
-                _PreparedUpload(
-                    upload=upload,
-                    content=None,
-                    error="upload_read_error",
-                )
-            )
-            continue
-        total_bytes += len(content)
-        if total_bytes > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail="batch_request_size_limit_exceeded",
-            )
-        prepared.append(_PreparedUpload(upload=upload, content=content))
-    return prepared
 
 
 _SOURCE_CONTENT_TYPES = {

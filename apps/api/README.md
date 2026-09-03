@@ -15,7 +15,7 @@ PYTHONPATH=src .venv/bin/pytest -q
 
 The retained shared capabilities are:
 
-- upload and batch boundaries;
+- upload boundaries;
 - report schema validation;
 - SQLite ownership, audit, retention, and deletion;
 - phone, e-mail, literal URL, postal-candidate, and e-mail typo primitives;

@@ -228,11 +228,6 @@ export type AnalyzeItemResult =
       error: string;
     };
 
-export type AnalyzeBatchResponse = {
-  analysis_access_token?: string;
-  results: AnalyzeItemResult[];
-};
-
 export type AnalysisHistoryItem = {
   analysis_id: string;
   filename: string;

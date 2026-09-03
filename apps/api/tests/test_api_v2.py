@@ -84,33 +84,23 @@ def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
     assert loaded.json()["base_analysis"]["education"][0]["added_by_reviewer"] is True
 
 
-def test_batch_limits_are_enforced_before_analysis(tmp_path) -> None:
+def test_upload_size_limit_is_enforced_before_analysis(tmp_path) -> None:
     client = TestClient(
         create_app(
             db_path=tmp_path / "reports.db",
             openai_settings=OpenAISettings(enabled=False),
             analysis_strategy=FakeStrategy(),
-            batch_max_files=1,
-            batch_max_bytes=8,
+            upload_max_bytes=8,
         )
     )
 
-    too_many = client.post(
-        "/analyze/batch",
-        files=[
-            ("files", ("one.pdf", b"%PDF", "application/pdf")),
-            ("files", ("two.pdf", b"%PDF", "application/pdf")),
-        ],
-    )
     too_large = client.post(
-        "/analyze/batch",
-        files={"files": ("one.pdf", b"%PDF-1.7 text", "application/pdf")},
+        "/analyze",
+        files={"file": ("one.pdf", b"%PDF-1.7 text", "application/pdf")},
     )
 
-    assert too_many.status_code == 413
-    assert too_many.json()["detail"] == "batch_file_limit_exceeded"
     assert too_large.status_code == 413
-    assert too_large.json()["detail"] == "batch_request_size_limit_exceeded"
+    assert too_large.json()["detail"] == "upload_size_limit_exceeded"
 
 
 def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:

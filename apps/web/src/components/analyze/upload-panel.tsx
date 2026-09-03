@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CircleAlert, Clock3 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { AnalysisHistoryItem, AnalysisReport, AnalyzeBatchResponse, AnalyzeItemResult } from "@/lib/analyze-types";
+import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
@@ -57,21 +57,12 @@ export function UploadPanel() {
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
-    const form = new FormData(); form.append("files", file, file.name);
+    const form = new FormData(); form.append("file", file, file.name);
     const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage } });
-    const payload = await response.json().catch(() => ({})) as AnalyzeBatchResponse & { error?: string };
+    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
-    const result = payload.results?.[0];
-    if (!result) return { filename: file.name, status: "error", error: t("noResult") };
-    return result.status === "error"
-      ? { ...result, error: t("analysisFailed") }
-      : {
-          ...result,
-          report: withAnalysisAccessToken(
-            result.report,
-            payload.analysis_access_token,
-          ),
-        };
+    if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
+    return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(payload, payload.analysis_access_token) };
   }
 
   async function submit() {
