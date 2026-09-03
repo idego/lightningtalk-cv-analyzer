@@ -271,3 +271,57 @@ def test_source_document_is_purged_with_expired_analysis(tmp_path) -> None:
     assert store.get_source_document(analysis_id) is None
     assert _count_source_documents(app) == 0
     assert client.get(f"/analyses/{analysis_id}/document", headers=owner_headers).status_code == 404
+
+
+def test_history_is_served_while_an_analysis_is_running(tmp_path) -> None:
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStrategy(FakeStrategy):
+        def analyze(self, request):
+            started.set()
+            assert release.wait(timeout=10), "analysis was never released"
+            return super().analyze(request)
+
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=False),
+        analysis_strategy=BlockingStrategy(),
+    )
+    headers = {"X-Analysis-Access-Token": "owner-token"}
+    outcome: dict[str, object] = {}
+    # The context manager shares one event loop across requests, like uvicorn.
+    with TestClient(app) as client:
+        _assert_history_served_during_analysis(client, headers, started, release, outcome)
+
+
+def _assert_history_served_during_analysis(client, headers, started, release, outcome) -> None:
+    import threading
+
+    def run_analysis() -> None:
+        outcome["analyze"] = client.post(
+            "/analyze",
+            files={"file": ("slow.pdf", b"%PDF-1.7 slow", "application/pdf")},
+            headers=headers,
+        ).status_code
+
+    worker = threading.Thread(target=run_analysis)
+    worker.start()
+    try:
+        assert started.wait(timeout=5), "analysis never started"
+        history: dict[str, object] = {}
+        reader = threading.Thread(
+            target=lambda: history.update(
+                status=client.get("/analyses", headers=headers).status_code
+            )
+        )
+        reader.start()
+        reader.join(timeout=3)
+        assert not reader.is_alive(), "GET /analyses blocked behind the running analysis"
+        assert history["status"] == 200
+    finally:
+        release.set()
+        worker.join(timeout=10)
+    assert outcome["analyze"] == 200

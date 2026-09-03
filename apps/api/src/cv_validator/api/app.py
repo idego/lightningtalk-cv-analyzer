@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from cv_validator.analysis import (
@@ -295,6 +296,9 @@ def create_app(
         else _positive_int_env("CV_VALIDATOR_BATCH_MAX_BYTES", DEFAULT_BATCH_MAX_BYTES)
     )
     research_locks = _ResearchLockRegistry()
+    # Analyses run off the event loop so reads stay responsive, but the shared
+    # strategy (one document converter) still processes one CV at a time.
+    analysis_lock = threading.Lock()
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
@@ -496,6 +500,18 @@ def create_app(
         access_token: str,
         correlation_id: str,
     ) -> dict:
+        with analysis_lock:
+            return _analyze_upload(
+                content, filename, report_language, access_token, correlation_id
+            )
+
+    def _analyze_upload(
+        content: bytes,
+        filename: str,
+        report_language: str,
+        access_token: str,
+        correlation_id: str,
+    ) -> dict:
         analysis_id = str(uuid4())
         try:
             store.create_analysis_run(analysis_id, correlation_id, access_token)
@@ -659,7 +675,8 @@ def create_app(
             raise HTTPException(status_code=500, detail="upload_read_error") from exc
         access_token = x_analysis_access_token or secrets.token_urlsafe(32)
         return JSONResponse(
-            analyze_upload(
+            await run_in_threadpool(
+                analyze_upload,
                 content,
                 filename,
                 _report_language(x_report_language),
@@ -691,7 +708,8 @@ def create_app(
                 )
                 continue
             try:
-                payload = analyze_upload(
+                payload = await run_in_threadpool(
+                    analyze_upload,
                     item.content or b"",
                     filename,
                     language,
