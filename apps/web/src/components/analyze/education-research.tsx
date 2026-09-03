@@ -84,21 +84,17 @@ export function EducationResearchPanel({
     await getAutoResearchOrchestrator()?.runManual(report, settings, "education");
   }
 
-  async function refreshResearch() {
-    await getAutoResearchOrchestrator()?.runRefresh(report, settings, "education");
-  }
-
   return <HoverDisclosure
     className="rounded-md border p-3"
     triggerClassName="font-medium"
     title={t("educationResearch")}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
-    action={<ResearchAction
+    action={completed ? undefined : <ResearchAction
       busy={busy}
       disabled={!enabled || busy}
-      onClick={completed ? refreshResearch : startResearch}
-      label={completed ? (settings.uiLanguage === "pl" ? "Odśwież" : "Refresh") : t("start")}
+      onClick={startResearch}
+      label={t("start")}
       busyLabel={t("researching")}
       busyAriaLabel={t("educationResearchInProgress")}
       disabledReason={!enabled ? t("noEducationEntries") : undefined}

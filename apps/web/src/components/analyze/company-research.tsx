@@ -63,10 +63,6 @@ export function CompanyResearchPanel({
     await getAutoResearchOrchestrator()?.runManual(report, settings, "company");
   }
 
-  async function refreshResearch() {
-    await getAutoResearchOrchestrator()?.runRefresh(report, settings, "company");
-  }
-
   return (
     <HoverDisclosure
       className="rounded-md border p-3"
@@ -74,12 +70,12 @@ export function CompanyResearchPanel({
       title={t("companyResearch")}
       collapsible={hasContent}
       contentClassName="space-y-3 pt-3"
-      action={(
+      action={completed ? undefined : (
         <ResearchAction
           busy={busy}
           disabled={!enabled || busy}
-          onClick={completed ? refreshResearch : startResearch}
-          label={completed ? (settings.uiLanguage === "pl" ? "Odśwież" : "Refresh") : t("start")}
+          onClick={startResearch}
+          label={t("start")}
           busyLabel={t("researching")}
           busyAriaLabel={t("companyResearchInProgress")}
           disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowLeft, PanelRightOpen } from "lucide-react";
+import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import type { AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { ResultsList } from "@/components/analyze/results-list";
@@ -38,7 +38,7 @@ export function AnalysisWorkspace({
     resizePreview(previewShare + (event.key === "ArrowLeft" ? 2 : -2));
   }
   const columns = !previewVisible || !hasOriginalFiles || isMobile
-    ? "minmax(0, 1fr)"
+    ? isMobile ? "minmax(0, 1fr)" : "minmax(0, 1fr) 0px minmax(0, 0fr)"
     : `minmax(0, ${100 - previewShare}fr) 16px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
@@ -50,13 +50,25 @@ export function AnalysisWorkspace({
       {!hasOriginalFiles ? <div className="flex flex-col items-end gap-1.5">
         <p className="text-sm text-foreground/75">{t("originalNotRetained")}</p>
         <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button>
-      </div> : !previewVisible ? <Button variant="ghost" size="sm" onClick={() => setPreviewVisible(true)}><PanelRightOpen />{t("showCv")}</Button> : null}
+      </div> : <Button variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
+        {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
+        {t(previewVisible ? "hideCv" : "showCv")}
+      </Button>}
     </div>
-    <div ref={hostRef} className="grid min-w-0 items-start gap-y-3" style={{ gridTemplateColumns: columns }}>
+    <div ref={hostRef} className="grid min-w-0 items-start gap-y-3 transition-[grid-template-columns] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
-      {previewVisible && active.file ? <>
-        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={0} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className="group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-full cursor-col-resize touch-none focus-visible:outline-none"><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:bg-primary group-active/separator:bg-primary" /></div> : null}
-        <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
+      {active.file ? <>
+        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={previewVisible ? 0 : -1} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className={`group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-full touch-none focus-visible:outline-none ${previewVisible ? "cursor-col-resize" : "pointer-events-none opacity-0"}`}><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:bg-primary group-active/separator:bg-primary" /></div> : null}
+        <div
+          aria-hidden={!previewVisible}
+          inert={!previewVisible}
+          className={`grid min-w-0 transition-[grid-template-rows,opacity] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none ${previewVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          style={{ gridTemplateRows: previewVisible ? "minmax(0, 1fr)" : "minmax(0, 0fr)" }}
+        >
+          <div className="min-h-0 min-w-0 overflow-hidden">
+            <DocumentPreview file={active.file} onHide={() => setPreviewVisible(false)} />
+          </div>
+        </div>
       </> : null}
     </div>
   </div>;

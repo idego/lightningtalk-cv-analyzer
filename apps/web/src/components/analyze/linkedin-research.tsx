@@ -119,22 +119,24 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}</span>}
+    title={<span className="font-medium">{t("linkedinProfiles")}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
-    action={discoveryCompleted ? undefined : <ResearchAction
-      busy={discoveryBusy}
-      disabled={!enabled || discoveryBusy}
-      onClick={discover}
-      label={t("start")}
-      busyLabel={t("discovering")}
-      busyAriaLabel={t("linkedinDiscoveryInProgress")}
-      disabledReason={!enabled ? t("noCandidateDetails") : undefined}
-    />}
+    action={<div className="flex items-center gap-2">
+      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
+      {!discoveryCompleted ? <ResearchAction
+        busy={discoveryBusy}
+        disabled={!enabled || discoveryBusy}
+        onClick={discover}
+        label={t("start")}
+        busyLabel={t("discovering")}
+        busyAriaLabel={t("linkedinDiscoveryInProgress")}
+        disabledReason={!enabled ? t("noCandidateDetails") : undefined}
+      /> : null}
+    </div>}
   >
     {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}
     {visibleDiscovery?.linkedin_not_found ? <div className="rounded border border-amber-500/30 p-2 text-sm"><Badge variant="outline">{t("noProfileFound")}</Badge><p className="mt-2">{visibleDiscovery.not_found_caveat}</p></div> : null}
-    {visibleDiscovery?.outcome === "ambiguous" ? <Badge variant="outline">{t("severalPossibleMatches")}</Badge> : null}
     <div className="space-y-2">
       {sortByResearchConfidence(visibleDiscovery?.possible_profiles ?? []).map((profile, profileIndex) => (
         <LinkedInProfileCard
