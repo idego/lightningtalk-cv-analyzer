@@ -15,6 +15,7 @@ export function FeedbackAccess() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Member["role"]>("reviewer");
   const [error, setError] = useState("");
+  const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/feedback/access", { cache: "no-store" });
@@ -49,7 +50,12 @@ export function FeedbackAccess() {
   }
 
   async function revoke(memberEmail: string) {
+    if (confirmRevoke !== memberEmail) {
+      setConfirmRevoke(memberEmail);
+      return;
+    }
     setError("");
+    setConfirmRevoke(null);
     const response = await fetch("/api/feedback/access", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -69,9 +75,9 @@ export function FeedbackAccess() {
     if (response.ok) setCollectionEnabled(next);
   }
 
-  return <section className="mx-auto max-w-3xl space-y-6">
+  return <section className="mx-auto max-w-6xl space-y-6">
     <div className="space-y-3">
-      <Button variant="ghost" nativeButton={false} className="-ml-2 w-fit" render={<Link href="/feedback"><ArrowLeft />{t("back")}</Link>} />
+      <Button variant="outline" nativeButton={false} className="w-fit" render={<Link href="/feedback"><ArrowLeft data-icon="inline-start" />{t("back")}</Link>} />
       <div><h1 className="text-2xl font-semibold">{t("feedbackAccess")}</h1><p className="text-sm text-muted-foreground">{t("feedbackAccessDescription")}</p></div>
     </div>
     <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
@@ -84,6 +90,21 @@ export function FeedbackAccess() {
       <button className="rounded-md bg-primary px-4 py-2 text-primary-foreground" onClick={grant}>{t("grantAccess")}</button>
     </div>
     {error ? <p className="text-sm text-destructive">{error}</p> : null}
-    <ul className="divide-y rounded-lg border">{members.map(member => <li key={member.email} className="flex items-center justify-between p-3"><span>{member.email} · {t(member.role)}</span><button className="text-sm text-destructive" onClick={() => revoke(member.email)}>{t("revokeAccess")}</button></li>)}</ul>
+    <ul className="divide-y rounded-lg border">{members.map(member => {
+      const awaitingConfirmation = confirmRevoke === member.email;
+      return <li key={member.email} className="flex items-center justify-between p-3">
+        <span>{member.email} · {t(member.role)}</span>
+        <Button
+          variant={awaitingConfirmation ? "destructive" : "ghost"}
+          size="sm"
+          className={awaitingConfirmation ? undefined : "text-destructive hover:text-destructive"}
+          onBlur={() => setConfirmRevoke(null)}
+          onKeyDown={(event) => { if (event.key === "Escape") setConfirmRevoke(null); }}
+          onClick={() => void revoke(member.email)}
+        >
+          {t(awaitingConfirmation ? "clickAgainToConfirm" : "revokeAccess")}
+        </Button>
+      </li>;
+    })}</ul>
   </section>;
 }
