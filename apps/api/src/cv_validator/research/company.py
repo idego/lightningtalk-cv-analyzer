@@ -16,9 +16,9 @@ from cv_validator.research.domain import (
 )
 from cv_validator.research.subjects import accepted_records, subject_key, supported_field
 
-RESEARCH_VERSION = "company-research-v1"
-PROMPT_VERSION = "company-research-prompt-v3"
-SCHEMA_VERSION = "company-research-schema-v1"
+RESEARCH_VERSION = "company-research-v2"
+PROMPT_VERSION = "company-research-prompt-v4"
+SCHEMA_VERSION = "company-research-schema-v2"
 MAX_ORGANIZATIONS = 12
 
 
@@ -88,14 +88,21 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
     for organization in payload["organizations"]:
         claims_public_facts = organization["existence"] != "insufficient_evidence" or any(
             organization[key] is not None
-            for key in ("activity", "operating_dates", "location", "official_website")
-        ) or bool(organization["company_pages"] or organization["registries"])
+            for key in ("activity", "official_website")
+        ) or bool(organization["operating_periods"] or organization["offices"] or organization["company_pages"] or organization["registries"])
         if claims_public_facts and not organization["findings"]:
             raise CompanyResearchInvalidResponse("claims_without_findings")
+        for period in organization["operating_periods"]:
+            if period["from"] is None and period["to"] is None:
+                raise CompanyResearchInvalidResponse("empty_operating_period")
+            if period["ongoing"] and period["to"] is not None:
+                raise CompanyResearchInvalidResponse("contradictory_operating_period")
         if organization["limited_online_presence"]:
             reason = organization["limited_online_presence_reason"]
             if (
                 organization["existence"] != "insufficient_evidence"
+                or organization["offices"]
+                or organization["operating_periods"]
                 or not isinstance(reason, str)
                 or "does not establish existence or absence" not in reason.casefold()
                 or not payload["searches_performed"]

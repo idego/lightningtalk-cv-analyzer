@@ -249,8 +249,8 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
             organization.update({
                 "existence": "insufficient_evidence",
                 "activity": None,
-                "operating_dates": None,
-                "location": None,
+                "operating_periods": [],
+                "offices": [],
                 "relationship": None,
                 "official_website": None,
                 "company_pages": [],

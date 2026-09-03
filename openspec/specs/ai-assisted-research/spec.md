@@ -63,9 +63,15 @@ Research is decision support. It MUST NOT claim that a candidate is dishonest, f
 ### Requirement: Company research
 Company research SHALL check public evidence for organization existence, activity, operating dates, location, official pages, and registries. Missing public evidence SHALL remain inconclusive and MUST NOT be described as proof that an organization is fake. High confidence SHALL require multiple mutually consistent authoritative signals for the exact organization; a name-only search result MUST NOT receive high confidence.
 
+Company research SHALL return each supported office as a separate map-searchable address with an optional short comment. It SHALL return operating periods as separate date fields with an optional short comment. Explanatory prose MUST NOT be placed in address or date fields.
+
 #### Scenario: Company has limited public evidence
 - **WHEN** no reliable official page or registry result is found
 - **THEN** the result remains inconclusive with low confidence and explains the search limits
+
+#### Scenario: Company has several reported offices
+- **WHEN** public evidence supports more than one office
+- **THEN** each office is displayed separately and links to its own Google Maps search
 
 ### Requirement: Education research
 Education research SHALL check public evidence for institutions, programs, degrees, certificates, dates, and location. Accreditation MAY be retained as backend research metadata but SHALL NOT be shown as a recruiter-facing status badge. A cited institution-country difference MAY be shown for manual review but is not evidence of a false CV claim. High confidence SHALL require consistent authoritative support for the exact institution and relevant credential context.

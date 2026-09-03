@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef } from "react";
-import { Building2, ExternalLink } from "lucide-react";
+import { BriefcaseBusiness, Building2, CalendarDays, ExternalLink, Globe2, MapPin } from "lucide-react";
 import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
@@ -17,6 +17,7 @@ import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { companyGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function isResearchableCompany(value: string) {
   const normalized = value.toLocaleLowerCase().replace(/[^a-z]+/g, " ").trim();
@@ -114,7 +115,9 @@ type Organization = CompanyResearch["organizations"][number];
 
 function CompanyResult({ organization }: { organization: Organization }) {
   const { t } = useCopy();
-  const searchHref = companyGoogleSearchUrl({ organization: organization.query_subject, location: organization.location });
+  const offices = organization.offices ?? [];
+  const operatingPeriods = organization.operating_periods ?? [];
+  const searchHref = companyGoogleSearchUrl({ organization: organization.query_subject, location: offices[0]?.address });
   const sources = Array.from(new Set([
     ...(organization.official_website ? [organization.official_website] : []),
     ...organization.company_pages,
@@ -152,14 +155,40 @@ function CompanyResult({ organization }: { organization: Organization }) {
         <dl className="divide-y rounded-md border">
           <FactRow
             label={t("reportedOfficeOrLocation")}
-            value={organization.location ? <ExternalFactLink href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(organization.location)}`} value={organization.location} /> : t("notConfirmed")}
+            icon={<MapPin className="size-4" />}
+            value={offices.length ? (
+              <ul className="list-disc space-y-2 pl-4">
+                {offices.map((office, index) => (
+                  <li key={`${office.address}-${index}`}>
+                    <ExternalFactLink href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(office.address)}`} value={office.address} />
+                    {office.comment ? <p className="mt-0.5 text-xs text-muted-foreground">{office.comment}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : t("notConfirmed")}
           />
           <FactRow
             label={t("officialWebsite")}
+            icon={<Globe2 className="size-4" />}
             value={organization.official_website ? <ExternalFactLink href={organization.official_website} value={organization.official_website} /> : t("notConfirmed")}
           />
-          {organization.activity ? <FactRow label={t("activity")} value={organization.activity} /> : null}
-          {organization.operating_dates ? <FactRow label={t("operatingDates")} value={organization.operating_dates} /> : null}
+          {organization.activity ? <FactRow label={t("activity")} icon={<BriefcaseBusiness className="size-4" />} value={organization.activity} /> : null}
+          {operatingPeriods.length ? (
+            <FactRow
+              label={t("operatingDates")}
+              icon={<CalendarDays className="size-4" />}
+              value={
+                <ul className="list-disc space-y-2 pl-4">
+                  {operatingPeriods.map((period, index) => (
+                    <li key={`${period.from}-${period.to}-${index}`}>
+                      <span>{formatOperatingPeriod(period, t("present"), t("until"))}</span>
+                      {period.comment ? <p className="mt-0.5 text-xs text-muted-foreground">{period.comment}</p> : null}
+                    </li>
+                  ))}
+                </ul>
+              }
+            />
+          ) : null}
         </dl>
 
         {organization.findings.length ? (
@@ -180,14 +209,36 @@ function CompanyResult({ organization }: { organization: Organization }) {
   );
 }
 
+function formatOperatingPeriod(period: Organization["operating_periods"][number], present: string, until: string) {
+  if (period.from && period.ongoing) return `${period.from} – ${present}`;
+  if (period.from && period.to) return `${period.from} – ${period.to}`;
+  if (period.from) return period.from;
+  return `${until} ${period.to}`;
+}
+
 function ExternalFactLink({ href, value }: { href: string; value: string }) {
   return <a className="inline-flex items-center gap-1 break-all underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground" href={href} target="_blank" rel="noreferrer">{value}<ExternalLink className="size-3 shrink-0" aria-hidden /></a>;
 }
 
-function FactRow({ label, value }: { label: string; value: ReactNode }) {
+function FactRow({ label, icon, value }: { label: string; icon: ReactNode; value: ReactNode }) {
   return (
-    <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_1fr]">
-      <dt className="text-muted-foreground">{label}</dt>
+    <div className="grid items-start gap-1 px-3 py-2 sm:grid-cols-[2.25rem_1fr]">
+      <dt>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                tabIndex={0}
+                aria-label={label}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {icon}
+              </span>
+            }
+          />
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      </dt>
       <dd>{value}</dd>
     </div>
   );

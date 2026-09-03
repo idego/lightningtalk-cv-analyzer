@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "outcome", "organizations", "searches_performed", "search_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "company-research-schema-v1"},
+    "schema_version": {"type": "string", "const": "company-research-schema-v2"},
     "outcome": {"type": "string", "enum": ["completed", "insufficient_evidence"]},
     "organizations": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/organization"}},
     "searches_performed": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}},
@@ -12,6 +12,25 @@
   },
   "$defs": {
     "nullableString": {"type": ["string", "null"]},
+    "nullableShortString": {"type": ["string", "null"], "maxLength": 500},
+    "office": {
+      "type": "object", "additionalProperties": false,
+      "required": ["address", "comment"],
+      "properties": {
+        "address": {"type": "string", "minLength": 1, "maxLength": 300},
+        "comment": {"$ref": "#/$defs/nullableShortString"}
+      }
+    },
+    "operatingPeriod": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from", "to", "ongoing", "comment"],
+      "properties": {
+        "from": {"type": ["string", "null"], "maxLength": 32},
+        "to": {"type": ["string", "null"], "maxLength": 32},
+        "ongoing": {"type": "boolean"},
+        "comment": {"$ref": "#/$defs/nullableShortString"}
+      }
+    },
     "finding": {
       "type": "object", "additionalProperties": false,
       "required": ["kind", "summary", "source_urls", "confidence", "uncertainty"],
@@ -25,13 +44,13 @@
     },
     "organization": {
       "type": "object", "additionalProperties": false,
-      "required": ["query_subject", "existence", "activity", "operating_dates", "location", "relationship", "official_website", "company_pages", "registries", "confidence", "uncertainty", "findings", "limited_online_presence", "limited_online_presence_reason"],
+      "required": ["query_subject", "existence", "activity", "operating_periods", "offices", "relationship", "official_website", "company_pages", "registries", "confidence", "uncertainty", "findings", "limited_online_presence", "limited_online_presence_reason"],
       "properties": {
         "query_subject": {"type": "string", "minLength": 1},
         "existence": {"type": "string", "enum": ["supported", "conflicting", "insufficient_evidence"]},
         "activity": {"$ref": "#/$defs/nullableString"},
-        "operating_dates": {"$ref": "#/$defs/nullableString"},
-        "location": {"$ref": "#/$defs/nullableString"},
+        "operating_periods": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/operatingPeriod"}},
+        "offices": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/office"}},
         "relationship": {"$ref": "#/$defs/nullableString"},
         "official_website": {"$ref": "#/$defs/nullableString"},
         "company_pages": {"type": "array", "items": {"type": "string", "pattern": "^https://"}},

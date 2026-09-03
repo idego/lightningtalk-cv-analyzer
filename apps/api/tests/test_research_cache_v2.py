@@ -40,14 +40,14 @@ class AdaptiveCompanyResearcher:
 
 def company_result() -> dict:
     return {
-        "schema_version": "company-research-schema-v1",
+        "schema_version": "company-research-schema-v2",
         "outcome": "completed",
         "organizations": [{
             "query_subject": "Example Systems",
             "existence": "supported",
             "activity": "Software services",
-            "operating_dates": None,
-            "location": None,
+            "operating_periods": [],
+            "offices": [],
             "relationship": "employer",
             "official_website": "https://example.com/",
             "company_pages": [],

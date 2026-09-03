@@ -18,11 +18,21 @@ sites and registries. Cite every factual finding with URLs actually returned by 
 search. State confidence and uncertainty. Never infer fraud, shell-company status,
 candidate identity, nationality, or physical location.
 
+Return each publicly reported office as a separate `offices` item. Put only one
+map-searchable address or place name in `address`. Do not join several offices or
+explanations into that field. Use the optional `comment` only when brief context is
+needed, such as headquarters status, a source conflict, or an incomplete address.
+
+Return operating dates as `operating_periods`. Keep `from` and `to` to a year or an
+ISO date. Set `ongoing` only when current operation is supported. Put explanations,
+registry context, or conflicting dates in the optional `comment`, not in the date
+fields. Omit unsupported offices and periods instead of guessing.
+
 Use at most four searches total. Record the actual searches and material limits.
 When evidence is insufficient, use `insufficient_evidence`. Set
 `limited_online_presence` to true only together with `existence:
-insufficient_evidence`, empty company pages and registries, and null activity,
-dates, location, and website; it means only that the bounded public searches found
+insufficient_evidence`, empty company pages, registries, offices, and operating
+periods, and null activity and website; it means only that the bounded public searches found
 little reliable indexed evidence. If you found any cited evidence for the
 organization, set `limited_online_presence` to false. Its reason must include the
 exact caveat "does not establish existence or absence". Return only the strict

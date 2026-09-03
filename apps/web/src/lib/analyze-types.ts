@@ -60,8 +60,16 @@ export type CompanyResearch = {
     query_subject: string;
     existence: "supported" | "conflicting" | "insufficient_evidence";
     activity: string | null;
-    operating_dates: string | null;
-    location: string | null;
+    operating_periods: Array<{
+      from: string | null;
+      to: string | null;
+      ongoing: boolean;
+      comment: string | null;
+    }>;
+    offices: Array<{
+      address: string;
+      comment: string | null;
+    }>;
     relationship: string | null;
     official_website: string | null;
     company_pages: string[];

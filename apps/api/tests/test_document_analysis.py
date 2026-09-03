@@ -686,7 +686,7 @@ def test_company_research_rejections_carry_rule_names() -> None:
     organization = {
         "query_subject": "Example Systems",
         "existence": "supported",
-        "activity": None, "operating_dates": None, "location": None, "official_website": None,
+        "activity": None, "operating_periods": [], "offices": [], "official_website": None,
         "company_pages": [], "registries": [], "findings": [{"claim": "x", "source_url": "https://example.com"}],
         "confidence": "low", "uncertainty": "n/a",
         "limited_online_presence": True,

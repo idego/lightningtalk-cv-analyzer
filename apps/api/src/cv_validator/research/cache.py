@@ -148,7 +148,7 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
         common["organizations"] = []
         for item in result["organizations"]:
             cached = {key: deepcopy(item[key]) for key in (
-                "query_subject", "existence", "activity", "operating_dates", "location",
+                "query_subject", "existence", "activity", "operating_periods", "offices",
                 "official_website", "company_pages", "registries", "confidence", "uncertainty",
                 "findings", "limited_online_presence", "limited_online_presence_reason",
             )}
