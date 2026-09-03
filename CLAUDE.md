@@ -16,16 +16,16 @@ In addition to the rules in `AGENTS.md`:
   improvising when working on spec-driven changes.
 - **Slash commands** are in `.claude/commands/opsx/` (`propose`, `apply`,
   `explore`, `archive`). Cursor equivalents are in `.cursor/commands/`.
-- **Docker is the default runtime** for this project. Prefer
-  `docker compose up --build` and
+- **Docker is the default runtime** for this project. Prefer `make dev`
+  (which wraps compose with preflight, `.env.local`, and the dev overlay) and
   `docker compose --profile test run --rm test` over local pip installs
   unless the user asks otherwise.
-- **Playground project** — lives in `code/_playground/cv-validator/`. No
-  production deployment or external stakeholders; keep changes focused
-  and proportionate.
+- **Internal playground** — no production deployment or external
+  stakeholders; keep changes focused and proportionate.
 - **Conventional Commits** — when creating git commits in this repo, always
-  follow Conventional Commits (see `AGENTS.md` §4). Never use free-form or
-  sentence-case commit subjects.
+  follow Conventional Commits (see `AGENTS.md` "Code conventions"). Never use
+  free-form or sentence-case commit subjects.
 
 For everything else (project overview, commands, domain constraints,
-OpenSpec layout, file map), see `AGENTS.md`.
+OpenSpec rules), see `AGENTS.md`; the capability specs are in
+`openspec/specs/`.

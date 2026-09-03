@@ -15,7 +15,7 @@ The analyze UI SHALL provide manual Google Search actions for each visible compa
 
 #### Scenario: Search a completed research subject
 - **WHEN** Company Research shows an organization or Education Research shows a credential
-- **THEN** that result provides a labeled Google Search action in its header area
+- **THEN** that result provides the same compact icon-only Google Search action in its header area, next to its confidence and feedback controls
 
 #### Scenario: Repeated subject entries
 - **WHEN** the overview shows the same company or institution in more than one entry
@@ -45,19 +45,19 @@ Google Search actions SHALL construct their query only from the visible public s
 - **THEN** its action searches Google for the institution alone
 
 ### Requirement: Safe and accessible external search navigation
-Each Google Search action SHALL use the fixed HTTPS Google Search origin, encode the complete query as the `q` search parameter, and open in a new browser tab with a referrer-protecting relationship. The compact action SHALL use a search icon with a localized accessible name and tooltip. The labeled action SHALL reuse the existing monochrome Google SVG and show `Search with Google` in English or `Wyszukaj w Google` in Polish. Every action MUST remain keyboard accessible and visibly focusable.
+Each Google Search action SHALL use the fixed HTTPS Google Search origin, encode the complete query as the `q` search parameter, and open in a new browser tab with a referrer-protecting relationship. Every Google Search action SHALL be a compact icon-only control that uses a search icon with a localized accessible name and tooltip naming the searched subject (`Search {subject} with Google` in English, `Wyszukaj {subject} w Google` in Polish), falling back to `Search with Google` / `Wyszukaj w Google` when no subject is available. The LinkedIn Profiles header shortcut SHALL follow the same pattern with `Search LinkedIn for {subject}` / `Wyszukaj {subject} na LinkedIn`. Every action MUST remain keyboard accessible and visibly focusable.
 
 #### Scenario: Query contains URL-sensitive characters
 - **WHEN** the visible subject contains whitespace, diacritics, an ampersand, or another URL-sensitive character
 - **THEN** the action opens a valid Google Search URL whose `q` parameter decodes to the complete intended query
 
 #### Scenario: User activates a search action
-- **WHEN** the recruiter activates either search-action variant
+- **WHEN** the recruiter activates a search action
 - **THEN** Google Search opens in a new tab and the current analysis remains available
 
 #### Scenario: Compact action is used without visible text
-- **WHEN** the overview renders an icon-only action for a subject
-- **THEN** assistive technology and the tooltip identify that the action searches that subject in Google
+- **WHEN** the overview or a research result renders an icon-only action for a subject
+- **THEN** the accessible name and the tooltip both include that subject, for example `Search Edclub with Google`
 
 #### Scenario: Interface language changes
 - **WHEN** the UI language is Polish or English

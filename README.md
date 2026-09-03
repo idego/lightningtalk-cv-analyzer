@@ -25,7 +25,7 @@ Every semantic value needs literal source evidence. A reviewer may add a missing
 only when the same evidence and relation validation accepts it.
 
 The specialists use pinned `gpt-5.6-luna` with reasoning effort `none`; the
-reviewer uses `low`. Responses API storage is disabled and base analysis uses
+reviewer uses `low`; public research calls use `medium`. Responses API storage is disabled and base analysis uses
 no tools. Without AI credentials the strategy still converts documents and
 returns an explicit unavailable/partial result instead of another parser.
 
@@ -43,10 +43,13 @@ the authoritative executable contracts.
 make dev
 make dev-down
 cd apps/api && PYTHONPATH=src .venv/bin/pytest -q
-cd apps/web && npm test
-cd apps/web && npm run typecheck
-cd apps/web && npm run build
+cd apps/web && pnpm test        # requires Node 22 (type stripping)
+cd apps/web && pnpm typecheck
+cd apps/web && pnpm build
 ```
+
+`make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
+through `docker-compose.dev.yml`; `make deploy` never does.
 
 The isolated web app is available at `http://127.0.0.1:3021/analyze`. Compose
 uses project `cv-analyzer-docling-luna`, API database
@@ -105,7 +108,10 @@ multiple consistent public signals, and LinkedIn discovery requires both name
 support and compatible experience or education context. Results remain possible
 matches, never identity verification. The LinkedIn Profiles header also provides
 one user-initiated people-search shortcut; it does not replace or trigger LinkedIn
-Research and no per-profile search shortcuts are shown.
+Research and no per-profile search shortcuts are shown. Each company and
+education entry in the CV overview, and each completed company or education
+research result, carries a compact Google Search shortcut built only from the
+visible public subject; self-employment entries get none.
 
 ## Supported documents and limitations
 

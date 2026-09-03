@@ -36,13 +36,16 @@ Old pilot reports are not a compatibility requirement.
 | Run the stack | `make dev` |
 | Stop stack | `make dev-down` |
 | Backend tests | `cd apps/api && PYTHONPATH=src .venv/bin/pytest -q` |
-| Web tests | `cd apps/web && npm test` |
-| Web typecheck | `cd apps/web && npm run typecheck` |
-| Web build | `cd apps/web && npm run build` |
+| Web tests | `cd apps/web && pnpm test` (Node 22) |
+| Web typecheck | `cd apps/web && pnpm typecheck` |
+| Web build | `cd apps/web && pnpm build` |
 
-API endpoints include `GET /health`, `POST /analyze`,
-`POST /analyze/batch`, analysis lifecycle endpoints, settings/retention, and
-company/education/LinkedIn research.
+API endpoints include `GET /health`, `GET /operations/{metrics,status}`,
+`POST /analyze`, `POST /analyze/batch`, analysis lifecycle endpoints,
+settings/retention, per-analysis feedback, the `/internal/feedback` inbox
+(authorized only by the web proxy), and company/education/LinkedIn research.
+The browser reaches the API only through Next.js routes under
+`apps/web/src/app/api/`.
 
 ## Code conventions
 
@@ -52,7 +55,10 @@ company/education/LinkedIn research.
   recent analyses, GeoNames, and research unless the owner changes scope.
 - Match existing style and keep diffs focused.
 - Use environment variables for runtime configuration.
-- Use Conventional Commits.
+- Use Conventional Commits (`<type>[scope]: <description>`).
+- Every capability lives in an `openspec/specs/<capability>/spec.md`; ship a
+  new feature through `/opsx:propose` → apply → archive, or update the spec in
+  the same change when adjusting behavior.
 - Create commits only when explicitly asked.
 - Never push unless explicitly asked.
 - If elevated access is needed, use graphical Polkit rather than `sudo`.

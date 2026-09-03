@@ -46,6 +46,11 @@ target.
 - **WHEN** a user opens the app shell
 - **THEN** an `Analyze` navigation item and corresponding analysis screen are present
 
+#### Scenario: Role-gated Feedback route
+- **WHEN** the signed-in user holds an active feedback `owner` or `reviewer` role
+- **THEN** a `Feedback` navigation item pointing at `/feedback` is also present
+- **AND** users without a role see no `Feedback` item and are redirected from `/feedback` to `/analyze`
+
 #### Scenario: Layout structure
 - **WHEN** shell pages are rendered
 - **THEN** they are wrapped by sidebar + header + main content + footer structure suitable for later auth/upload pages

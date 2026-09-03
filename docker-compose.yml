@@ -5,7 +5,7 @@ services:
       target: feedback-init
     command: ["node", "scripts/init-feedback-access.mjs", "/config/feedback-access.json"]
     environment:
-      BETTER_AUTH_DB_PATH: /app/data/docling_luna_auth.db
+      BETTER_AUTH_DB_PATH: ${BETTER_AUTH_DB_PATH:-/app/data/docling_luna_auth.db}
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
     volumes:
       - web_auth_data:/app/data
@@ -71,8 +71,6 @@ services:
       target: runtime
     expose:
       - "8000"
-    ports:
-      - "127.0.0.1:8001:8000"
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/docling_luna.db}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}

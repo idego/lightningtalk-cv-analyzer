@@ -119,7 +119,7 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}</span>}
+    title={<span className="flex flex-wrap items-center gap-2 font-medium">{t("linkedinProfiles")}{searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedInFor", { subject: searchKeyword ?? "" })}><Search aria-hidden /></a>} />} /><TooltipContent>{t("searchLinkedInFor", { subject: searchKeyword ?? "" })}</TooltipContent></Tooltip> : null}</span>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     action={discoveryCompleted ? undefined : <ResearchAction

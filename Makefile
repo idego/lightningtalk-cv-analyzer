@@ -11,6 +11,7 @@ COMPOSE_FILES := -f docker-compose.yml -f docker-compose.reference-data.yml
 else
 COMPOSE_FILES := -f docker-compose.yml
 endif
+DEV_COMPOSE_FILES := $(COMPOSE_FILES) -f docker-compose.dev.yml
 
 dev:
 	@./scripts/runtime-preflight.sh dev .env.local $(REFERENCE_DATA_MODE)
@@ -20,12 +21,13 @@ dev:
 	BASE_URL=http://localhost:$(WEB_PORT) \
 	BETTER_AUTH_URL=http://localhost:$(WEB_PORT) \
 	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) \
-	docker --context $(DOCKER_CONTEXT) compose $(COMPOSE_FILES) --env-file .env.local up --build -d --wait
+	docker --context $(DOCKER_CONTEXT) compose $(DEV_COMPOSE_FILES) --env-file .env.local up --build -d --wait
 	@./scripts/verify-stack.sh http://127.0.0.1:$(WEB_PORT) $(ALLOW_DEGRADED)
 	@echo "CV Analyzer: http://127.0.0.1:$(WEB_PORT)/analyze"
+	@echo "API docs (dev only): http://127.0.0.1:$${API_DEV_PORT:-8001}/docs"
 
 dev-down:
-	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker --context $(DOCKER_CONTEXT) compose $(COMPOSE_FILES) --env-file .env.local down
+	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker --context $(DOCKER_CONTEXT) compose $(DEV_COMPOSE_FILES) --env-file .env.local down
 
 deploy-check:
 	@./scripts/runtime-preflight.sh production .env $(REFERENCE_DATA_MODE)
