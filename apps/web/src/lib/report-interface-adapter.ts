@@ -254,7 +254,7 @@ function overview(report: AnalysisReport): ReportOverview {
   const eu = record(report.mechanical.eu_status);
   const postalValidation = record(postal?.validation);
   const suspectedIds = new Set(
-    report.base_analysis.review.annotations
+    (report.base_analysis.review.annotations ?? [])
       .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
       .map((item) => item.record_id),
   );
