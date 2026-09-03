@@ -5,10 +5,18 @@ import logging
 import threading
 from collections import Counter
 from datetime import datetime, timezone
+from hashlib import sha256
 from time import perf_counter
 from typing import Any, Callable
+from uuid import uuid4
 
-from cv_validator.usage import PricingCatalog, normalize_usage
+from cv_validator.usage import (
+    USD_PLN_FX_RATE,
+    USD_PLN_FX_VERSION,
+    PricingCatalog,
+    normalize_usage,
+    usd_to_pln,
+)
 
 logger = logging.getLogger("cv_validator.operations")
 
@@ -159,7 +167,25 @@ class AnalysisRecorder:
             response_model or configured_model,
             saved,
         ) if saved_usage is not None else None
+        event_key = sha256(
+            "|".join((
+                self.analysis_id,
+                operation,
+                str(attempt),
+                started_at,
+            )).encode("utf-8")
+        ).hexdigest()
+        if cache_outcome == "hit" and normalized["total_tokens"] == 0:
+            billing_status = "cache_hit"
+        elif normalized["total_tokens"] > 0:
+            billing_status = "paid"
+        elif outcome == "failed":
+            billing_status = "usage_unavailable"
+        else:
+            billing_status = "no_usage"
         event = {
+            "event_id": str(uuid4()),
+            "event_key": event_key,
             "analysis_id": self.analysis_id,
             "correlation_id": self.correlation_id,
             "operation": operation,
@@ -176,8 +202,12 @@ class AnalysisRecorder:
             "latency_ms": latency_ms,
             **normalized,
             "estimated_cost_usd": estimate.estimated_cost_usd,
+            "estimated_cost_pln": usd_to_pln(estimate.estimated_cost_usd),
             "pricing_version": estimate.pricing_version,
             "pricing_reason": estimate.unavailable_reason,
+            "fx_rate": str(USD_PLN_FX_RATE),
+            "fx_version": USD_PLN_FX_VERSION,
+            "billing_status": billing_status,
             "cache_outcome": cache_outcome,
             "saved_input_tokens": saved["input_tokens"] if saved_usage is not None else 0,
             "saved_cached_input_tokens": saved["cached_input_tokens"] if saved_usage is not None else 0,

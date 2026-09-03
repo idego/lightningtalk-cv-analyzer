@@ -380,9 +380,15 @@ def create_app(
         result: dict[str, Any],
         started_at: str,
         started: float,
+        *,
+        cache_outcome: str | None = None,
     ) -> None:
         cache = result.get("cache", {})
-        cache_outcome = cache.get("status") if isinstance(cache, dict) else None
+        resolved_cache_outcome = (
+            cache_outcome
+            if cache_outcome is not None
+            else cache.get("status") if isinstance(cache, dict) else None
+        )
         saved_usage: dict[str, int] = {}
         if isinstance(cache, dict):
             direct_saved = cache.get("saved_usage")
@@ -408,7 +414,7 @@ def create_app(
             completed_at=utc_now(),
             latency_ms=int((perf_counter() - started) * 1000),
             usage=result.get("usage", {}),
-            cache_outcome=cache_outcome,
+            cache_outcome=resolved_cache_outcome,
             saved_usage=saved_usage if saved_usage else None,
         )
         recorder.emit(
@@ -416,7 +422,7 @@ def create_app(
             operation=f"{category}_research",
             category="research",
             outcome="completed",
-            cache_outcome=cache_outcome,
+            cache_outcome=resolved_cache_outcome,
         )
 
     @app.middleware("http")
@@ -736,6 +742,19 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         return JSONResponse(payload)
 
+    @app.get("/analyses/{analysis_id}/usage")
+    def get_analysis_usage(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return JSONResponse(store.get_analysis_usage_summary(analysis_id))
+
+    @app.get("/internal/usage/summary")
+    def get_usage_summary() -> JSONResponse:
+        return JSONResponse(store.get_usage_summary())
+
     @app.delete("/analyses/{analysis_id}")
     def delete_analysis(
         analysis_id: str,
@@ -826,12 +845,12 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         descriptors = company_subject_descriptors(request)
         lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
+        paid_request_recorded = False
         with research_locks.acquire(f"cache:company:{lock_key}"):
             if x_research_refresh:
                 for descriptor in descriptors:
                     store.invalidate_reusable_research(descriptor.cache_key)
             row = None if x_research_refresh else store.get_company_research(analysis_id)
-            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -855,6 +874,17 @@ def create_app(
                                 request.input_facts[index] for index in missing
                             )),
                         )
+                        record_research_result(
+                            recorder,
+                            "company",
+                            fresh,
+                            research_started_at,
+                            research_started,
+                            cache_outcome=(
+                                "miss" if len(missing) == len(descriptors) else "partial_hit"
+                            ),
+                        )
+                        paid_request_recorded = True
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     except CompanyResearchTimeout as exc:
@@ -925,8 +955,15 @@ def create_app(
                 )
         response = deepcopy(stored)
         response["company_research"] = result
-        if performed:
-            record_research_result(recorder, "company", result, research_started_at, research_started)
+        if not paid_request_recorded:
+            cache = result.get("cache", {})
+            recorder.emit(
+                "research_completed",
+                operation="company_research",
+                category="research",
+                outcome="completed",
+                cache_outcome=cache.get("status") if isinstance(cache, dict) else None,
+            )
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/education")
@@ -950,12 +987,12 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         descriptors = education_subject_descriptors(request)
         lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
+        paid_request_recorded = False
         with research_locks.acquire(f"cache:education:{lock_key}"):
             if x_research_refresh:
                 for descriptor in descriptors:
                     store.invalidate_reusable_research(descriptor.cache_key)
             row = None if x_research_refresh else store.get_education_research(analysis_id)
-            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -979,6 +1016,17 @@ def create_app(
                                 request.input_facts[index] for index in missing
                             )),
                         )
+                        record_research_result(
+                            recorder,
+                            "education",
+                            fresh,
+                            research_started_at,
+                            research_started,
+                            cache_outcome=(
+                                "miss" if len(missing) == len(descriptors) else "partial_hit"
+                            ),
+                        )
+                        paid_request_recorded = True
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
                     except EducationResearchTimeout as exc:
@@ -1054,8 +1102,15 @@ def create_app(
                 )
         response = deepcopy(stored)
         response["education_research"] = result
-        if performed:
-            record_research_result(recorder, "education", result, research_started_at, research_started)
+        if not paid_request_recorded:
+            cache = result.get("cache", {})
+            recorder.emit(
+                "research_completed",
+                operation="education_research",
+                category="research",
+                outcome="completed",
+                cache_outcome=cache.get("status") if isinstance(cache, dict) else None,
+            )
         return JSONResponse(response)
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
@@ -1072,9 +1127,9 @@ def create_app(
         research_started = perf_counter()
         recorder = analysis_recorder(analysis_id)
         recorder.emit("research_started", operation="linkedin_discovery", category="research", outcome="started")
+        paid_request_recorded = False
         with research_locks.acquire(f"linkedin:{analysis_id}"):
             row = store.get_linkedin_discovery(analysis_id)
-            performed = row is None
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -1084,6 +1139,14 @@ def create_app(
                         linkedin_threshold,
                         linkedin_profiles,
                     ).run(stored)
+                    record_research_result(
+                        recorder,
+                        "linkedin_discovery",
+                        result,
+                        research_started_at,
+                        research_started,
+                    )
+                    paid_request_recorded = True
                     store.persist_linkedin_discovery(analysis_id, result)
                 except ValueError as exc:
                     raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1130,8 +1193,13 @@ def create_app(
                     _raise_research_persistence_error(exc)
         response = deepcopy(stored)
         response["linkedin_discovery"] = result
-        if performed:
-            record_research_result(recorder, "linkedin_discovery", result, research_started_at, research_started)
+        if not paid_request_recorded:
+            recorder.emit(
+                "research_completed",
+                operation="linkedin_discovery_research",
+                category="research",
+                outcome="completed",
+            )
         return JSONResponse(response)
 
     app.state.store = store

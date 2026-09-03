@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from conftest import valid_report
 from cv_validator.api.app import create_app
+from cv_validator.errors import PersistenceError
 from cv_validator.openai_config import OpenAISettings
 
 
@@ -135,6 +136,9 @@ def test_company_research_reuses_public_cache_across_analyses(tmp_path) -> None:
     assert second.json()["company_research"]["usage"]["output_tokens"] == 0
     assert len(researcher.calls) == 1
     assert app.state.store.get_cache_audit("analysis-2")[0]["outcome"] == "hit"
+    usage = app.state.store.get_usage_summary()
+    assert usage["requests"] == 1
+    assert usage["paid_requests"] == 1
 
 
 def test_education_research_reuses_public_cache_across_analyses(tmp_path) -> None:
@@ -210,6 +214,32 @@ def test_company_refresh_bypasses_and_replaces_cached_result(tmp_path) -> None:
     assert refreshed.status_code == 200
     assert refreshed.json()["company_research"]["cache"]["status"] == "miss"
     assert len(researcher.calls) == 2
+    assert app.state.store.get_usage_summary()["requests"] == 2
+
+
+def test_paid_research_is_ledgered_before_mutable_result_persistence(tmp_path) -> None:
+    researcher = FakeResearcher(company_result())
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=researcher,
+    )
+    report = valid_report()
+    report["analysis_id"] = "analysis-persistence-failure"
+    app.state.store.persist_analysis_payload_for_test(report)
+
+    def fail_persist(*_args, **_kwargs):
+        raise PersistenceError("forced persistence failure")
+
+    app.state.store.persist_company_research = fail_persist
+    response = client_for(app).post("/analyses/analysis-persistence-failure/research/company")
+
+    assert response.status_code == 409
+    assert len(researcher.calls) == 1
+    usage = app.state.store.get_usage_summary()
+    assert usage["requests"] == 1
+    assert usage["paid_requests"] == 1
+    assert usage["total_tokens"] == 30
 
 
 def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:

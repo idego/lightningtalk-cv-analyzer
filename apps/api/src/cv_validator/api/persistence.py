@@ -16,6 +16,7 @@ from cv_validator.analysis import validate_analysis_report
 from cv_validator.api.feedback import init_feedback_schema
 from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
 from cv_validator.serialization import deserialize_analysis_payload
+from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
 @dataclass
@@ -168,6 +169,8 @@ class PersistenceStore:
                 );
                 CREATE TABLE IF NOT EXISTS ai_usage_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT,
+                    event_key TEXT,
                     analysis_id TEXT NOT NULL,
                     correlation_id TEXT NOT NULL,
                     operation TEXT NOT NULL,
@@ -185,10 +188,15 @@ class PersistenceStore:
                     input_tokens INTEGER NOT NULL,
                     cached_input_tokens INTEGER NOT NULL,
                     output_tokens INTEGER NOT NULL,
+                    reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL,
                     estimated_cost_usd TEXT,
+                    estimated_cost_pln TEXT,
                     pricing_version TEXT NOT NULL,
                     pricing_reason TEXT,
+                    fx_rate TEXT,
+                    fx_version TEXT,
+                    billing_status TEXT,
                     cache_outcome TEXT,
                     saved_input_tokens INTEGER NOT NULL DEFAULT 0,
                     saved_cached_input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -196,7 +204,20 @@ class PersistenceStore:
                     saved_total_tokens INTEGER NOT NULL DEFAULT 0,
                     saved_cost_usd TEXT
                 );
+                CREATE TABLE IF NOT EXISTS processed_report_events (
+                    event_id TEXT PRIMARY KEY,
+                    analysis_id TEXT NOT NULL UNIQUE,
+                    completed_at TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status = 'completed')
+                );
                 """
+            )
+            _ensure_ai_usage_schema(conn)
+            conn.execute(
+                """INSERT OR IGNORE INTO processed_report_events
+                   (event_id, analysis_id, completed_at, status)
+                   SELECT 'legacy-report-' || analysis_id, analysis_id, created_at, 'completed'
+                   FROM reports WHERE status = 'completed'"""
             )
             init_feedback_schema(conn)
             conn.execute(
@@ -252,20 +273,54 @@ class PersistenceStore:
 
     def record_ai_usage_event(self, event: dict[str, Any]) -> None:
         columns = (
-            "analysis_id", "correlation_id", "operation", "category", "provider",
+            "event_id", "event_key", "analysis_id", "correlation_id", "operation", "category", "provider",
             "configured_model", "response_model", "reasoning_effort", "attempt",
             "outcome", "error_code", "started_at", "completed_at", "latency_ms",
-            "input_tokens", "cached_input_tokens", "output_tokens", "total_tokens",
-            "estimated_cost_usd", "pricing_version", "pricing_reason", "cache_outcome",
+            "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens",
+            "estimated_cost_usd", "estimated_cost_pln", "pricing_version", "pricing_reason",
+            "fx_rate", "fx_version", "billing_status", "cache_outcome",
             "saved_input_tokens", "saved_cached_input_tokens", "saved_output_tokens",
             "saved_total_tokens", "saved_cost_usd",
         )
         with self._event_write_lock:
             with self._connect() as conn:
                 conn.execute(
-                    f"INSERT INTO ai_usage_events ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                    f"INSERT INTO ai_usage_events ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(event_key) DO NOTHING",
                     tuple(event.get(column) for column in columns),
                 )
+
+    def get_usage_summary(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM ai_usage_events ORDER BY id").fetchall()
+            reports_processed = int(conn.execute(
+                "SELECT COUNT(*) FROM processed_report_events"
+            ).fetchone()[0])
+        usage = [dict(row) for row in rows]
+        summary = _summarize_usage(usage)
+        summary["reports_processed"] = reports_processed
+        summary["average_tokens_per_report"] = (
+            round(summary["total_tokens"] / reports_processed, 1)
+            if reports_processed else 0.0
+        )
+        summary["average_estimated_cost_usd"] = _average_decimal(
+            summary["estimated_cost_usd"], reports_processed
+        )
+        summary["average_estimated_cost_pln"] = _average_decimal(
+            summary["estimated_cost_pln"], reports_processed
+        )
+        summary["operations"] = _group_usage(
+            usage,
+            lambda item: item["operation"],
+        )
+        return summary
+
+    def get_analysis_usage_summary(self, analysis_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ai_usage_events WHERE analysis_id = ? ORDER BY id",
+                (analysis_id,),
+            ).fetchall()
+        return _summarize_usage([dict(row) for row in rows])
 
     def get_analysis_diagnostics(self, analysis_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -385,6 +440,14 @@ class PersistenceStore:
                         selected_analysis_id,
                     ),
                 )
+                if status == "completed":
+                    conn.execute(
+                        """INSERT INTO processed_report_events
+                           (event_id, analysis_id, completed_at, status)
+                           VALUES (?, ?, ?, 'completed')
+                           ON CONFLICT(analysis_id) DO NOTHING""",
+                        (str(uuid4()), selected_analysis_id, now),
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("report persistence failed") from exc
         return selected_analysis_id
@@ -470,7 +533,6 @@ class PersistenceStore:
         with self._connect() as conn:
             for table in (
                 "diagnostic_events",
-                "ai_usage_events",
                 "research_cache_audit",
                 "company_research",
                 "education_research",
@@ -792,7 +854,7 @@ class PersistenceStore:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in ("research_cache_audit", "company_research", "education_research",
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation",
-                              "audit_log", "diagnostic_events", "ai_usage_events"):
+                              "audit_log", "diagnostic_events"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
@@ -822,23 +884,78 @@ def _group_usage(
             "output_tokens": 0,
             "total_tokens": 0,
             "estimated_cost_usd": Decimal("0"),
-            "cost_available": True,
+            "estimated_cost_pln": Decimal("0"),
+            "usd_cost_available": True,
+            "pln_cost_available": True,
         })
         group["attempts"] += 1
         for token in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
             group[token] += item[token]
-        if item["estimated_cost_usd"] is None:
-            group["cost_available"] = False
+        if item["estimated_cost_usd"] is None and item["total_tokens"] > 0:
+            group["usd_cost_available"] = False
         else:
-            group["estimated_cost_usd"] += Decimal(item["estimated_cost_usd"])
+            group["estimated_cost_usd"] += Decimal(item["estimated_cost_usd"] or "0")
+        if item.get("estimated_cost_pln") is None and item["total_tokens"] > 0:
+            group["pln_cost_available"] = False
+        else:
+            group["estimated_cost_pln"] += Decimal(item.get("estimated_cost_pln") or "0")
     output: list[dict[str, Any]] = []
     for key in sorted(groups):
         group = groups[key]
-        available = group.pop("cost_available")
-        cost = group["estimated_cost_usd"]
-        group["estimated_cost_usd"] = f"{cost:.9f}" if available else None
+        usd_available = group.pop("usd_cost_available")
+        pln_available = group.pop("pln_cost_available")
+        usd_cost = group["estimated_cost_usd"]
+        pln_cost = group["estimated_cost_pln"]
+        group["estimated_cost_usd"] = f"{usd_cost:.9f}" if usd_available else None
+        group["estimated_cost_pln"] = f"{pln_cost:.9f}" if pln_available else None
         output.append(group)
     return output
+
+
+def _summarize_usage(usage: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "requests": len(usage),
+        "paid_requests": 0,
+        "unpriced_requests": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
+    usd_cost = Decimal("0")
+    pln_cost = Decimal("0")
+    usd_available = True
+    pln_available = True
+    for item in usage:
+        if item.get("billing_status") == "paid":
+            summary["paid_requests"] += 1
+        for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
+            summary[key] += int(item.get(key) or 0)
+        token_usage = int(item.get("total_tokens") or 0)
+        item_usd = item.get("estimated_cost_usd")
+        item_pln = item.get("estimated_cost_pln")
+        if item_usd is None and token_usage > 0:
+            usd_available = False
+            summary["unpriced_requests"] += 1
+        else:
+            usd_cost += Decimal(item_usd or "0")
+        if item_pln is None and token_usage > 0:
+            pln_available = False
+        else:
+            pln_cost += Decimal(item_pln or "0")
+    summary["estimated_cost_usd"] = f"{usd_cost:.9f}" if usd_available else None
+    summary["estimated_cost_pln"] = f"{pln_cost:.9f}" if pln_available else None
+    summary["fx_rate"] = str(USD_PLN_FX_RATE)
+    summary["fx_version"] = USD_PLN_FX_VERSION
+    return summary
+
+
+def _average_decimal(value: str | None, divisor: int) -> str | None:
+    if value is None:
+        return None
+    if divisor <= 0:
+        return "0.000000000"
+    return f"{(Decimal(value) / Decimal(divisor)):.9f}"
 
 
 def _token_hash(token: str) -> str:
@@ -879,3 +996,65 @@ def _require_current_report_schema(conn: sqlite3.Connection) -> None:
     }
     if columns and not required.issubset(columns):
         raise PersistenceError("legacy_database_reset_required")
+
+
+def _ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(ai_usage_events)").fetchall()
+    }
+    additions = {
+        "event_id": "TEXT",
+        "event_key": "TEXT",
+        "estimated_cost_pln": "TEXT",
+        "fx_rate": "TEXT",
+        "fx_version": "TEXT",
+        "billing_status": "TEXT",
+        "reasoning_output_tokens": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for name, definition in additions.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE ai_usage_events ADD COLUMN {name} {definition}")
+    rows = conn.execute(
+        """SELECT id, event_id, event_key, estimated_cost_usd, estimated_cost_pln,
+                  total_tokens, outcome, cache_outcome, fx_rate, fx_version, billing_status
+           FROM ai_usage_events
+           WHERE event_id IS NULL OR event_key IS NULL OR fx_rate IS NULL
+              OR fx_version IS NULL OR billing_status IS NULL"""
+    ).fetchall()
+    for row in rows:
+        event_id = row["event_id"] or f"legacy-usage-{row['id']}"
+        event_key = row["event_key"] or f"legacy-usage-{row['id']}"
+        cost_pln = row["estimated_cost_pln"] or usd_to_pln(row["estimated_cost_usd"])
+        total_tokens = int(row["total_tokens"] or 0)
+        billing_status = row["billing_status"]
+        if not billing_status:
+            if row["cache_outcome"] == "hit" and total_tokens == 0:
+                billing_status = "cache_hit"
+            elif total_tokens > 0:
+                billing_status = "paid"
+            elif row["outcome"] == "failed":
+                billing_status = "usage_unavailable"
+            else:
+                billing_status = "no_usage"
+        conn.execute(
+            """UPDATE ai_usage_events
+               SET event_id = ?, event_key = ?, estimated_cost_pln = ?, fx_rate = ?,
+                   fx_version = ?, billing_status = ?
+               WHERE id = ?""",
+            (
+                event_id,
+                event_key,
+                cost_pln,
+                row["fx_rate"] or str(USD_PLN_FX_RATE),
+                row["fx_version"] or f"legacy-backfill-{USD_PLN_FX_VERSION}",
+                billing_status,
+                row["id"],
+            ),
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_events_event_id ON ai_usage_events(event_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_events_event_key ON ai_usage_events(event_key)"
+    )

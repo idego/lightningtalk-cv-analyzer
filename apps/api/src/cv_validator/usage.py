@@ -9,6 +9,8 @@ from typing import Any, Mapping
 
 
 DEFAULT_PRICING_VERSION = "openai-pricing-2026-09-02"
+USD_PLN_FX_RATE = Decimal("3.75")
+USD_PLN_FX_VERSION = "usd-pln-fixed-3.75-v1"
 DEFAULT_PRICING: dict[str, Any] = {
     "version": DEFAULT_PRICING_VERSION,
     "models": {
@@ -43,6 +45,7 @@ def normalize_usage(value: Any) -> dict[str, int]:
 
     usage = _mapping(value)
     details = _mapping(usage.get("input_tokens_details"))
+    output_details = _mapping(usage.get("output_tokens_details"))
     input_tokens = _non_negative_int(usage.get("input_tokens"))
     cached_input_tokens = min(
         input_tokens,
@@ -51,6 +54,10 @@ def normalize_usage(value: Any) -> dict[str, int]:
         ),
     )
     output_tokens = _non_negative_int(usage.get("output_tokens"))
+    reasoning_output_tokens = min(
+        output_tokens,
+        _non_negative_int(output_details.get("reasoning_tokens")),
+    )
     total_tokens = _non_negative_int(usage.get("total_tokens"))
     if total_tokens == 0:
         total_tokens = input_tokens + output_tokens
@@ -58,6 +65,7 @@ def normalize_usage(value: Any) -> dict[str, int]:
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
         "output_tokens": output_tokens,
+        "reasoning_output_tokens": reasoning_output_tokens,
         "total_tokens": total_tokens,
     }
 
@@ -110,6 +118,16 @@ class PricingCatalog:
             + Decimal(normalized["output_tokens"]) * output_rate * output_multiplier
         ) / million
         return CostEstimate(format(cost.quantize(Decimal("0.000000001")), "f"), self.version)
+
+
+def usd_to_pln(cost_usd: str | None) -> str | None:
+    if cost_usd is None:
+        return None
+    try:
+        cost = Decimal(cost_usd) * USD_PLN_FX_RATE
+    except (InvalidOperation, TypeError):
+        return None
+    return format(cost.quantize(Decimal("0.000000001")), "f")
 
 
 def load_pricing_catalog() -> PricingCatalog:
