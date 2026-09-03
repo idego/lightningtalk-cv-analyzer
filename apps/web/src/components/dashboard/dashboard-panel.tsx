@@ -1,17 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, Coins, FileCheck2, Gauge, MessageSquareText, ReceiptText, Sigma } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Activity, Coins, FileCheck2, Gauge, ReceiptText, Sigma } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCopy } from "@/lib/app-settings";
 import type { DeploymentUsageSummary } from "@/lib/usage-types";
-
-type DashboardPanelProps = {
-  feedbackRole: "owner" | "reviewer" | null;
-};
 
 type DashboardLabels = {
   eyebrow: string;
@@ -33,10 +27,6 @@ type DashboardLabels = {
   requests: string;
   tokens: string;
   estimatedCost: string;
-  feedback: string;
-  feedbackDescription: string;
-  openFeedback: string;
-  manageAccess: string;
   accountingNote: string;
   loadError: string;
   noUsage: string;
@@ -63,10 +53,6 @@ const labels: Record<"en" | "pl", DashboardLabels> = {
     requests: "Requests",
     tokens: "Tokens",
     estimatedCost: "Estimated cost",
-    feedback: "Feedback",
-    feedbackDescription: "Review product feedback and follow up on reported issues.",
-    openFeedback: "Open feedback",
-    manageAccess: "Manage access",
     accountingNote: "Completed base reports are counted once and remain in lifetime totals after report deletion. Costs use the pricing snapshot stored with each event and a fixed 1 USD = {rate} PLN conversion.",
     loadError: "Usage totals could not be loaded.",
     noUsage: "No AI usage has been recorded yet.",
@@ -91,10 +77,6 @@ const labels: Record<"en" | "pl", DashboardLabels> = {
     requests: "Wywołania",
     tokens: "Tokeny",
     estimatedCost: "Szacowany koszt",
-    feedback: "Feedback",
-    feedbackDescription: "Przejrzyj feedback do produktu i obsłuż zgłoszone problemy.",
-    openFeedback: "Otwórz feedback",
-    manageAccess: "Zarządzaj dostępem",
     accountingNote: "Ukończony raport bazowy jest liczony raz i pozostaje w sumach historycznych po usunięciu raportu. Koszty używają snapshotu cennika zapisanego przy zdarzeniu oraz stałego przelicznika 1 USD = {rate} PLN.",
     loadError: "Nie udało się wczytać danych o użyciu.",
     noUsage: "Nie zarejestrowano jeszcze użycia AI.",
@@ -160,7 +142,7 @@ function MetricCard({
   );
 }
 
-export function DashboardPanel({ feedbackRole }: DashboardPanelProps) {
+export function DashboardPanel() {
   const { settings } = useCopy();
   const locale = settings.uiLanguage === "pl" ? "pl-PL" : "en-US";
   const copy = labels[settings.uiLanguage];
@@ -255,19 +237,6 @@ export function DashboardPanel({ feedbackRole }: DashboardPanelProps) {
           ) : summary ? <p className="px-4 py-6 text-sm text-muted-foreground">{copy.noUsage}</p> : <div className="h-28 animate-pulse bg-muted/20" />}
         </CardContent>
       </Card>
-
-      {feedbackRole ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><MessageSquareText className="size-4" />{copy.feedback}</CardTitle>
-            <CardDescription>{copy.feedbackDescription}</CardDescription>
-            <CardAction className="flex gap-2">
-              {feedbackRole === "owner" ? <Button variant="outline" render={<Link href="/feedback/access" />}>{copy.manageAccess}</Button> : null}
-              <Button render={<Link href="/feedback" />}>{copy.openFeedback}<ArrowRight data-icon="inline-end" /></Button>
-            </CardAction>
-          </CardHeader>
-        </Card>
-      ) : null}
 
       <p className="max-w-4xl text-xs leading-relaxed text-muted-foreground">{accountingNote}</p>
     </div>

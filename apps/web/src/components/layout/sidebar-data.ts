@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Search, Settings } from "lucide-react";
+import { LayoutDashboard, MessageSquareText, Search, Settings } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -12,13 +12,14 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-export function buildSidebarNav(): NavGroup[] {
+export function buildSidebarNav(showFeedback = false): NavGroup[] {
   return [
     {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+        ...(showFeedback ? [{ title: "Feedback", url: "/feedback", icon: MessageSquareText }] : []),
         { title: "Settings", url: "/settings", icon: Settings },
       ],
     },

@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import type { AnalyzeItemResult } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { ResultsList } from "@/components/analyze/results-list";
 import { DocumentPreview } from "@/components/analyze/document-preview";
 import { useCopy } from "@/lib/app-settings";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
 
 export type AnalyzedFile = { file: File | null; result: AnalyzeItemResult };
 
@@ -42,19 +43,17 @@ export function AnalysisWorkspace({
     : `minmax(0, ${100 - previewShare}fr) 16px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
-    <div className="mb-3 flex min-h-10 items-start justify-between gap-4">
-      <div className="flex items-center gap-4">
-        {onBack ? <Button variant="outline" onClick={onBack}><ArrowLeft data-icon="inline-start" />{t("back")}</Button> : null}
-        {analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
-      </div>
-      {!hasOriginalFiles ? <div className="flex flex-col items-end gap-1.5">
+    <PageBackToolbar
+      onBack={onBack}
+      detail={analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
+      action={!hasOriginalFiles ? <div className="flex flex-col items-end gap-1.5">
         <p className="text-sm text-foreground/75">{t("originalNotRetained")}</p>
         <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button>
       </div> : <Button variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
         {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
         {t(previewVisible ? "hideCv" : "showCv")}
       </Button>}
-    </div>
+    />
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3 transition-[grid-template-columns] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {active.file ? <>
