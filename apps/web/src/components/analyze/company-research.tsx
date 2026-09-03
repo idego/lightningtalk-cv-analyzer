@@ -156,6 +156,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
           <FactRow
             label={t("reportedOfficeOrLocation")}
             icon={<MapPin className="size-4" />}
+            align={offices.length ? "start" : "center"}
             value={offices.length ? (
               <ul className="list-disc space-y-2 pl-4">
                 {offices.map((office, index) => (
@@ -170,7 +171,8 @@ function CompanyResult({ organization }: { organization: Organization }) {
           <FactRow
             label={t("officialWebsite")}
             icon={<Globe2 className="size-4" />}
-            value={organization.official_website ? <ExternalFactLink href={organization.official_website} value={organization.official_website} /> : t("notConfirmed")}
+            align="center"
+            value={organization.official_website ? <ExternalFactLink href={organization.official_website} value={organization.official_website} compact /> : t("notConfirmed")}
           />
           {organization.activity ? <FactRow label={t("activity")} icon={<BriefcaseBusiness className="size-4" />} value={organization.activity} /> : null}
           {operatingPeriods.length ? (
@@ -216,13 +218,13 @@ function formatOperatingPeriod(period: Organization["operating_periods"][number]
   return `${until} ${period.to}`;
 }
 
-function ExternalFactLink({ href, value }: { href: string; value: string }) {
-  return <a className="inline-flex items-center gap-1 break-all underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground" href={href} target="_blank" rel="noreferrer">{value}<ExternalLink className="size-3 shrink-0" aria-hidden /></a>;
+function ExternalFactLink({ href, value, compact = false }: { href: string; value: string; compact?: boolean }) {
+  return <a className={`inline-flex max-w-full items-center gap-1 break-words underline decoration-muted-foreground/50 underline-offset-2 [text-decoration-skip-ink:none] hover:text-foreground ${compact ? "leading-none" : ""}`} href={href} target="_blank" rel="noreferrer">{value}<ExternalLink className="size-3 shrink-0" aria-hidden /></a>;
 }
 
-function FactRow({ label, icon, value }: { label: string; icon: ReactNode; value: ReactNode }) {
+function FactRow({ label, icon, value, align = "start" }: { label: string; icon: ReactNode; value: ReactNode; align?: "start" | "center" }) {
   return (
-    <div className="grid items-start gap-1 px-3 py-2 sm:grid-cols-[2.25rem_1fr]">
+    <div className={`grid gap-1 px-3 py-2 sm:grid-cols-[2.25rem_1fr] ${align === "center" ? "items-center" : "items-start"}`}>
       <dt>
         <Tooltip>
           <TooltipTrigger
@@ -230,7 +232,7 @@ function FactRow({ label, icon, value }: { label: string; icon: ReactNode; value
               <span
                 tabIndex={0}
                 aria-label={label}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {icon}
               </span>
