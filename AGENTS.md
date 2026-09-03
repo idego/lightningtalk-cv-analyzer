@@ -56,14 +56,15 @@ The browser reaches the API only through Next.js routes under
 - Match existing style and keep diffs focused.
 - Use environment variables for runtime configuration.
 - Use Conventional Commits (`<type>[scope]: <description>`).
-- Every capability lives in an `openspec/specs/<capability>/spec.md`; ship a
-  new feature through `/opsx:propose` → apply → archive, or update the spec in
-  the same change when adjusting behavior.
 - Create commits only when explicitly asked.
 - Never push unless explicitly asked.
 - If elevated access is needed, use graphical Polkit rather than `sudo`.
 
 ## OpenSpec
 
-Keep source-of-truth specs aligned when archiving completed changes. Do not
-restore archived contracts for removed analysis systems.
+OpenSpec is optional. Use `/opsx:propose` → apply → archive for larger
+behavior changes where an upfront design helps; small fixes, refactors, and
+doc updates do not need a change proposal. When a change touches behavior
+that an `openspec/specs/*/spec.md` already describes, update that spec in the
+same commit so specs stay truthful. Do not restore archived contracts for
+removed analysis systems.
