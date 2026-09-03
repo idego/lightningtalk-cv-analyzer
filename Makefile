@@ -14,6 +14,9 @@ endif
 
 dev:
 	@./scripts/runtime-preflight.sh dev .env.local $(REFERENCE_DATA_MODE)
+	@if [ "$(REFERENCE_DATA_MODE)" = automatic ]; then \
+		echo "GeoNames: validating the cached release; the first build can take several minutes."; \
+	fi
 	LOCAL_DEV_AUTH_BYPASS=true \
 	WEB_HOST=127.0.0.1 \
 	WEB_PORT=$(WEB_PORT) \
