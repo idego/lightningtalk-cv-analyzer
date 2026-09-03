@@ -4,7 +4,7 @@ Canonical instructions for coding agents in this repository.
 
 ## Current architecture
 
-This branch runs the `docling-luna` strategy against the shared
+The API runs the `docling-luna` strategy against the shared
 `base-analysis-v2` schema. Read `docs/architecture.md` before changing the
 analysis pipeline. The shared layer owns validation, persistence, mechanical
 primitives, UI, and research.

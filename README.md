@@ -1,7 +1,7 @@
 # CV Analyzer
 
-This branch implements the Docling plus GPT-5.6 Luna analysis variant against
-the shared `base-analysis-v2` contract.
+CV Analyzer analyzes CVs with Docling document conversion and GPT-5.6 Luna
+passes, producing reports in the `base-analysis-v2` contract.
 
 The previous deterministic Document Understanding, Structural Audit, ESCO,
 national-ID redaction, score/band, file metadata, and live-link checker have
@@ -52,11 +52,12 @@ cd apps/web && pnpm build
 through `docker-compose.dev.yml`; `make deploy` never does.
 
 The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
-project `cv-analyzer-docling-luna`, API database `/app/data/cv_analyzer.db`,
-and auth database `/app/data/auth.db`. Stacks created before these defaults
-changed hold `docling_luna.db` and `docling_luna_auth.db` in the same volumes;
-keep them by setting `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` in the
-env file, or rename the files inside the volumes while the stack is stopped.
+project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
+database `/app/data/auth.db`. A stack created under the former project name
+`cv-analyzer-docling-luna` keeps its volumes under that name; to reuse its
+data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-docling-luna` and pin
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to the old `docling_luna*.db`
+paths in the env file, or copy the volumes once while the stack is stopped.
 
 On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
 downloads the configured official GeoNames sources and builds both locality and

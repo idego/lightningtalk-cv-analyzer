@@ -2,7 +2,7 @@
 
 ## Runtime
 
-- This branch installs exactly one `docling-luna` strategy and exposes its name
+- The API installs exactly one `docling-luna` strategy and exposes its name
   and version through health and every report.
 - `OPENAI_API_KEY` is required when public research or a Luna strategy is
   enabled. Never commit the key.
@@ -70,13 +70,14 @@ make dev
 make dev-down
 ```
 
-The command uses Compose project `cv-analyzer-docling-luna`, loopback web port
-3001, API database `/app/data/cv_analyzer.db`, and auth database
-`/app/data/auth.db`. Do not rename the Compose project: named volumes are keyed
-by it. A stack created while the defaults were `docling_luna.db` and
-`docling_luna_auth.db` keeps its data only if the env file pins
-`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths, or if the
-files are renamed inside the volumes while the stack is stopped.
+The command uses Compose project `cv-analyzer`, loopback web port 3001, API
+database `/app/data/cv_analyzer.db`, and auth database `/app/data/auth.db`.
+Named volumes are keyed by the project name, so do not change it casually. A
+stack created under the former project `cv-analyzer-docling-luna` with the
+former `docling_luna.db` / `docling_luna_auth.db` defaults keeps its data only
+if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-docling-luna` and pin
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths in the env
+file, or copy the volumes to the new project once while the stack is stopped.
 
 Production deploys an exact reviewed SHA:
 
@@ -107,5 +108,5 @@ A strategy failure returns a bounded per-document error. It must not silently
 fall back to a different strategy or the removed deterministic pipeline.
 
 For application rollback, deploy the previously recorded reviewed SHA. Named
-volumes remain intact. This variant uses `cv_analyzer.db` and does not migrate
+volumes remain intact. The API uses `cv_analyzer.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.

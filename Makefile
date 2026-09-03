@@ -2,7 +2,7 @@
 
 DOCKER_CONTEXT ?= default
 ALLOW_DEGRADED ?= false
-COMPOSE_PROJECT_NAME ?= cv-analyzer-docling-luna
+COMPOSE_PROJECT_NAME ?= cv-analyzer
 WEB_PORT ?= 3001
 REFERENCE_DATA_MODE ?= automatic
 
