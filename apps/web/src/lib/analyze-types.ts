@@ -188,7 +188,7 @@ export type AnalysisReport = {
       status: AnalysisStatus;
       accepted_ids: string[];
       rejected: Array<Record<string, unknown>>;
-      annotations: Array<{ record_id: string; kind: "suspected_hallucination" | "unsupported_evidence" | "uncertain_relation" | "conflicting_relation" | "duplicate"; reason_code: string }>;
+      annotations?: Array<{ record_id: string; kind: "suspected_hallucination" | "unsupported_evidence" | "uncertain_relation" | "conflicting_relation" | "duplicate"; reason_code: string }>;
       merged_ids: string[][];
       merge_projections: Array<Record<string, unknown>>;
       relation_corrections: Array<Record<string, unknown>>;

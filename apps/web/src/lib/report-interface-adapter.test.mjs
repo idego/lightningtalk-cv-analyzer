@@ -142,6 +142,16 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 
+test("CV overview renders when optional review annotations are absent", () => {
+  const value = report();
+  delete value.base_analysis.review.annotations;
+
+  const overview = adaptReportInterface(value, "en").overview;
+
+  assert.equal(overview.employment.length, 2);
+  assert.equal(overview.attentionRecords.length, 0);
+});
+
 test("completed LinkedIn not-found result becomes one cautious checklist finding", () => {
   const value = report();
   value.linkedin_discovery = {
