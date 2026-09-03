@@ -1,7 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 
 from conftest import valid_report
 from cv_validator.api.app import create_app
+from cv_validator.errors import PersistenceError
 from cv_validator.openai_config import OpenAISettings
 
 
@@ -144,3 +147,127 @@ def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:
     ).status_code == 404
     assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 200
     assert client.get(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 404
+
+
+def _analyze(client: TestClient, headers: dict[str, str], filename: str = "candidate.pdf") -> str:
+    created = client.post(
+        "/analyze",
+        files={"file": (filename, b"%PDF-1.7 stored bytes", "application/pdf")},
+        headers=headers,
+    )
+    assert created.status_code == 200
+    return created.json()["analysis_id"]
+
+
+def _document_app(tmp_path):
+    return create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=False),
+        analysis_strategy=FakeStrategy(),
+    )
+
+
+def _count_source_documents(app) -> int:
+    with app.state.store._connect() as conn:
+        return conn.execute("SELECT COUNT(*) FROM source_documents").fetchone()[0]
+
+
+def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    analysis_id = _analyze(client, owner_headers, filename='Życiorys "2026".pdf')
+
+    history = client.get("/analyses", headers=owner_headers).json()["analyses"]
+    assert history[0]["analysis_id"] == analysis_id
+    assert history[0]["has_document"] is True
+
+    document = client.get(f"/analyses/{analysis_id}/document", headers=owner_headers)
+    assert document.status_code == 200
+    assert document.content == b"%PDF-1.7 stored bytes"
+    assert document.headers["content-type"] == "application/pdf"
+    assert document.headers["cache-control"] == "private, no-store"
+    disposition = document.headers["content-disposition"]
+    assert disposition.startswith('inline; filename="')
+    assert '"2026"' not in disposition
+    assert "filename*=UTF-8''%C5%BByciorys" in disposition
+
+    assert client.get(
+        f"/analyses/{analysis_id}/document",
+        headers={"X-Analysis-Access-Token": "another-owner"},
+    ).status_code == 404
+    assert client.get(f"/analyses/{analysis_id}/document").status_code == 404
+    assert client.get("/analyses/missing/document", headers=owner_headers).status_code == 404
+
+
+def test_docx_source_document_uses_docx_content_type(tmp_path) -> None:
+    client = TestClient(_document_app(tmp_path))
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    analysis_id = _analyze(client, owner_headers, filename="candidate.docx")
+    document = client.get(f"/analyses/{analysis_id}/document", headers=owner_headers)
+    assert document.status_code == 200
+    assert document.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert document.headers["content-disposition"] == 'inline; filename="candidate.docx"'
+
+
+def test_source_document_storage_failure_does_not_fail_analysis(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+
+    def failing_persist(*_args, **_kwargs):
+        raise PersistenceError("source document persistence failed")
+
+    app.state.store.persist_source_document = failing_persist
+    analysis_id = _analyze(client, owner_headers)
+
+    history = client.get("/analyses", headers=owner_headers).json()["analyses"]
+    assert history[0]["has_document"] is False
+    assert client.get(f"/analyses/{analysis_id}/document", headers=owner_headers).status_code == 404
+    diagnostics = client.get(f"/analyses/{analysis_id}/diagnostics", headers=owner_headers).json()
+    assert any(
+        event.get("event") == "persistence_failed"
+        and event.get("error_code") == "source_document_persistence_error"
+        for event in diagnostics["diagnostics"]
+    )
+
+
+def test_source_document_is_removed_with_analysis_deletion(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    first = _analyze(client, owner_headers)
+    second = _analyze(client, owner_headers)
+
+    assert client.delete(f"/analyses/{first}", headers=owner_headers).status_code == 200
+    assert app.state.store.get_source_document(first) is None
+    assert app.state.store.get_source_document(second) is not None
+
+    assert client.delete("/analyses", headers=owner_headers).json()["deleted"] == 1
+    assert app.state.store.get_source_document(second) is None
+    assert _count_source_documents(app) == 0
+
+
+def test_source_document_is_purged_with_expired_analysis(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    analysis_id = _analyze(client, owner_headers)
+    store = app.state.store
+    stale = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+    with store._connect() as conn:
+        for table in ("reports", "audit_log", "analysis_runs", "source_documents"):
+            conn.execute(
+                f"UPDATE {table} SET created_at = ? WHERE analysis_id = ?",
+                (stale, analysis_id),
+            )
+
+    deleted = store.purge_expired()
+
+    assert analysis_id in deleted["analysis_ids"]
+    assert deleted["source_documents"] == 1
+    assert store.get_source_document(analysis_id) is None
+    assert _count_source_documents(app) == 0
+    assert client.get(f"/analyses/{analysis_id}/document", headers=owner_headers).status_code == 404

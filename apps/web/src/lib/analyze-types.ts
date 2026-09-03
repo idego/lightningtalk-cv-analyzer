@@ -240,4 +240,10 @@ export type AnalysisHistoryItem = {
   status: AnalysisStatus;
   strategy: AnalysisReport["strategy"]["name"] | null;
   created_at: string;
+  /** True when the original uploaded document is still stored and can be fetched from `/api/analyses/{analysis_id}/document`. */
+  has_document?: boolean;
 };
+
+/** A document the preview can render: the in-memory upload for this session, or a stored copy served by the API. */
+export type StoredDocument = { url: string; name: string };
+export type DocumentSource = File | StoredDocument;

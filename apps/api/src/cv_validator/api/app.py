@@ -12,10 +12,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from cv_validator.analysis import (
@@ -563,6 +564,26 @@ def create_app(
                 operation="report_persistence",
                 outcome="completed",
             )
+            try:
+                store.persist_source_document(
+                    analysis_id,
+                    filename,
+                    _source_content_type(filename),
+                    content,
+                )
+            except PersistenceError:
+                recorder.emit(
+                    "persistence_failed",
+                    operation="source_document_persistence",
+                    outcome="failed",
+                    error_code="source_document_persistence_error",
+                )
+            else:
+                recorder.emit(
+                    "persistence_completed",
+                    operation="source_document_persistence",
+                    outcome="completed",
+                )
             store.complete_analysis_run(analysis_id, base_status)
             recorder.emit(
                 "analysis_completed",
@@ -735,6 +756,25 @@ def create_app(
         if payload is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
         return JSONResponse(payload)
+
+    @app.get("/analyses/{analysis_id}/document")
+    def get_analysis_document(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> Response:
+        if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        document = store.get_source_document(analysis_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return Response(
+            content=document["content"],
+            media_type=document["content_type"],
+            headers={
+                "Content-Disposition": _inline_disposition(document["filename"]),
+                "Cache-Control": "private, no-store",
+            },
+        )
 
     @app.delete("/analyses/{analysis_id}")
     def delete_analysis(
@@ -1241,6 +1281,33 @@ async def _prepare_batch(
             )
         prepared.append(_PreparedUpload(upload=upload, content=content))
     return prepared
+
+
+_SOURCE_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+def _source_content_type(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    return _SOURCE_CONTENT_TYPES.get(suffix, "application/octet-stream")
+
+
+def _inline_disposition(filename: str) -> str:
+    """Build an inline Content-Disposition with a header-safe filename.
+
+    The plain ``filename`` parameter keeps only printable ASCII without quotes
+    or backslashes; the original name travels in RFC 5987 ``filename*``.
+    """
+    ascii_name = "".join(
+        ch if 0x20 <= ord(ch) < 0x7F and ch not in '"\\' else "_"
+        for ch in filename
+    ).strip() or "document"
+    disposition = f'inline; filename="{ascii_name}"'
+    if ascii_name != filename:
+        disposition += f"; filename*=UTF-8''{quote(filename, safe='')}"
+    return disposition
 
 
 def _owned_payload(

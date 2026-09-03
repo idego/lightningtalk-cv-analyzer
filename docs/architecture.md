@@ -48,6 +48,9 @@ disabled. Raw uploads are processed in memory, and raw CV text, evidence,
 model output, and secrets must not enter logs.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
+After a report is persisted, the original uploaded PDF or DOCX is stored
+alongside it so the recruiter can preview it again; the copy is served only to
+the owning token and is deleted with the analysis or by retention purge.
 GeoNames locality and postal indexes are prepared by a one-shot Compose service
 and mounted read-only by the API. Operational setup, recovery, retention,
 feedback rollout, and backups are documented in `docs/operations.md` and
