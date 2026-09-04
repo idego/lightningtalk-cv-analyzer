@@ -569,9 +569,16 @@ class PersistenceStore:
         access_token: str | None,
         share_token: str,
     ) -> bool:
-        if not self.analysis_access_allowed(analysis_id, access_token):
+        if not access_token:
             return False
+        access_token_hash = _token_hash(access_token)
         with self._connect() as conn:
+            report = conn.execute(
+                "SELECT 1 FROM reports WHERE analysis_id = ? AND access_token_hash = ?",
+                (analysis_id, access_token_hash),
+            ).fetchone()
+            if report is None:
+                return False
             conn.execute(
                 """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at)
                    VALUES (?, ?, ?)""",

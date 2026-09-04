@@ -31,6 +31,16 @@ def test_persistence_uses_strategy_contract_without_score_or_access_token(tmp_pa
     assert store.list_analyses("secret-token")[0]["strategy"] == "document-analysis"
 
 
+def test_analysis_share_requires_a_persisted_report_not_only_an_analysis_run(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    store.create_analysis_run("failed-analysis", "correlation-id", "owner-token")
+
+    assert store.analysis_access_allowed("failed-analysis", "owner-token") is True
+    assert store.persist_analysis_share_token(
+        "failed-analysis", "owner-token", "share-secret"
+    ) is False
+
+
 def test_analysis_share_capabilities_are_hashed_scoped_and_deleted_with_report(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     payload = valid_report()
