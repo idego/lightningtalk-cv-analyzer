@@ -43,26 +43,28 @@ export function AnalysisWorkspace({
     : `minmax(0, ${100 - previewShare}fr) 16px minmax(340px, ${previewShare}fr)`;
 
   return <div className="mx-auto w-full max-w-[1800px]">
-    <PageBackToolbar
-      onBack={onBack}
-      detail={analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
-      center={!hasOriginalFiles ? <p className="min-w-0 truncate text-center text-xs text-foreground/75 sm:text-sm" title={t("originalNotRetained")}>{t("originalNotRetained")}</p> : null}
-      action={!hasOriginalFiles ? <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button> : <Button variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
-        {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
-        {t(previewVisible ? "hideCv" : "showCv")}
-      </Button>}
-    />
+    <div className="sticky top-14 z-20 bg-background/95 backdrop-blur">
+      <PageBackToolbar
+        onBack={onBack}
+        detail={analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
+        center={!hasOriginalFiles ? <p className="min-w-0 truncate text-center text-xs text-foreground/75 sm:text-sm" title={t("originalNotRetained")}>{t("originalNotRetained")}</p> : null}
+        action={!hasOriginalFiles ? <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button> : <Button variant="ghost" size="sm" onClick={() => setPreviewVisible((visible) => !visible)}>
+          {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
+          {t(previewVisible ? "hideCv" : "showCv")}
+        </Button>}
+      />
+    </div>
     <div ref={hostRef} className="grid min-w-0 items-start gap-y-3 transition-[grid-template-columns] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none" style={{ gridTemplateColumns: columns }}>
       <ResultsList items={entries.map(entry => entry.result)} onActiveIndex={setActiveIndex} />
       {active.file ? <>
-        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={previewVisible ? 0 : -1} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className={`group/separator sticky top-20 z-10 h-[calc(100svh-6.5rem)] w-full touch-none focus-visible:outline-none ${previewVisible ? "cursor-col-resize" : "pointer-events-none opacity-0"}`}><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:bg-primary group-active/separator:bg-primary" /></div> : null}
+        {!isMobile ? <div role="separator" aria-orientation="vertical" aria-label={t("resizeCvPreview")} aria-valuemin={32} aria-valuemax={70} aria-valuenow={Math.round(previewShare)} tabIndex={previewVisible ? 0 : -1} onKeyDown={resizeWithKeyboard} onPointerDown={startResize} className={`group/separator sticky top-28 z-10 h-[calc(100svh-8rem)] w-full touch-none focus-visible:outline-none ${previewVisible ? "cursor-col-resize" : "pointer-events-none opacity-0"}`}><span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-border transition-colors group-hover/separator:bg-primary/70 group-focus-visible/separator:bg-primary group-active/separator:bg-primary" /></div> : null}
         <div
           aria-hidden={!previewVisible}
           inert={!previewVisible}
           className={`grid min-w-0 transition-[grid-template-rows,opacity] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none ${previewVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
           style={{ gridTemplateRows: previewVisible ? "minmax(0, 1fr)" : "minmax(0, 0fr)" }}
         >
-          <div className="min-h-0 min-w-0 overflow-hidden">
+          <div className={`min-h-0 min-w-0 ${previewVisible ? "overflow-visible" : "overflow-hidden"}`}>
             <DocumentPreview source={active.file} onHide={() => setPreviewVisible(false)} />
           </div>
         </div>
