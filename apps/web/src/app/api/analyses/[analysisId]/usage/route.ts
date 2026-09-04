@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
-import { analysisAccessTokenForUser } from "@/lib/analysis-access";
+import { analysisOwnerHeaders, proxyInternalJson } from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
-
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ analysisId: string }> },
 ) {
   const user = await getWebUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { analysisId } = await context.params;
-  const token = analysisAccessTokenForUser(user.id);
-  const upstream = await fetch(
-    `${INTERNAL_API_URL}/analyses/${encodeURIComponent(analysisId)}/usage`,
-    { cache: "no-store", headers: { "X-Analysis-Access-Token": token } },
-  );
-  return NextResponse.json(await upstream.json(), { status: upstream.status });
+  return proxyInternalJson(`/analyses/${encodeURIComponent(analysisId)}/usage`, {
+    cache: "no-store",
+    headers: analysisOwnerHeaders(user.id),
+  });
 }

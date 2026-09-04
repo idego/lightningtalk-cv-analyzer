@@ -23,6 +23,8 @@ export function SettingsPanel() {
   const [retentionDays, setRetentionDays] = useState("90");
   const [retentionLoading, setRetentionLoading] = useState(true);
   const [retentionMessage, setRetentionMessage] = useState<string | null>(null);
+  const [retentionCanManage, setRetentionCanManage] = useState(false);
+  const [retentionConfirmOpen, setRetentionConfirmOpen] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
 
@@ -57,28 +59,45 @@ export function SettingsPanel() {
     void fetch("/api/settings/retention", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("retention_unavailable");
-        const body = await response.json() as { days: number };
+        const body = await response.json() as { days: number; canManage?: boolean };
         setRetentionDays(String(body.days));
+        setRetentionCanManage(body.canManage === true);
       })
       .catch(() => setRetentionMessage(t("retentionUnavailable")))
       .finally(() => setRetentionLoading(false));
   }, [t]);
 
-  async function saveRetention() {
+  function requestRetentionSave() {
     const days = Number(retentionDays);
     if (!Number.isInteger(days) || days < 1 || days > 3650) {
       setRetentionMessage(t("enterWholeNumber"));
       return;
     }
+    if (!retentionCanManage) {
+      setRetentionMessage(t("retentionOwnerOnly"));
+      return;
+    }
+    setRetentionMessage(null);
+    setRetentionConfirmOpen(true);
+  }
+
+  async function saveRetention() {
+    const days = Number(retentionDays);
     setRetentionLoading(true);
     setRetentionMessage(null);
-    const response = await fetch("/api/settings/retention", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ days }),
-    });
-    setRetentionLoading(false);
-    setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    try {
+      const response = await fetch("/api/settings/retention", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    } catch {
+      setRetentionMessage(t("retentionCouldNotSave"));
+    } finally {
+      setRetentionLoading(false);
+      setRetentionConfirmOpen(false);
+    }
   }
 
   async function deleteAllAnalyses() {
@@ -138,14 +157,28 @@ export function SettingsPanel() {
     </section>
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
+      <p className="mt-1 text-sm text-muted-foreground">{t("retentionGlobalDescription")}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
         <label htmlFor="retention-days">{t("keepFor")}</label>
-        <input id="retention-days" type="number" min={1} max={3650} value={retentionDays} onChange={(event) => setRetentionDays(event.target.value)} className="h-10 w-24 rounded-md border bg-background px-3" />
+        <input id="retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={retentionLoading || !retentionCanManage} onChange={(event) => setRetentionDays(event.target.value)} className="h-10 w-24 rounded-md border bg-background px-3 disabled:cursor-not-allowed disabled:opacity-60" />
         <span>{t("days")}</span>
-        <Button variant="outline" onClick={() => void saveRetention()} disabled={retentionLoading}>{t("save")}</Button>
+        <Button variant="outline" onClick={requestRetentionSave} disabled={retentionLoading || !retentionCanManage}>{t("save")}</Button>
       </div>
+      {!retentionLoading && !retentionCanManage ? <p className="mt-2 text-xs text-muted-foreground">{t("retentionOwnerOnly")}</p> : null}
       <div className="mt-5 border-t pt-5"><Button variant="outline" className="text-destructive hover:text-destructive" disabled={deletingAll} onClick={() => setDeleteAllOpen(true)}><Trash2 />{t("deleteAll")}</Button></div>
       {retentionMessage ? <p className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
+      <Dialog open={retentionConfirmOpen} onOpenChange={(open) => { if (!retentionLoading) setRetentionConfirmOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("confirmRetentionChange")}</DialogTitle>
+            <DialogDescription>{t("retentionGlobalConfirm", { days: retentionDays })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={retentionLoading} onClick={() => setRetentionConfirmOpen(false)}>{t("cancel")}</Button>
+            <Button disabled={retentionLoading} onClick={() => void saveRetention()}>{t("save")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={deleteAllOpen} onOpenChange={(open) => { if (!deletingAll) setDeleteAllOpen(open); }}>
         <DialogContent>
           <DialogHeader>

@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
@@ -136,11 +136,11 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
     const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
-    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
+    const payload = await response.json().catch(() => null) as AnalysisReport | null;
     if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
     if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
-    return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(payload, payload.analysis_access_token) };
+    return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: payload };
   }
 
   async function submit() {

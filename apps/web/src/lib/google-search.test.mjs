@@ -78,3 +78,19 @@ test("falls back to the institution only", () => {
   );
   assert.equal(educationGoogleSearchUrl({ institution: null }), null);
 });
+
+
+test("uses a certificate-only education subject when institution is missing", () => {
+  const url = educationGoogleSearchUrl({ institution: null, certificate: "AWS Cloud Practitioner" });
+  assert.equal(new URL(url).searchParams.get("q"), "AWS Cloud Practitioner");
+});
+
+
+test("falls back from program to certificate context for an institution", () => {
+  const url = educationGoogleSearchUrl({
+    institution: "Example University",
+    program: null,
+    certificate: "AWS Cloud Practitioner",
+  });
+  assert.equal(new URL(url).searchParams.get("q"), "Example University AWS Cloud Practitioner");
+});

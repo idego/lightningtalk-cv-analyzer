@@ -4,6 +4,9 @@ import type { AnalysisReport } from "@/lib/analyze-types";
 import type { FeedbackResponse, FeedbackTarget } from "@/lib/feedback-types";
 import { useCopy } from "@/lib/app-settings";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { captureFeedbackContext } from "./feedback-context-snapshot";
+import { feedbackMorphPath } from "./feedback-control-motion";
+import { submitFeedback, type FeedbackSubmissionBody } from "./feedback-submission";
 import "./feedback-control.css";
 type Rating = "helpful" | "not_helpful" | null;
 type Phase =
@@ -13,50 +16,6 @@ type Phase =
   | "launching"
   | "delivered"
   | "resetting";
-const B = [
-    [
-      [13, 2],
-      [17, 2.8],
-      [20, 5.5],
-      [22, 9],
-      [21.5, 13],
-      [19, 16.5],
-      [15, 18],
-      [11, 18],
-    ],
-    [
-      [11, 18],
-      [8, 20],
-      [8.5, 17.2],
-      [5.5, 15],
-      [4, 11],
-      [4.8, 7],
-      [7, 4],
-      [13, 2],
-    ],
-  ],
-  X = [
-    [
-      [6, 6],
-      [7.7, 7.7],
-      [9.4, 9.4],
-      [11.1, 11.1],
-      [12.9, 12.9],
-      [14.6, 14.6],
-      [16.3, 16.3],
-      [18, 18],
-    ],
-    [
-      [18, 6],
-      [16.3, 7.7],
-      [14.6, 9.4],
-      [12.9, 11.1],
-      [11.1, 12.9],
-      [9.4, 14.6],
-      [7.7, 16.3],
-      [6, 18],
-    ],
-  ];
 export function FeedbackControl({
   analysisId,
   target,
@@ -98,23 +57,9 @@ export function FeedbackControl({
       rating !== null ||
       (normalized.length > 0 && normalized.length <= 180),
     disabledReason = t("feedbackSelectionRequired");
-  const draw = useCallback(
-    (value: number) =>
-      path.current?.setAttribute(
-        "d",
-        B.map((line, li) =>
-          line
-            .map((point, i) => {
-              const t = X[li][i],
-                x = point[0] + (t[0] - point[0]) * value,
-                y = point[1] + (t[1] - point[1]) * value;
-              return `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
-            })
-            .join(""),
-        ).join(""),
-      ),
-    [],
-  );
+  const draw = useCallback((value: number) => {
+    path.current?.setAttribute("d", feedbackMorphPath(value));
+  }, []);
   const morph = useCallback(
     (targetValue: number) => {
       if (frame.current) cancelAnimationFrame(frame.current);
@@ -221,12 +166,8 @@ export function FeedbackControl({
   async function send() {
     if (!valid || sending) return;
     setError(false);
-    const contextElement = anchor.current?.closest<HTMLElement>("[data-feedback-snapshot]"),
-      contextLabel = contextElement?.dataset.feedbackSnapshot?.trim() || null,
-      contextClone = contextElement?.cloneNode(true) as HTMLElement | undefined;
-    contextClone?.querySelectorAll("[data-feedback-target]").forEach((control) => control.remove());
-    const contextText = contextClone?.innerText.trim().slice(0, 12000) || null;
-    const body = failure
+    const { contextLabel, contextText } = captureFeedbackContext(anchor.current);
+    const body: FeedbackSubmissionBody = failure
       ? {
           rating: "not_helpful",
           reason: "operation_failed",
@@ -244,16 +185,11 @@ export function FeedbackControl({
           context_report: report ?? null,
         };
     try {
-      const response = await fetch(
-        `/api/analyses/${encodeURIComponent(analysisId)}/feedback/${encodeURIComponent(target.target_id)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      );
-      if (!response.ok) throw new Error();
-      setConfirmed(await response.json());
+      setConfirmed(await submitFeedback({
+        analysisId,
+        targetId: target.target_id,
+        body,
+      }));
       sessionStorage.removeItem(draftKey);
       const sendRect = cloud.current
           ?.querySelector<HTMLButtonElement>(".feedback-send")

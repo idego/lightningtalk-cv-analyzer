@@ -17,11 +17,15 @@ export function FeedbackAccess() {
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
   async function load() {
-    const response = await fetch("/api/feedback/access", { cache: "no-store" });
-    if (!response.ok) return;
-    const data = await response.json();
-    setMembers(data.members);
-    setCollectionEnabled(data.collectionEnabled);
+    try {
+      const response = await fetch("/api/feedback/access", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setMembers(data.members);
+      setCollectionEnabled(data.collectionEnabled);
+    } catch {
+      setError(t("feedbackUpdateFailed"));
+    }
   }
 
   useEffect(() => {
@@ -32,20 +36,25 @@ export function FeedbackAccess() {
         if (!active || !data) return;
         setMembers(data.members);
         setCollectionEnabled(data.collectionEnabled);
-      });
+      })
+      .catch(() => { if (active) setError(t("feedbackUpdateFailed")); });
     return () => { active = false; };
-  }, []);
+  }, [t]);
 
   async function grant() {
     setError("");
-    const response = await fetch("/api/feedback/access", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role }),
-    });
-    if (!response.ok) { setError((await response.json()).error); return; }
-    setEmail("");
-    await load();
+    try {
+      const response = await fetch("/api/feedback/access", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role }),
+      });
+      if (!response.ok) { setError((await response.json()).error); return; }
+      setEmail("");
+      await load();
+    } catch {
+      setError(t("feedbackUpdateFailed"));
+    }
   }
 
   async function revoke(memberEmail: string) {
@@ -55,23 +64,32 @@ export function FeedbackAccess() {
     }
     setError("");
     setConfirmRevoke(null);
-    const response = await fetch("/api/feedback/access", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: memberEmail }),
-    });
-    if (!response.ok) { setError((await response.json()).error); return; }
-    await load();
+    try {
+      const response = await fetch("/api/feedback/access", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: memberEmail }),
+      });
+      if (!response.ok) { setError((await response.json()).error); return; }
+      await load();
+    } catch {
+      setError(t("feedbackDeleteFailed"));
+    }
   }
 
   async function toggleCollection() {
     const next = !collectionEnabled;
-    const response = await fetch("/api/feedback/access", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ collectionEnabled: next }),
-    });
-    if (response.ok) setCollectionEnabled(next);
+    try {
+      const response = await fetch("/api/feedback/access", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionEnabled: next }),
+      });
+      if (response.ok) setCollectionEnabled(next);
+      else setError(t("feedbackUpdateFailed"));
+    } catch {
+      setError(t("feedbackUpdateFailed"));
+    }
   }
 
   return <section className="mx-auto w-full max-w-[1800px]">

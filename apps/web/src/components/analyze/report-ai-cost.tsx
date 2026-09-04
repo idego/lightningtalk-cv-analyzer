@@ -20,7 +20,7 @@ function formatCost(value: string | null, currency: "USD" | "PLN", locale: strin
 }
 
 export function ReportAiCost({ analysisId }: { analysisId: string }) {
-  const { settings } = useCopy();
+  const { settings, t } = useCopy();
   const company = useAutoResearchState(analysisId, "company");
   const education = useAutoResearchState(analysisId, "education");
   const linkedin = useAutoResearchState(analysisId, "linkedin");
@@ -48,7 +48,7 @@ export function ReportAiCost({ analysisId }: { analysisId: string }) {
     return () => controller.abort();
   }, [analysisId, company?.status, education?.status, linkedin?.status]);
 
-  const label = settings.uiLanguage === "pl" ? "Szacowany koszt AI raportu" : "Estimated report AI cost";
+  const label = t("reportAiCost");
   const usd = usage ? formatCost(usage.estimated_cost_usd, "USD", locale, 2) : "…";
   const pln = usage ? formatCost(usage.estimated_cost_pln, "PLN", locale, 2) : "…";
   const detailedUsd = usage ? formatCost(usage.estimated_cost_usd, "USD", locale, 5) : "…";

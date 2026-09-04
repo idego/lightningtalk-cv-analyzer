@@ -31,13 +31,18 @@ export function companyGoogleSearchUrl({
 export function educationGoogleSearchUrl({
   institution,
   program,
+  certificate,
 }: {
   institution: string | null | undefined;
   program?: string | null;
+  certificate?: string | null;
 }): string | null {
-  const subject = cleanPart(institution);
+  const cleanInstitution = cleanPart(institution);
+  const cleanCertificate = cleanPart(certificate);
+  const subject = cleanInstitution || cleanCertificate;
   if (!subject) return null;
-  return buildGoogleSearchUrl([subject, program]);
+  const context = cleanPart(program) || (cleanInstitution ? cleanCertificate : null);
+  return buildGoogleSearchUrl([subject, context]);
 }
 
 export function linkedinPeopleSearchUrl(query: string | null | undefined): string | null {

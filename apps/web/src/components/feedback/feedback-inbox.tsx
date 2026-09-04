@@ -39,15 +39,23 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
   }
 
   async function load() {
-    const response = await fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" });
-    acceptData(response.ok ? await response.json() : { items: [], counts: {} });
+    try {
+      const response = await fetch(
+        `/api/feedback/inbox${status ? `?status=${status}` : ""}`,
+        { cache: "no-store" },
+      );
+      acceptData(response.ok ? await response.json() : { items: [], counts: {} });
+    } catch {
+      acceptData({ items: [], counts: {} });
+    }
   }
 
   useEffect(() => {
     let active = true;
     fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" })
       .then(async (response) => response.ok ? response.json() : { items: [], counts: {} })
-      .then((value: InboxData) => { if (active) acceptData(value); });
+      .then((value: InboxData) => { if (active) acceptData(value); })
+      .catch(() => { if (active) acceptData({ items: [], counts: {} }); });
     return () => { active = false; };
   }, [status]);
 
@@ -78,23 +86,33 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
     const key = itemKey(item);
     setBusy(key);
     setErrors((current) => ({ ...current, [key]: "" }));
-    const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: nextStatus, note: note.trim() || null }),
-    });
-    if (response.ok) await load();
-    else setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
-    setBusy(null);
+    try {
+      const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus, note: note.trim() || null }),
+      });
+      if (response.ok) await load();
+      else setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
+    } catch {
+      setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function remove(item: InboxItem) {
     const key = itemKey(item);
     if (confirmDelete !== key) { setConfirmDelete(key); return; }
     setBusy(key);
-    const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, { method: "DELETE" });
-    if (response.ok) { setConfirmDelete(null); await load(); }
-    else setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
-    setBusy(null);
+    try {
+      const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, { method: "DELETE" });
+      if (response.ok) { setConfirmDelete(null); await load(); }
+      else setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
+    } catch {
+      setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -119,7 +137,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
       <div className="space-y-3">
         {!data ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingFeedback")}</div> : null}
         {data?.items.map((item) => {
-          const context = feedbackContext(item);
+          const context = feedbackContext(item, t);
           const moduleReport = isAnalysisReport(item.context_report) ? item.context_report : null;
           const moduleCategory = isReportModuleCategory(item.source_category) ? item.source_category : null;
           const key = itemKey(item);

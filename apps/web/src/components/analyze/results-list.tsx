@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
@@ -111,12 +111,12 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
-  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
-  const reviewLabel = settings.uiLanguage === "pl" ? "Wymaga sprawdzenia" : "Needs review";
+  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
+  const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
-    if (sectionStatus === "not_present") return settings.uiLanguage === "pl" ? "Nie znaleziono wpisów w CV." : "No entries were found in the CV.";
-    if (sectionStatus === "failed") return settings.uiLanguage === "pl" ? "Nie udało się przeanalizować tej sekcji." : "This section could not be analyzed.";
-    return settings.uiLanguage === "pl" ? "Nie udało się jednoznacznie ustalić zawartości tej sekcji." : "This section could not be resolved confidently.";
+    if (sectionStatus === "not_present") return t("noEntriesFound");
+    if (sectionStatus === "failed") return t("sectionAnalysisFailed");
+    return t("sectionUnresolved");
   };
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
@@ -133,13 +133,19 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   );
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
+  const overviewFeedbackTarget = feedbackTarget(
+    feedbackManifest,
+    "report_overall",
+    "report",
+    "overall",
+  );
 
   return (
-    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen={readOnly} action={!readOnly && feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen={readOnly} action={!readOnly && overviewFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={overviewFeedbackTarget} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
           {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
-            <h4 id="overview-attention" className="mb-2 text-xs font-semibold text-foreground">{settings.uiLanguage === "pl" ? "Dane wymagające uwagi" : "Data needing attention"}</h4>
+            <h4 id="overview-attention" className="mb-2 text-xs font-semibold text-foreground">{t("dataNeedingAttention")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {overview.attentionRecords.map((item) => <OverviewRow key={item.id} icon={<CircleAlert className="size-4" />} label={reviewLabel} value={item.value} detail={item.detail} tone="bg-rose-500/10 text-rose-700 dark:text-rose-300" />)}
             </div>
@@ -178,11 +184,29 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={educationTone}
-                  action={href ? <GoogleSearchAction href={href} /> : null}
+                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
                 />;
               })}
             </div>
             {!overview.education.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.educationStatus)}</p> : null}
+          </section> : null}
+
+          {overview.certifications.length ? <section aria-labelledby="overview-certifications" className="border-t pt-4">
+            <h4 id="overview-certifications" className="mb-2 text-xs font-semibold text-foreground">{t("certifications")}</h4>
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+              {overview.certifications.map((item) => {
+                const href = educationGoogleSearchUrl({ institution: null, certificate: item.searchSubject, program: item.searchContext });
+                return <OverviewRow
+                  key={item.id}
+                  icon={<Award className="size-4" />}
+                  label={t("certificationEntry")}
+                  value={item.value}
+                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                  tone={educationTone}
+                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
+                />;
+              })}
+            </div>
           </section> : null}
 
           {overview.employment.length || overview.employmentStatus ? <section aria-labelledby="overview-employment" className="border-t pt-4">
@@ -197,7 +221,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                   value={item.value}
                   detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
                   tone={employmentTone}
-                  action={href ? <GoogleSearchAction href={href} /> : null}
+                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
                 />;
               })}
             </div>
@@ -282,6 +306,13 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
 
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
         const presentation = adaptReportInterface(report, settings.uiLanguage);
+        const reportFeedbackManifest = feedback[report.analysis_id];
+        const worthKnowingFeedbackTarget = feedbackTarget(
+          reportFeedbackManifest,
+          "report_overall",
+          "worth_knowing",
+          "section",
+        );
         return (
           <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
@@ -293,15 +324,15 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
                 <FlagList flags={presentation.attention} />
               </HoverDisclosure> : null}
 
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && worthKnowingFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={worthKnowingFeedbackTarget} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.worthKnowing} />
               </HoverDisclosure> : null}
 
-              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} />
+              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} />
 
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
             </CardContent>
           </Card>

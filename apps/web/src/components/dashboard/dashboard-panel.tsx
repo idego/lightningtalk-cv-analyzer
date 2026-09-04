@@ -13,96 +13,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { type AppLanguage, useCopy } from "@/lib/app-settings";
+import { useCopy } from "@/lib/app-settings";
 import type { DeploymentUsageSummary } from "@/lib/usage-types";
 
 const DASHBOARD_CURRENCY_STORAGE_KEY = "cv-analyzer-dashboard-currency";
-
-const labels: Record<AppLanguage, {
-  eyebrow: string;
-  title: string;
-  description: string;
-  reports: string;
-  tokenMetric: string;
-  total: string;
-  average: string;
-  cost: string;
-  totalTokens: string;
-  input: string;
-  cached: string;
-  output: string;
-  usd: string;
-  pln: string;
-  avgTokens: string;
-  avgCost: string;
-  perCompletedReport: string;
-  breakdownTitle: string;
-  breakdownDescription: string;
-  tableOp: string;
-  tableCalls: string;
-  tableTokens: string;
-  tableCost: string;
-  noUsage: string;
-  loadError: string;
-  accountingNote: string;
-}> = {
-  en: {
-    eyebrow: "Deployment health",
-    title: "AI Usage",
-    description: "Deployment-wide token consumption and estimated AI provider cost ledgered across completed analyses.",
-    reports: "Reports processed",
-    tokenMetric: "Tokens",
-    total: "Total",
-    average: "Average",
-    cost: "Estimated cost",
-    totalTokens: "Total tokens",
-    input: "Prompt",
-    cached: "Cached",
-    output: "Completion",
-    usd: "Estimated cost (USD)",
-    pln: "Estimated cost (PLN)",
-    avgTokens: "Avg. tokens / report",
-    avgCost: "Avg. cost / report",
-    perCompletedReport: "Per processed report",
-    breakdownTitle: "Usage by operation",
-    breakdownDescription: "Detailed consumption grouped by pipeline step across all processed reports.",
-    tableOp: "Operation",
-    tableCalls: "Calls",
-    tableTokens: "Tokens",
-    tableCost: "Est. Cost (USD)",
-    noUsage: "No AI operations have been ledgered yet.",
-    loadError: "Failed to load usage metrics.",
-    accountingNote: "Counts and estimates reflect immutable accounting facts ledgered upon successful provider completion. Retained deployment totals survive report deletion and omit personal data. PLN estimates use the configured deployment rate (1 USD = {rate} PLN).",
-  },
-  pl: {
-    eyebrow: "Kondycja wdrożenia",
-    title: "Zużycie AI",
-    description: "Łączne zużycie tokenów i szacowany koszt dostawców AI zarejestrowane dla przetworzonych analiz.",
-    reports: "Przetworzone raporty",
-    tokenMetric: "Tokeny",
-    total: "Łącznie",
-    average: "Średnio",
-    cost: "Szacowany koszt",
-    totalTokens: "Łącznie tokenów",
-    input: "Prompt",
-    cached: "Cache",
-    output: "Odpowiedź",
-    usd: "Szacowany koszt (USD)",
-    pln: "Szacowany koszt (PLN)",
-    avgTokens: "Śr. tokenów / raport",
-    avgCost: "Śr. koszt / raport",
-    perCompletedReport: "Na przetworzony raport",
-    breakdownTitle: "Zużycie według operacji",
-    breakdownDescription: "Szczegółowe zużycie z podziałem na etapy analizy dla wszystkich przetworzonych raportów.",
-    tableOp: "Operacja",
-    tableCalls: "Wywołania",
-    tableTokens: "Tokeny",
-    tableCost: "Szac. koszt (USD)",
-    noUsage: "Nie zarejestrowano jeszcze żadnych operacji AI.",
-    loadError: "Nie udało się pobrać statystyk zużycia.",
-    accountingNote: "Statystyki odzwierciedlają niezmienne fakty księgowe rejestrowane po udanej odpowiedzi dostawcy. Zachowane sumy przetrwają usunięcie raportów i nie zawierają danych osobowych. Wartości w PLN bazują na kursie wdrożenia (1 USD = {rate} PLN).",
-  },
-};
 
 function formatNumber(value: number, locale: string, fractionDigits = 0): string {
   return new Intl.NumberFormat(locale, {
@@ -190,9 +104,8 @@ function MetricSwitch<T extends string>({
 }
 
 export function DashboardPanel() {
-  const { settings } = useCopy();
+  const { settings, t } = useCopy();
   const locale = settings.uiLanguage === "pl" ? "pl-PL" : "en-US";
-  const copy = labels[settings.uiLanguage];
   const [summary, setSummary] = useState<DeploymentUsageSummary | null>(null);
   const [error, setError] = useState(false);
   const [tokenMode, setTokenMode] = useState<"total" | "average">("total");
@@ -240,40 +153,40 @@ export function DashboardPanel() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
-      {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{copy.loadError}</div> : null}
+      {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{t("dashboardLoadError")}</div> : null}
 
-      <section className="space-y-4" aria-label={copy.title}>
+      <section className="space-y-4" aria-label={t("dashboardUsageTitle")}>
         <div className="flex w-fit items-center gap-3 py-1">
           <span className="flex size-9 items-center justify-center rounded-md bg-muted text-foreground"><FileCheck2 className="size-4" /></span>
           <div>
-            <p className="text-xs font-medium text-muted-foreground">{copy.reports}</p>
+            <p className="text-xs font-medium text-muted-foreground">{t("dashboardReportsProcessed")}</p>
             <p className="text-xl font-semibold tracking-tight tabular-nums">{reports}</p>
           </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <MetricCard
             icon={<Sigma className="size-4" />}
-            title={copy.tokenMetric}
+            title={t("dashboardTokens")}
             value={displayedTokens}
-            action={<MetricSwitch value={tokenMode} onChange={setTokenMode} label={copy.tokenMetric} options={[{ value: "total", label: copy.total }, { value: "average", label: copy.average }]} />}
+            action={<MetricSwitch value={tokenMode} onChange={setTokenMode} label={t("dashboardTokens")} options={[{ value: "total", label: t("dashboardTotal") }, { value: "average", label: t("dashboardAverage") }]} />}
             detail={tokenMode === "average"
-              ? copy.perCompletedReport
-              : summary ? <span className="flex flex-wrap gap-x-3 gap-y-1"><span>{copy.input}: {formatNumber(summary.input_tokens, locale)}</span><span>{copy.cached}: {formatNumber(summary.cached_input_tokens, locale)}</span><span>{copy.output}: {formatNumber(summary.output_tokens, locale)}</span></span> : null}
+              ? t("dashboardPerProcessedReport")
+              : summary ? <span className="flex flex-wrap gap-x-3 gap-y-1"><span>{t("dashboardPrompt")}: {formatNumber(summary.input_tokens, locale)}</span><span>{t("dashboardCached")}: {formatNumber(summary.cached_input_tokens, locale)}</span><span>{t("dashboardCompletion")}: {formatNumber(summary.output_tokens, locale)}</span></span> : null}
           />
           <MetricCard
             icon={<ReceiptText className="size-4" />}
-            title={copy.cost}
+            title={t("dashboardEstimatedCost")}
             value={displayedCost}
             detail={currency === "PLN" ? `1 USD = ${exchangeRate} PLN` : undefined}
-            action={<MetricSwitch value={currency} onChange={selectCurrency} label={copy.cost} options={[{ value: "USD", label: "USD" }, { value: "PLN", label: "PLN" }]} />}
+            action={<MetricSwitch value={currency} onChange={selectCurrency} label={t("dashboardEstimatedCost")} options={[{ value: "USD", label: "USD" }, { value: "PLN", label: "PLN" }]} />}
           />
         </div>
       </section>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">{copy.breakdownTitle}</CardTitle>
-          <CardDescription>{copy.breakdownDescription}</CardDescription>
+          <CardTitle className="text-base">{t("dashboardUsageByOperation")}</CardTitle>
+          <CardDescription>{t("dashboardBreakdownDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           {summary?.operations.length ? (
@@ -281,10 +194,10 @@ export function DashboardPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
-                    <th className="pb-3 pr-4 font-medium">{copy.tableOp}</th>
-                    <th className="pb-3 px-4 font-medium text-right">{copy.tableCalls}</th>
-                    <th className="pb-3 px-4 font-medium text-right">{copy.tableTokens}</th>
-                    <th className="pb-3 pl-4 font-medium text-right">{copy.tableCost}</th>
+                    <th className="pb-3 pr-4 font-medium">{t("dashboardOperation")}</th>
+                    <th className="pb-3 px-4 font-medium text-right">{t("dashboardCalls")}</th>
+                    <th className="pb-3 px-4 font-medium text-right">{t("dashboardTokens")}</th>
+                    <th className="pb-3 pl-4 font-medium text-right">{t("dashboardEstimatedCostUsd")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -299,7 +212,7 @@ export function DashboardPanel() {
                 </tbody>
               </table>
             </div>
-          ) : summary ? <p className="px-4 py-6 text-sm text-muted-foreground">{copy.noUsage}</p> : <div className="h-28 animate-pulse bg-muted/20" />}
+          ) : summary ? <p className="px-4 py-6 text-sm text-muted-foreground">{t("dashboardNoUsage")}</p> : <div className="h-28 animate-pulse bg-muted/20" />}
         </CardContent>
       </Card>
     </div>

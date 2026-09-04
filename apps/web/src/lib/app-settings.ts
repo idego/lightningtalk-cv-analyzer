@@ -124,6 +124,7 @@ export function useAppSettings() {
 const copy = {
   en: {
     analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings",
+    dashboardUsageTitle: "AI Usage", dashboardReportsProcessed: "Reports processed", dashboardTokens: "Tokens", dashboardTotal: "Total", dashboardAverage: "Average", dashboardEstimatedCost: "Estimated cost", dashboardPrompt: "Prompt", dashboardCached: "Cached", dashboardCompletion: "Completion", dashboardPerProcessedReport: "Per processed report", dashboardUsageByOperation: "Usage by operation", dashboardBreakdownDescription: "Detailed consumption grouped by pipeline step across all processed reports.", dashboardOperation: "Operation", dashboardCalls: "Calls", dashboardEstimatedCostUsd: "Est. Cost (USD)", dashboardNoUsage: "No AI operations have been ledgered yet.", dashboardLoadError: "Failed to load usage metrics.",
     uploadTitle: "Upload CV files",
     drop: "Drag and drop files here, or click to select", accepted: "Accepted: PDF, DOCX",
     queued: "Queued files", valid: "valid", analyzeFiles: "Analyze files", reset: "Reset", cancel: "Cancel", removeFile: "Remove {name}", analysisCancelled: "Analysis cancelled.",
@@ -131,14 +132,15 @@ const copy = {
     showCv: "Show CV", hideCv: "Hide CV", copyAnalysisLink: "Copy link", copyingAnalysisLink: "Copying...", analysisLinkCopied: "Link copied", analysisLinkCopyFailed: "Copy failed", loadingAnalysis: "Loading analysis...", unsupportedFiles: "Unsupported files: {names}. Use PDF or DOCX.",
     recentAnalyses: "Recent analyses", noHistory: "No saved analyses yet.", showMoreAnalyses: "Show more ({count})", showFewerAnalyses: "Show fewer",
     originalNotRetained: "The original CV was not retained.", documentFetchFailed: "The stored CV could not be loaded.", deleteAnalysis: "Delete analysis",
-    dataRetention: "Data retention", keepFor: "Keep completed analyses for", days: "days", save: "Save",
+    dataRetention: "Data retention", keepFor: "Keep completed analyses for", days: "days", save: "Save", retentionGlobalDescription: "Retention is deployment-wide and affects every user's saved analyses.", retentionOwnerOnly: "Only a feedback owner can change deployment-wide retention.", confirmRetentionChange: "Change global retention?", retentionGlobalConfirm: "Set the deployment-wide retention window to {days} days? Analyses older than this can be purged for every user.",
     deleteAll: "Delete all analyses", confirmDeleteAll: "Delete all", deleteAllDescription: "This permanently deletes every saved analysis and stored CV. This action cannot be undone.", deleting: "Deleting...",
     health: "System health", refresh: "Refresh status", refreshing: "Refreshing...", updated: "Updated", ready: "Ready", degraded: "Needs attention",
-    needsAttention: "Needs attention", worthKnowing: "Worth knowing",
+    needsAttention: "Needs attention", worthKnowing: "Worth knowing", needsReview: "Needs review", dataNeedingAttention: "Data needing attention", noEntriesFound: "No entries were found in the CV.", sectionAnalysisFailed: "This section could not be analyzed.", sectionUnresolved: "This section could not be resolved confidently.", reportAiCost: "Estimated report AI cost",
+    feedbackLocationResolved: "GeoNames resolved the declared city and country", feedbackLocationAmbiguous: "GeoNames location is ambiguous", feedbackLocationUnresolved: "GeoNames did not resolve the declared location", feedbackLocationMismatch: "Declared city and country mismatch", feedbackPhoneCountryMismatch: "Declared country and phone country differ", feedbackEmailTypo: "Possible email-domain typo", feedbackMissingCvInformation: "Missing CV information", feedbackLinkedinNotFound: "No matching LinkedIn profile found", feedbackResultNumber: "Result {index}", feedbackProfileNumber: "Profile {index}",
     extracted: "CV overview", whyItMatters: "Why it matters", whatToCheck: "What to check", evidence: "Evidence",
     contact: "Contact", candidateName: "Candidate name", phoneNumber: "Phone number", location: "Location",
     statedLocation: "Stated location", resolvedLocation: "Resolved location", postalCode: "Postal code", postalCountry: "Postal country", euStatus: "EU status",
-    outsideEu: "Outside the EU", insideEu: "Inside the EU", education: "Education", educationEntry: "Education entry", experience: "Experience", employmentEntry: "Employment entry",
+    outsideEu: "Outside the EU", insideEu: "Inside the EU", education: "Education", educationEntry: "Education entry", certifications: "Certifications", certificationEntry: "Certification", experience: "Experience", employmentEntry: "Employment entry",
     noCvDetails: "No CV details extracted.",
     closeFeedback: "Close feedback", reportProblem: "Report a problem", rateResult: "Rate result", giveFeedback: "Give feedback", resultFeedback: "Result feedback", helpful: "Helpful", needsImprovement: "Needs improvement", whatToImprove: "What should be improved?", writeFeedback: "Write feedback…", feedbackComment: "Comment", sendFeedback: "Send feedback", feedbackSelectionRequired: "Choose a rating or add a comment", feedbackSaveFailed: "Could not save feedback", feedbackSent: "Sent!",
     feedbackFilters: "Filters", feedbackStatusFilters: "Status filters", all: "All", statusNew: "New", statusReviewing: "Reviewing", statusPlanned: "Planned", statusResolved: "Resolved", statusWontFix: "Won't fix", manageAccess: "Manage access", loadingFeedback: "Loading feedback…", current: "Current", deleteFeedback: "Delete feedback", confirmDeleteFeedback: "Click again to delete feedback", clickAgainToConfirm: "Click again to confirm", commentFrom: "Comment from: {author}", unknownAuthor: "unknown author", showCvExcerpt: "Show CV excerpt", showReportModule: "Show report section", errorDetails: "Error details", teamNote: "Team note", teamNotePlaceholder: "Add context, a decision, or the next step…", saveNote: "Save note", noFeedbackForFilter: "No feedback for this filter.", unsavedFeedbackNote: "You have an unsaved feedback note. Leave this page?", feedbackUpdateFailed: "Could not save changes.", feedbackDeleteFailed: "Could not delete feedback.", feedbackAccess: "Feedback access", feedbackAccessDescription: "Manage who can view and handle feedback.", feedbackCollection: "Feedback collection", feedbackCollectionDescription: "Hide feedback buttons for all users.", enabled: "Enabled", disabled: "Disabled", companyEmail: "Company email", reviewer: "Reviewer", owner: "Owner", grantAccess: "Grant access", revokeAccess: "Revoke",
@@ -166,6 +168,7 @@ const copy = {
   },
   pl: {
     analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia",
+    dashboardUsageTitle: "Zużycie AI", dashboardReportsProcessed: "Przetworzone raporty", dashboardTokens: "Tokeny", dashboardTotal: "Łącznie", dashboardAverage: "Średnio", dashboardEstimatedCost: "Szacowany koszt", dashboardPrompt: "Prompt", dashboardCached: "Cache", dashboardCompletion: "Odpowiedź", dashboardPerProcessedReport: "Na przetworzony raport", dashboardUsageByOperation: "Zużycie według operacji", dashboardBreakdownDescription: "Szczegółowe zużycie z podziałem na etapy analizy dla wszystkich przetworzonych raportów.", dashboardOperation: "Operacja", dashboardCalls: "Wywołania", dashboardEstimatedCostUsd: "Szac. koszt (USD)", dashboardNoUsage: "Nie zarejestrowano jeszcze żadnych operacji AI.", dashboardLoadError: "Nie udało się pobrać statystyk zużycia.",
     uploadTitle: "Dodaj pliki CV",
     drop: "Przeciągnij pliki tutaj lub kliknij, aby je wybrać", accepted: "Obsługiwane: PDF, DOCX",
     queued: "Pliki w kolejce", valid: "poprawnych", analyzeFiles: "Analizuj pliki", reset: "Wyczyść", cancel: "Anuluj", removeFile: "Usuń {name}", analysisCancelled: "Analiza anulowana.",
@@ -173,14 +176,15 @@ const copy = {
     showCv: "Pokaż CV", hideCv: "Ukryj CV", copyAnalysisLink: "Kopiuj link", copyingAnalysisLink: "Kopiowanie...", analysisLinkCopied: "Skopiowano link", analysisLinkCopyFailed: "Nie udało się skopiować", loadingAnalysis: "Ładowanie analizy...", unsupportedFiles: "Nieobsługiwane pliki: {names}. Użyj PDF lub DOCX.",
     recentAnalyses: "Ostatnie analizy", noHistory: "Brak zapisanych analiz.", showMoreAnalyses: "Pokaż więcej ({count})", showFewerAnalyses: "Pokaż mniej",
     originalNotRetained: "Oryginalny plik CV nie został zachowany.", documentFetchFailed: "Nie udało się wczytać zapisanego CV.", deleteAnalysis: "Usuń analizę",
-    dataRetention: "Retencja danych", keepFor: "Przechowuj ukończone analizy przez", days: "dni", save: "Zapisz",
+    dataRetention: "Retencja danych", keepFor: "Przechowuj ukończone analizy przez", days: "dni", save: "Zapisz", retentionGlobalDescription: "Retencja jest globalna dla wdrożenia i dotyczy zapisanych analiz wszystkich użytkowników.", retentionOwnerOnly: "Tylko właściciel feedbacku może zmienić globalną retencję.", confirmRetentionChange: "Zmienić globalną retencję?", retentionGlobalConfirm: "Ustawić globalny okres retencji na {days} dni? Starsze analizy wszystkich użytkowników mogą zostać usunięte.",
     deleteAll: "Usuń wszystkie analizy", confirmDeleteAll: "Usuń wszystkie", deleteAllDescription: "To trwale usunie wszystkie zapisane analizy i przechowywane pliki CV. Tej operacji nie można cofnąć.", deleting: "Usuwanie...",
     health: "Stan systemu", refresh: "Odśwież status", refreshing: "Odświeżanie...", updated: "Zaktualizowano", ready: "Gotowe", degraded: "Wymaga uwagi",
-    needsAttention: "Wymaga uwagi", worthKnowing: "Warto wiedzieć",
+    needsAttention: "Wymaga uwagi", worthKnowing: "Warto wiedzieć", needsReview: "Wymaga sprawdzenia", dataNeedingAttention: "Dane wymagające uwagi", noEntriesFound: "Nie znaleziono wpisów w CV.", sectionAnalysisFailed: "Nie udało się przeanalizować tej sekcji.", sectionUnresolved: "Nie udało się jednoznacznie ustalić zawartości tej sekcji.", reportAiCost: "Szacowany koszt AI raportu",
+    feedbackLocationResolved: "GeoNames rozpoznał deklarowane miasto i kraj", feedbackLocationAmbiguous: "Lokalizacja GeoNames jest niejednoznaczna", feedbackLocationUnresolved: "GeoNames nie rozpoznał deklarowanej lokalizacji", feedbackLocationMismatch: "Deklarowane miasto i kraj są niespójne", feedbackPhoneCountryMismatch: "Deklarowany kraj i kraj numeru telefonu są różne", feedbackEmailTypo: "Możliwa literówka w domenie e-mail", feedbackMissingCvInformation: "Brakujące informacje w CV", feedbackLinkedinNotFound: "Nie znaleziono pasującego profilu LinkedIn", feedbackResultNumber: "Wynik {index}", feedbackProfileNumber: "Profil {index}",
     extracted: "Podsumowanie CV", whyItMatters: "Dlaczego to ważne", whatToCheck: "Co sprawdzić", evidence: "Dowód",
     contact: "Kontakt", candidateName: "Imię i nazwisko kandydata", phoneNumber: "Numer telefonu", location: "Lokalizacja",
     statedLocation: "Deklarowana lokalizacja", resolvedLocation: "Rozpoznana lokalizacja", postalCode: "Kod pocztowy", postalCountry: "Kraj kodu pocztowego", euStatus: "Status UE",
-    outsideEu: "Poza UE", insideEu: "W UE", education: "Edukacja", educationEntry: "Wpis edukacyjny", experience: "Doświadczenie", employmentEntry: "Wpis zatrudnienia",
+    outsideEu: "Poza UE", insideEu: "W UE", education: "Edukacja", educationEntry: "Wpis edukacyjny", certifications: "Certyfikaty", certificationEntry: "Certyfikat", experience: "Doświadczenie", employmentEntry: "Wpis zatrudnienia",
     noCvDetails: "Nie wyodrębniono danych z CV.",
     closeFeedback: "Zamknij feedback", reportProblem: "Zgłoś problem", rateResult: "Oceń wynik", giveFeedback: "Przekaż opinię", resultFeedback: "Feedback do wyniku", helpful: "Pomocny", needsImprovement: "Do poprawy", whatToImprove: "Co poprawić?", writeFeedback: "Napisz…", feedbackComment: "Komentarz", sendFeedback: "Wyślij", feedbackSelectionRequired: "Wybierz ocenę lub dodaj komentarz", feedbackSaveFailed: "Nie udało się zapisać", feedbackSent: "Wysłano!",
     feedbackFilters: "Filtry", feedbackStatusFilters: "Filtry statusu", all: "Wszystkie", statusNew: "Nowy", statusReviewing: "W trakcie", statusPlanned: "Zaplanowany", statusResolved: "Rozwiązany", statusWontFix: "Nie naprawiamy", manageAccess: "Zarządzaj dostępem", loadingFeedback: "Ładowanie feedbacku…", current: "Aktualny", deleteFeedback: "Usuń feedback", confirmDeleteFeedback: "Kliknij ponownie, aby usunąć feedback", clickAgainToConfirm: "Kliknij ponownie, aby potwierdzić", commentFrom: "Komentarz od: {author}", unknownAuthor: "autor nieznany", showCvExcerpt: "Pokaż fragment CV", showReportModule: "Pokaż sekcję raportu", errorDetails: "Szczegóły błędu", teamNote: "Notatka zespołu", teamNotePlaceholder: "Dodaj kontekst, decyzję albo kolejny krok…", saveNote: "Zapisz notatkę", noFeedbackForFilter: "Brak feedbacku dla wybranego filtra.", unsavedFeedbackNote: "Masz niezapisaną notatkę do feedbacku. Czy na pewno chcesz opuścić stronę?", feedbackUpdateFailed: "Nie udało się zapisać zmian.", feedbackDeleteFailed: "Nie udało się usunąć feedbacku.", feedbackAccess: "Dostęp do feedbacku", feedbackAccessDescription: "Zarządzaj osobami, które mogą przeglądać i obsługiwać feedback.", feedbackCollection: "Zbieranie feedbacku", feedbackCollectionDescription: "Ukryj przyciski feedbacku wszystkim użytkownikom.", enabled: "Włączone", disabled: "Wyłączone", companyEmail: "Firmowy adres e-mail", reviewer: "Recenzent", owner: "Właściciel", grantAccess: "Nadaj dostęp", revokeAccess: "Cofnij",
@@ -209,14 +213,24 @@ const copy = {
 } as const;
 
 export type CopyKey = keyof typeof copy.en;
+export function translateCopy(
+  language: AppLanguage,
+  key: CopyKey,
+  values?: Record<string, string | number>,
+): string {
+  let value = copy[language][key] as string;
+  for (const [name, replacement] of Object.entries(values ?? {})) {
+    value = value.replaceAll(`{${name}}`, String(replacement));
+  }
+  return value;
+}
+
 export function useCopy() {
   const settings = useAppSettings();
-  const t = useCallback((key: CopyKey, values?: Record<string, string | number>) => {
-    let value = copy[settings.uiLanguage][key] as string;
-    for (const [name, replacement] of Object.entries(values ?? {})) {
-      value = value.replaceAll(`{${name}}`, String(replacement));
-    }
-    return value;
-  }, [settings.uiLanguage]);
+  const t = useCallback(
+    (key: CopyKey, values?: Record<string, string | number>) =>
+      translateCopy(settings.uiLanguage, key, values),
+    [settings.uiLanguage],
+  );
   return { settings, t };
 }

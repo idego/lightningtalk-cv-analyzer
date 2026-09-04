@@ -25,17 +25,19 @@ function EducationResult({ credential }: { credential: Credential }) {
   const searchHref = educationGoogleSearchUrl({
     institution: credential.institution,
     program: credential.program,
+    certificate: credential.certificate,
   });
-  const details = [credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ");
+  const subject = credential.institution ?? credential.certificate ?? t("educationResearch");
+  const details = [credential.certificate && credential.institution ? credential.certificate : null, credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ");
 
   return <HoverDisclosure
     className="rounded-md border bg-muted/20 p-3 text-sm"
     allowHover
-    feedbackSnapshotLabel={credential.institution ?? t("educationResearch")}
+    feedbackSnapshotLabel={subject}
     headerClassName="flex-wrap sm:flex-nowrap"
     actionClassName="w-full sm:w-auto"
-    title={<div className="flex min-w-0 items-baseline gap-2"><strong className="min-w-0 truncate">{credential.institution}</strong>{credential.program ? <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{credential.program}</span> : null}</div>}
-    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} /> : null}</div>}
+    title={<div className="flex min-w-0 items-baseline gap-2"><strong className="min-w-0 truncate">{subject}</strong>{credential.program ? <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{credential.program}</span> : null}</div>}
+    action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} subject={subject} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
     {details ? <p className="text-muted-foreground">{details}</p> : null}
@@ -88,6 +90,13 @@ export function EducationResearchPanel({
   async function startResearch() {
     await getAutoResearchOrchestrator()?.runManual(report, settings, "education");
   }
+  const sectionFeedbackTarget = feedbackTarget(
+    feedbackManifest,
+    "education_research_result",
+    "education_research",
+    "section",
+  );
+
 
   return <HoverDisclosure
     className="rounded-md border p-3"
@@ -107,11 +116,11 @@ export function EducationResearchPanel({
         busyAriaLabel={t("educationResearchInProgress")}
         disabledReason={!enabled ? t("noEducationEntries") : undefined}
       /> : null}
-      {!readOnly && hasContent && feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section")!} /> : null}
+      {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
     </div>}
   >
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
     <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
-    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="ml-2 pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pl-3 pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
+    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution ?? credential.certificate}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="ml-2 pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pl-3 pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
   </HoverDisclosure>;
 }

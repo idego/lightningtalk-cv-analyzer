@@ -17,13 +17,11 @@ export function AnalysisWorkspace({
   entries,
   compact = false,
   onBack,
-  analyzedCount,
   readOnly = false,
 }: {
   entries: AnalyzedFile[];
   compact?: boolean;
   onBack?: () => void;
-  analyzedCount?: string;
   readOnly?: boolean;
 }) {
   const { t } = useCopy();
@@ -65,7 +63,6 @@ export function AnalysisWorkspace({
     <div className="sticky top-14 z-20 bg-background/95 backdrop-blur">
       <PageBackToolbar
         onBack={onBack}
-        detail={analyzedCount ? <p className="text-sm text-muted-foreground">{analyzedCount}</p> : null}
         center={!hasOriginalFiles ? <p className="min-w-0 truncate text-center text-xs text-foreground/75 sm:text-sm" title={t("originalNotRetained")}>{t("originalNotRetained")}</p> : null}
         action={<div className="flex items-center gap-1">
           {!readOnly && activeReport ? <Button variant="ghost" size="sm" disabled={shareStatus === "copying"} onClick={() => void copyShareLink()}>

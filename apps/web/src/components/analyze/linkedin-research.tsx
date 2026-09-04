@@ -109,6 +109,9 @@ export function LinkedInResearchPanel({
   const hasContent = Boolean(visibleDiscovery || automatic?.message);
   const searchKeyword = linkedinSearchKeyword(report);
   const searchHref = linkedinPeopleSearchUrl(searchKeyword);
+  const searchLabel = searchKeyword
+    ? t("searchLinkedInFor", { subject: searchKeyword })
+    : t("searchLinkedIn");
 
   useEffect(() => {
     onDiscoveryChangeRef.current = onDiscoveryChange;
@@ -125,6 +128,13 @@ export function LinkedInResearchPanel({
   async function discover() {
     await getAutoResearchOrchestrator()?.runManual(report, settings, "linkedin");
   }
+  const sectionFeedbackTarget = feedbackTarget(
+    feedbackManifest,
+    "linkedin_research_result",
+    "linkedin_discovery",
+    "section",
+  );
+
 
   return <HoverDisclosure
     className="rounded-md border p-3"
@@ -134,7 +144,7 @@ export function LinkedInResearchPanel({
     feedbackSnapshotLabel={t("linkedinProfiles")}
     contentClassName="space-y-3 pt-3"
     action={<div className="flex items-center gap-2">
-      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><ProviderActionIcon provider="linkedin" /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
+      {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={searchLabel}><ProviderActionIcon provider="linkedin" /></a>} />} /><TooltipContent>{searchLabel}</TooltipContent></Tooltip> : null}
       {!readOnly && !discoveryCompleted ? <ResearchAction
         busy={discoveryBusy}
         disabled={!enabled || discoveryBusy}
@@ -144,7 +154,7 @@ export function LinkedInResearchPanel({
         busyAriaLabel={t("linkedinDiscoveryInProgress")}
         disabledReason={!enabled ? t("noCandidateDetails") : undefined}
       /> : null}
-      {!readOnly && hasContent && feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section")!} /> : null}
+      {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
     </div>}
   >
     {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}
@@ -162,12 +172,23 @@ export function LinkedInResearchPanel({
   </HoverDisclosure>;
 }
 
-function fieldValue(field: { value?: string } | null | undefined): string | null {
-  return typeof field?.value === "string" && field.value.trim() ? field.value.trim() : null;
+function supportedFieldValue(
+  field: { value?: string; status?: string } | null | undefined,
+): string | null {
+  return field?.status === "supported"
+    && typeof field.value === "string"
+    && field.value.trim()
+    ? field.value.trim()
+    : null;
 }
 
 export function linkedinSearchKeyword(report: AnalysisReport): string | null {
-  const name = fieldValue(report.base_analysis.profile.candidate_name);
-  const employment = report.base_analysis.employment.find((record) => record.status === "accepted");
-  return linkedinPeopleKeyword({ candidateName: name, organization: fieldValue(employment?.organization) });
+  const name = supportedFieldValue(report.base_analysis.profile.candidate_name);
+  const employment = report.base_analysis.employment.find(
+    (record) => record.status === "accepted" && record.relation_status === "supported",
+  );
+  return linkedinPeopleKeyword({
+    candidateName: name,
+    organization: supportedFieldValue(employment?.organization),
+  });
 }

@@ -98,9 +98,11 @@ export type EducationResearch = {
   credentials: Array<{
     institution: string | null;
     program: string | null;
+    certificate: string | null;
     degree: string | null;
     program_exists: "supported" | "mismatch" | "evidence_unavailable";
     degree_exists: "supported" | "mismatch" | "evidence_unavailable";
+    certificate_exists: "supported" | "mismatch" | "evidence_unavailable";
     dates: string | null;
     city: string | null;
     country: string | null;
@@ -156,7 +158,6 @@ export type LinkedInDiscovery = {
 export type AnalysisReport = {
   contract_version: "base-analysis-v2";
   analysis_id: string;
-  analysis_access_token?: string;
   ai_features_enabled?: boolean;
   ai_capabilities?: {
     document_analysis: boolean;
