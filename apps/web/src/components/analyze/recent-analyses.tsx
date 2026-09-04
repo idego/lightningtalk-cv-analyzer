@@ -62,10 +62,13 @@ export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) 
   }
 
   async function remove(item: AnalysisHistoryItem) {
-    if (!window.confirm(t("confirmDeleteAnalysis", { name: item.candidate_name ?? item.filename }))) return;
-    const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
-    if (response.ok) setItems((current) => current.filter(({ analysis_id }) => analysis_id !== item.analysis_id));
-    else setError(t("analysisCouldNotDelete"));
+    try {
+      const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
+      if (response.ok) setItems((current) => current.filter(({ analysis_id }) => analysis_id !== item.analysis_id));
+      else setError(t("analysisCouldNotDelete"));
+    } catch {
+      setError(t("analysisCouldNotDelete"));
+    }
   }
 
   return <section className="rounded-xl border bg-card">
@@ -112,11 +115,40 @@ function AnalysisHistoryRow({
   onRemove: (item: AnalysisHistoryItem) => Promise<void>;
 }) {
   const { settings, t } = useCopy();
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  async function requestRemove() {
+    if (!confirmRemove) {
+      setConfirmRemove(true);
+      return;
+    }
+    setConfirmRemove(false);
+    setRemoving(true);
+    try {
+      await onRemove(item);
+    } finally {
+      setRemoving(false);
+    }
+  }
   return <li className="flex min-w-0 items-center gap-2 px-3 py-2">
     <button type="button" onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
       <span className="flex items-baseline justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       {item.candidate_name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.filename}</span> : null}
     </button>
-    <Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={openingId === item.analysis_id} onClick={() => void onRemove(item)} aria-label={t("deleteAnalysis")}><Trash2 className="size-4" /></Button>
+    <div className="relative">
+      <Button
+        variant={confirmRemove ? "destructive" : "ghost"}
+        size="icon"
+        className={`size-8 shrink-0 ${confirmRemove ? "" : "text-destructive hover:bg-destructive/10 hover:text-destructive"}`}
+        disabled={openingId === item.analysis_id || removing}
+        onBlur={() => { if (!removing) setConfirmRemove(false); }}
+        onKeyDown={(event) => { if (event.key === "Escape") setConfirmRemove(false); }}
+        onClick={() => void requestRemove()}
+        aria-label={t(confirmRemove ? "clickAgainToConfirm" : "deleteAnalysis")}
+      >
+        {removing ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+      </Button>
+      {confirmRemove ? <span role="status" className="absolute right-0 top-full z-20 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md">{t("clickAgainToConfirm")}</span> : null}
+    </div>
   </li>;
 }

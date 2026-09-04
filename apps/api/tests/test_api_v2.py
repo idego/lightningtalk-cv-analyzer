@@ -202,6 +202,67 @@ def test_docx_source_document_uses_docx_content_type(tmp_path) -> None:
     assert document.headers["content-disposition"] == 'inline; filename="candidate.docx"'
 
 
+def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    analysis_id = _analyze(client, owner_headers, filename="candidate.pdf")
+    completed_company_research = {
+        "versions": {
+            "research": "company-research-v2",
+            "prompt": "test-prompt",
+            "schema": "test-schema",
+        },
+        "model": {"configured": "test-model", "response": "test-model"},
+        "status": "completed",
+        "accessed_at": "2026-09-04T00:00:00+00:00",
+        "usage": {},
+        "organizations": [],
+        "searches_performed": [],
+        "search_limitations": [],
+    }
+    app.state.store.persist_company_research(analysis_id, completed_company_research)
+
+    assert client.post(
+        f"/analyses/{analysis_id}/share",
+        headers={"X-Analysis-Access-Token": "another-owner"},
+    ).status_code == 404
+
+    share_response = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers)
+    assert share_response.status_code == 200
+    share_token = share_response.json()["share_token"]
+    share_headers = {"X-Analysis-Share-Token": share_token}
+
+    assert client.get(f"/shared/analyses/{analysis_id}").status_code == 404
+    assert client.get(
+        f"/shared/analyses/{analysis_id}",
+        headers={"X-Analysis-Share-Token": "wrong-token"},
+    ).status_code == 404
+
+    shared = client.get(f"/shared/analyses/{analysis_id}", headers=share_headers)
+    assert shared.status_code == 200
+    assert shared.json()["filename"] == "candidate.pdf"
+    assert shared.json()["has_document"] is True
+    assert shared.json()["report"]["analysis_id"] == analysis_id
+    assert shared.json()["report"]["company_research"] == completed_company_research
+    assert "analysis_access_token" not in shared.json()["report"]
+
+    shared_document = client.get(
+        f"/shared/analyses/{analysis_id}/document",
+        headers=share_headers,
+    )
+    assert shared_document.status_code == 200
+    assert shared_document.content == b"%PDF-1.7 stored bytes"
+
+    assert client.get(
+        f"/analyses/{analysis_id}",
+        headers={"X-Analysis-Access-Token": share_token},
+    ).status_code == 404
+
+    assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 200
+    assert client.get(f"/shared/analyses/{analysis_id}", headers=share_headers).status_code == 404
+
+
 def test_source_document_storage_failure_does_not_fail_analysis(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)

@@ -248,5 +248,5 @@ export type AnalysisHistoryItem = {
 };
 
 /** A document the preview can render: the in-memory upload for this session, or a stored copy served by the API. */
-export type StoredDocument = { url: string; name: string };
+export type StoredDocument = { url: string; name: string; headers?: Record<string, string> };
 export type DocumentSource = File | StoredDocument;

@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Check, CircleAlert, Clock3, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Check, CircleAlert, Clock3, LoaderCircle, Trash2 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
+import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
-import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, resolveDocumentSource } from "@/lib/batch-progress";
+import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
+import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -21,6 +22,14 @@ function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
   const remainder = (seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function reportResult(filename: string, report: AnalysisReport): AnalyzeItemResult {
+  return {
+    filename,
+    status: report.base_analysis?.status === "partial" ? "partial" : "ok",
+    report,
+  };
 }
 
 function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchProgress; elapsedSeconds: number; onCancel: () => void }) {
@@ -37,13 +46,17 @@ function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchPro
   </CardContent></Card>;
 }
 
-export function UploadPanel() {
+export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: string | null }) {
   const { settings, t } = useCopy();
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
+  const [openedReadOnly, setOpenedReadOnly] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const routeRequest = useRef(0);
+  const openedFromHistoryPush = useRef(false);
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
   const historyVersion = sessionIds.size;
@@ -55,7 +68,69 @@ export function UploadPanel() {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [running, startedAt]);
-  const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
+
+  const openRoutedAnalysis = useCallback(async (analysisId: string, shareToken: string | null) => {
+    const requestId = ++routeRequest.current;
+    setRouteLoading(true);
+    setError(null);
+    try {
+      let nextOpened: AnalyzedFile;
+      if (shareToken) {
+        const headers = { "X-Analysis-Share-Token": shareToken };
+        const response = await fetch(`/api/shared-analyses/${encodeURIComponent(analysisId)}`, { cache: "no-store", headers });
+        if (!response.ok) throw new Error("analysis_unavailable");
+        const body = await response.json() as { filename: string; has_document?: boolean; report: AnalysisReport };
+        const file: DocumentSource | null = body.has_document
+          ? { url: `/api/shared-analyses/${encodeURIComponent(analysisId)}/document`, name: body.filename, headers }
+          : null;
+        nextOpened = { file, result: reportResult(body.filename, body.report) };
+      } else {
+        const historyResponse = await fetch("/api/analyses", { cache: "no-store" });
+        if (!historyResponse.ok) throw new Error("history_unavailable");
+        const historyBody = await historyResponse.json() as { analyses?: AnalysisHistoryItem[] };
+        const item = (historyBody.analyses ?? []).find((candidate) => candidate.analysis_id === analysisId);
+        if (!item) throw new Error("analysis_unavailable");
+        const response = await fetch(`/api/analyses/${encodeURIComponent(analysisId)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("analysis_unavailable");
+        const report = await response.json() as AnalysisReport;
+        nextOpened = {
+          file: resolveDocumentSource(item, store.getSnapshot().sessionFiles),
+          result: reportResult(item.filename, report),
+        };
+      }
+      if (routeRequest.current !== requestId) return;
+      setOpened(nextOpened);
+      setOpenedReadOnly(Boolean(shareToken));
+    } catch {
+      if (routeRequest.current !== requestId) return;
+      setOpened(null);
+      setOpenedReadOnly(false);
+      setError(t("analysisUnavailable"));
+    } finally {
+      if (routeRequest.current === requestId) setRouteLoading(false);
+    }
+  }, [store, t]);
+
+  useEffect(() => {
+    function syncFromLocation() {
+      openedFromHistoryPush.current = false;
+      const { analysisId, shareToken } = parseAnalysisRoute(window.location.href);
+      if (!analysisId) {
+        routeRequest.current += 1;
+        setOpened(null);
+        setOpenedReadOnly(false);
+        setRouteLoading(false);
+        return;
+      }
+      void openRoutedAnalysis(analysisId, shareToken);
+    }
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, [openRoutedAnalysis]);
+
+  const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
+  const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
   function onFilesSelected(list: FileList | null) { if (list) store.enqueue(Array.from(list)); }
 
   async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
@@ -94,9 +169,29 @@ export function UploadPanel() {
     if (requestId) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
   }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
-    setOpened({ file: resolveDocumentSource(item, sessionFiles), result: { filename: item.filename, status: "ok", report } });
+    routeRequest.current += 1;
+    setError(null);
+    setOpenedReadOnly(false);
+    setOpened({ file: resolveDocumentSource(item, sessionFiles), result: reportResult(item.filename, report) });
+    openedFromHistoryPush.current = true;
+    window.history.pushState(null, "", relativeHref(withAnalysisRoute(window.location.href, item.analysis_id)));
   }
-  if (opened) return <AnalysisWorkspace entries={[opened]} onBack={() => setOpened(null)} />;
+  function closeOpened() {
+    if (openedFromHistoryPush.current) {
+      openedFromHistoryPush.current = false;
+      window.history.back();
+      return;
+    }
+    routeRequest.current += 1;
+    window.history.replaceState(null, "", relativeHref(withoutAnalysisRoute(window.location.href)));
+    setOpened(null);
+    setOpenedReadOnly(false);
+    setRouteLoading(false);
+    setError(null);
+  }
+
+  if (opened) return <AnalysisWorkspace entries={[opened]} onBack={closeOpened} readOnly={openedReadOnly} />;
+  if (routeLoading) return <div className="mx-auto max-w-5xl"><Card><CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />{t("loadingAnalysis")}</CardContent></Card></div>;
 
   return <div className="mx-auto max-w-5xl space-y-6">
     {batch ? <AnalysisProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancel} /> : <Card>
@@ -106,7 +201,8 @@ export function UploadPanel() {
           <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
         </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
+        {unsupportedFiles.length ? <p className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset}>{t("reset")}</Button></div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </CardContent>

@@ -90,7 +90,7 @@ function DocumentPreviewContent({ source, onHide }: { source: DocumentSource; on
       adopt(source);
     } else {
       queueMicrotask(() => { if (!cancelled) setFetching(true); });
-      fetch(source.url, { cache: "no-store" })
+      fetch(source.url, { cache: "no-store", headers: source.headers })
         .then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.blob(); })
         .then(adopt)
         .catch(() => { if (cancelled) return; setFetching(false); setRendering(false); setError(t("documentFetchFailed")); });
@@ -182,7 +182,7 @@ function DocumentPreviewContent({ source, onHide }: { source: DocumentSource; on
   }
 
   return (
-    <aside className="sticky top-20 flex h-[calc(100svh-6.5rem)] min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/35">
+    <aside className="flex h-[calc(100svh-8rem)] min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/35">
       <div className="flex min-w-0 items-center gap-2 border-b bg-background px-3 py-2">
         <FileText className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>

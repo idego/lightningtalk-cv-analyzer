@@ -53,6 +53,8 @@ export function HoverDisclosure({
     if (!(target instanceof Element)) return;
     if (target.closest("a, button, input, select, textarea")) return;
     if (target.closest("[data-disclosure-root]") !== event.currentTarget) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.toString().trim()) return;
 
     if (open && !pinned && allowHover) {
       setPinned(true);

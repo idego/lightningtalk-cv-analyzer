@@ -120,6 +120,17 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   };
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
+  const resolvedLocationDetail = overview.statedLocation && overview.resolvedLocation
+    ? `${t("resolvedLocation")}: ${overview.resolvedLocation}`
+    : null;
+  const postalCountry = overview.postalCountry ? displayCountry(overview.postalCountry, settings.uiLanguage) : null;
+  const postalConsistency = overview.postalConsistency
+    ? t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")
+    : null;
+  const postalDetail = joinDisplay(
+    postalCountry ? `${t("postalCountry")}: ${postalCountry}` : null,
+    postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null,
+  );
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
@@ -145,12 +156,12 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
             {hasLocation ? <section aria-labelledby="overview-location">
               <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
               <div className="space-y-1">
-                {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} tone={locationTone} /> : null}
-                {overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
-                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} tone={locationTone} /> : null}
-                {overview.postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(overview.postalCountry, settings.uiLanguage)} tone={locationTone} /> : null}
-                {overview.postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")} tone={locationTone} /> : null}
-                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} detail={t("euStatusDisclaimer")} tone={locationTone} /> : null}
+                {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} detail={resolvedLocationDetail} tone={locationTone} /> : null}
+                {!overview.statedLocation && overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
+                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} detail={postalDetail} tone={locationTone} /> : null}
+                {!overview.postalCode && postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={postalCountry} detail={postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null} tone={locationTone} /> : null}
+                {!overview.postalCode && !postalCountry && postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={postalConsistency} tone={locationTone} /> : null}
+                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
               </div>
             </section> : null}
           </div> : null}
@@ -198,7 +209,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   );
 }
 
-export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void }) {
+export function ResultsList({ items, onActiveIndex, readOnly = false }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void; readOnly?: boolean }) {
   const { settings, t } = useCopy();
   const reportRefs = useRef<Array<HTMLElement | null>>([]);
   const [reportOverrides, setReportOverrides] = useState<Record<string, AnalysisReport>>({});
@@ -210,6 +221,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
     .join(",");
 
   useEffect(() => {
+    if (readOnly) return;
     let cancelled = false;
     for (const analysisId of reportIds.split(",").filter(Boolean)) {
       if (feedbackLoads.current.has(analysisId)) continue;
@@ -220,7 +232,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         .catch(() => feedbackLoads.current.delete(analysisId));
     }
     return () => { cancelled = true; };
-  }, [reportIds]);
+  }, [readOnly, reportIds]);
 
   function updateCompletedResearch(
     report: AnalysisReport,
@@ -274,22 +286,22 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
           <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
               <CardTitle className="min-w-0 truncate text-base">{item.filename}</CardTitle>
-              <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction>
+              {!readOnly ? <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction> : null}
             </CardHeader>
             <CardContent className="space-y-3">
               {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
                 <FlagList flags={presentation.attention} />
               </HoverDisclosure> : null}
 
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.worthKnowing} />
               </HoverDisclosure> : null}
 
-              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} />
+              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} />
 
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
             </CardContent>
           </Card>

@@ -40,6 +40,13 @@ The Analyzing card SHALL offer a Cancel control. Cancelling SHALL close the card
 - **WHEN** the recruiter cancels a running batch of four files after the first completed, removes one of the restored files, and starts the batch again
 - **THEN** the cancelled second file is not listed in Recent analyses, the new batch analyzes exactly the three remaining files, and the first file keeps its new marker
 
+### Requirement: Unsupported uploads are explained by filename
+The analyze page SHALL accept only PDF and DOCX files. When drag-and-drop adds one or more unsupported files, the queue SHALL keep those filenames visible, distinguish them as invalid, and show a clear error naming the unsupported files and the accepted formats. The Analyze action SHALL remain disabled when the queue contains no supported files.
+
+#### Scenario: Recruiter drops an unsupported image
+- **WHEN** the recruiter drops `candidate.png`
+- **THEN** the page identifies `candidate.png` as unsupported, tells the recruiter to use PDF or DOCX, and does not enable analysis for that file
+
 ### Requirement: Finished files appear in Recent analyses immediately
 Each time a batch file finishes, successfully or with an error, the Recent analyses list SHALL reload so that the finished analysis is listed without waiting for the rest of the batch. Analyses finished in the current session SHALL be marked as new in the list. Automatic research scheduling for successful results SHALL continue to happen per file as it completes.
 
@@ -48,11 +55,33 @@ Each time a batch file finishes, successfully or with an error, the Recent analy
 - **THEN** the second analysis is listed in Recent analyses with a new marker before the batch finishes
 
 ### Requirement: Reports open one at a time from Recent analyses
-The analyze page SHALL open a report only from a Recent analyses row, showing a single-report workspace for that analysis. The page MUST NOT render a combined multi-report workspace or an analyzed-count summary at the end of a batch. Pressing back SHALL return to the analyze page with the Analyzing card still visible when any file is still analyzing or waiting.
+The analyze page SHALL open a report only from a Recent analyses row, showing a single-report workspace for that analysis. The opened analysis SHALL be represented in the browser URL as `/analyze?analysis={analysis_id}`. Client-side report opening SHALL use browser history without remounting the analyze flow so an in-flight batch remains in memory. Direct navigation or refresh of that URL SHALL reload the persisted owner-scoped report instead of falling back to the empty upload form. The page MUST NOT render a combined multi-report workspace or an analyzed-count summary at the end of a batch. Pressing the browser Back action after opening from Recent analyses SHALL return to the analyze page with the Analyzing card still visible when any file is still analyzing or waiting.
 
 #### Scenario: Open a finished report during a batch
 - **WHEN** the recruiter opens a Recent analyses row while later files are still processing
-- **THEN** the single report opens, and pressing back shows the upload page with the Analyzing card still tracking the remaining files
+- **THEN** the single report opens at its analysis URL, and pressing browser Back shows the upload page with the Analyzing card still tracking the remaining files
+
+#### Scenario: Refresh an opened owner report
+- **WHEN** the owning recruiter refreshes `/analyze?analysis={analysis_id}` for a persisted analysis
+- **THEN** the persisted report and available stored document are reloaded instead of showing a blank upload form
+
+### Requirement: Shareable report URLs
+An owner SHALL be able to copy a share link for an opened persisted analysis. The link SHALL identify the analysis in the query string and carry the per-analysis share capability in the URL fragment so the capability is not sent in the initial page request. After the authenticated client loads, it SHALL exchange that fragment capability only through the scoped shared-analysis proxies and SHALL render the report read-only. Shared views MUST NOT expose feedback submission, research mutation, deletion, usage diagnostics, or creation of additional share links.
+
+#### Scenario: Open a share link as another authenticated user
+- **WHEN** an authenticated colleague opens a valid shared analysis URL
+- **THEN** the persisted report and stored document load read-only even though the colleague is not the analysis owner
+
+### Requirement: Destructive analysis actions use scope-appropriate confirmation
+Deleting one analysis from Recent analyses SHALL use an inline click-again confirmation on the same delete control and SHALL NOT open a modal or native browser confirmation. Deleting all analyses from Settings SHALL instead open a destructive confirmation dialog explaining that all saved analyses and stored CVs are permanently removed, with separate cancel and confirm actions.
+
+#### Scenario: Delete one recent analysis
+- **WHEN** the recruiter clicks the delete icon for one Recent analyses row
+- **THEN** the control enters a click-again confirmation state and deletion runs only after the second click
+
+#### Scenario: Delete all analyses from Settings
+- **WHEN** the recruiter clicks Delete all analyses
+- **THEN** a confirmation dialog opens and no deletion occurs until the destructive confirm action is chosen
 
 ### Requirement: Document preview source for opened reports
 When a report is opened from Recent analyses, the document preview SHALL use the in-memory file uploaded in the current browser session when that analysis was produced in this session, otherwise the stored document served by the analysis document endpoint when the history item reports a stored document, otherwise no document preview.

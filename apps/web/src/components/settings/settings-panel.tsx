@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { updateAppSettings, useCopy, type AppLanguage, type CopyKey } from "@/lib/app-settings";
 
 type Capability = { ready: boolean; version?: string | null; recovery?: string | null };
@@ -22,7 +23,7 @@ export function SettingsPanel() {
   const [retentionDays, setRetentionDays] = useState("90");
   const [retentionLoading, setRetentionLoading] = useState(true);
   const [retentionMessage, setRetentionMessage] = useState<string | null>(null);
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
 
   const refresh = useCallback(async (showFeedback = true) => {
@@ -81,10 +82,6 @@ export function SettingsPanel() {
   }
 
   async function deleteAllAnalyses() {
-    if (!confirmDeleteAll) {
-      setConfirmDeleteAll(true);
-      return;
-    }
     setDeletingAll(true);
     try {
       const response = await fetch("/api/analyses", { method: "DELETE" });
@@ -93,7 +90,7 @@ export function SettingsPanel() {
       setRetentionMessage(t("analysesCouldNotDelete"));
     } finally {
       setDeletingAll(false);
-      setConfirmDeleteAll(false);
+      setDeleteAllOpen(false);
     }
   }
 
@@ -147,8 +144,20 @@ export function SettingsPanel() {
         <span>{t("days")}</span>
         <Button variant="outline" onClick={() => void saveRetention()} disabled={retentionLoading}>{t("save")}</Button>
       </div>
-      <div className="mt-5 border-t pt-5"><Button variant={confirmDeleteAll ? "destructive" : "outline"} className={confirmDeleteAll ? undefined : "text-destructive hover:text-destructive"} disabled={deletingAll} onBlur={() => setConfirmDeleteAll(false)} onKeyDown={(event) => { if (event.key === "Escape") setConfirmDeleteAll(false); }} onClick={() => void deleteAllAnalyses()}><Trash2 />{t(deletingAll ? "deleting" : confirmDeleteAll ? "confirmDeleteAll" : "deleteAll")}</Button></div>
+      <div className="mt-5 border-t pt-5"><Button variant="outline" className="text-destructive hover:text-destructive" disabled={deletingAll} onClick={() => setDeleteAllOpen(true)}><Trash2 />{t("deleteAll")}</Button></div>
       {retentionMessage ? <p className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
+      <Dialog open={deleteAllOpen} onOpenChange={(open) => { if (!deletingAll) setDeleteAllOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("deleteAll")}</DialogTitle>
+            <DialogDescription>{t("deleteAllDescription")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={deletingAll} onClick={() => setDeleteAllOpen(false)}>{t("cancel")}</Button>
+            <Button variant="destructive" disabled={deletingAll} onClick={() => void deleteAllAnalyses()}><Trash2 />{t(deletingAll ? "deleting" : "confirmDeleteAll")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
     <section className="rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between gap-4"><h3 className="font-medium">{t("health")}</h3><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>

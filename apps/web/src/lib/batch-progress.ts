@@ -30,6 +30,10 @@ export function completedBatchIds(results: AnalyzeItemResult[]) {
   return results.flatMap((result) => (result.status === "error" ? [] : [result.report.analysis_id]));
 }
 
+export function isSupportedCvFilename(filename: string) {
+  return /\.(pdf|docx)$/i.test(filename);
+}
+
 /** Prefer this session's in-memory upload, then the stored copy served by the API, else no preview. */
 export function resolveDocumentSource(
   item: Pick<AnalysisHistoryItem, "analysis_id" | "filename" | "has_document">,
