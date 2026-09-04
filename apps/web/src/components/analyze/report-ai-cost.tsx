@@ -51,9 +51,6 @@ export function ReportAiCost({ analysisId }: { analysisId: string }) {
   }, [analysisId, company?.status, education?.status, linkedin?.status]);
 
   const label = settings.uiLanguage === "pl" ? "Szacowany koszt AI raportu" : "Estimated report AI cost";
-  const explanation = settings.uiLanguage === "pl"
-    ? "Łączny szacowany koszt płatnych wywołań AI przypisanych do tego raportu, w tym późniejszego researchu."
-    : "Estimated total cost of paid AI calls attributed to this report, including later research.";
   const usd = usage ? compactCost(usage.estimated_cost_usd, "USD", locale) : "…";
   const pln = usage ? compactCost(usage.estimated_cost_pln, "PLN", locale) : "…";
 
@@ -71,10 +68,7 @@ export function ReportAiCost({ analysisId }: { analysisId: string }) {
           </span>
         }
       />
-      <TooltipContent className="max-w-xs">
-        <p className="font-medium">{label}</p>
-        <p className="mt-1 text-xs">{explanation}</p>
-      </TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }
