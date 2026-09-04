@@ -6,6 +6,7 @@ import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionTitle } from "@/components/analyze/section-title";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CompanyResearchPanel } from "@/components/analyze/company-research";
@@ -48,10 +49,6 @@ function FlagList({ flags }: { flags: ReportFinding[] }) {
       ))}
     </div>
   );
-}
-
-function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return <span className="flex items-center gap-2"><span className="text-muted-foreground" aria-hidden>{icon}</span>{children}</span>;
 }
 
 function OverviewIcon({ label, tone, children }: { label: string; tone: string; children: ReactNode }) {

@@ -9,6 +9,7 @@ import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
+import { SectionTitle } from "@/components/analyze/section-title";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
@@ -125,7 +126,7 @@ export function LinkedInResearchPanel({
 
   return <HoverDisclosure
     className="rounded-md border p-3"
-    title={<span className="flex items-center gap-2 font-medium"><LinkedInIcon className="size-4 text-muted-foreground" />{t("linkedinProfiles")}</span>}
+    title={<SectionTitle className="font-medium" icon={<LinkedInIcon className="size-4" />}>{t("linkedinProfiles")}</SectionTitle>}
     collapsible={hasContent}
     feedbackSnapshotLabel={t("linkedinProfiles")}
     contentClassName="space-y-3 pt-3"

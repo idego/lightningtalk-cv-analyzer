@@ -9,6 +9,7 @@ import { ResearchSources } from "@/components/analyze/research-sources";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
+import { SectionTitle } from "@/components/analyze/section-title";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
 import { researchEligibility } from "@/lib/auto-research";
@@ -89,7 +90,7 @@ export function EducationResearchPanel({
   return <HoverDisclosure
     className="rounded-md border p-3"
     triggerClassName="font-medium"
-    title={<span className="flex items-center gap-2 font-medium"><GraduationCap className="size-4 text-muted-foreground" aria-hidden />{t("educationResearch")}</span>}
+    title={<SectionTitle className="font-medium" icon={<GraduationCap className="size-4" />}>{t("educationResearch")}</SectionTitle>}
     collapsible={hasContent}
     contentClassName="space-y-3 pt-3"
     feedbackSnapshotLabel={t("educationResearch")}
