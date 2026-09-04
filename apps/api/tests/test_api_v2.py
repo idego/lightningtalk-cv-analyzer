@@ -315,3 +315,69 @@ def _assert_history_served_during_analysis(client, headers, started, release, ou
         release.set()
         worker.join(timeout=10)
     assert outcome["analyze"] == 200
+
+
+def test_cancelled_analysis_is_discarded_before_persistence(tmp_path) -> None:
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingStrategy(FakeStrategy):
+        def analyze(self, request):
+            started.set()
+            assert release.wait(timeout=10), "analysis was never released"
+            return super().analyze(request)
+
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=False),
+        analysis_strategy=BlockingStrategy(),
+    )
+    headers = {"X-Analysis-Access-Token": "owner-token", "X-Analysis-Request-Id": "req-1"}
+    outcome: dict[str, object] = {}
+    with TestClient(app) as client:
+        worker = threading.Thread(
+            target=lambda: outcome.update(
+                response=client.post(
+                    "/analyze",
+                    files={"file": ("slow.pdf", b"%PDF-1.7 slow", "application/pdf")},
+                    headers=headers,
+                )
+            )
+        )
+        worker.start()
+        try:
+            assert started.wait(timeout=5), "analysis never started"
+            cancel = client.post("/analyze/cancel", headers=headers)
+            assert cancel.status_code == 202
+        finally:
+            release.set()
+            worker.join(timeout=10)
+        response = outcome["response"]
+        assert response.status_code == 409
+        assert response.json()["detail"] == "analysis_cancelled"
+        analysis_id = response.headers["X-Analysis-ID"]
+        assert client.get("/analyses", headers=headers).json()["analyses"] == []
+        diagnostics = client.get(f"/analyses/{analysis_id}/diagnostics", headers=headers)
+        assert diagnostics.json()["analysis"]["status"] == "cancelled"
+
+        # A cancel from another owner does not touch this request id.
+        client.post(
+            "/analyze/cancel",
+            headers={"X-Analysis-Access-Token": "other-token", "X-Analysis-Request-Id": "req-2"},
+        )
+        ok = client.post(
+            "/analyze",
+            files={"file": ("fast.pdf", b"%PDF-1.7 fast", "application/pdf")},
+            headers={"X-Analysis-Access-Token": "owner-token", "X-Analysis-Request-Id": "req-2"},
+        )
+        assert ok.status_code == 200
+
+
+def test_cancel_endpoint_requires_request_id(tmp_path) -> None:
+    client = TestClient(
+        create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    )
+    response = client.post("/analyze/cancel", headers={"X-Analysis-Access-Token": "owner-token"})
+    assert response.status_code == 400
