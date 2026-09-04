@@ -132,6 +132,40 @@ class _ResearchLockLease:
         self._registry.release(self._key, self._entry)
 
 
+class _AnalysisCancellationRegistry:
+    """Remembers cancel requests by (access token, client request id).
+
+    The model call is synchronous and cannot be interrupted, so a cancel takes
+    effect at the next checkpoint: before the run starts or before its report is
+    persisted. Entries are bounded and dropped once consumed or superseded.
+    """
+
+    _MAX_ENTRIES = 256
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[str, str], None] = {}
+        self._guard = threading.Lock()
+
+    def request(self, access_token: str, request_id: str) -> None:
+        with self._guard:
+            self._entries.pop((access_token, request_id), None)
+            self._entries[(access_token, request_id)] = None
+            while len(self._entries) > self._MAX_ENTRIES:
+                self._entries.pop(next(iter(self._entries)))
+
+    def is_cancelled(self, access_token: str, request_id: str | None) -> bool:
+        if request_id is None:
+            return False
+        with self._guard:
+            return (access_token, request_id) in self._entries
+
+    def discard(self, access_token: str, request_id: str | None) -> None:
+        if request_id is None:
+            return
+        with self._guard:
+            self._entries.pop((access_token, request_id), None)
+
+
 class _ResearchLockRegistry:
     def __init__(self) -> None:
         self._entries: dict[str, _ResearchLockEntry] = {}
@@ -284,6 +318,7 @@ def create_app(
     # Analyses run off the event loop so reads stay responsive, but the shared
     # strategy (one document converter) still processes one CV at a time.
     analysis_lock = threading.Lock()
+    cancellations = _AnalysisCancellationRegistry()
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
@@ -490,11 +525,15 @@ def create_app(
         report_language: str,
         access_token: str,
         correlation_id: str,
+        request_id: str | None = None,
     ) -> dict:
         with analysis_lock:
-            return _analyze_upload(
-                content, filename, report_language, access_token, correlation_id
-            )
+            try:
+                return _analyze_upload(
+                    content, filename, report_language, access_token, correlation_id, request_id
+                )
+            finally:
+                cancellations.discard(access_token, request_id)
 
     def _analyze_upload(
         content: bytes,
@@ -502,7 +541,10 @@ def create_app(
         report_language: str,
         access_token: str,
         correlation_id: str,
+        request_id: str | None,
     ) -> dict:
+        if cancellations.is_cancelled(access_token, request_id):
+            raise HTTPException(status_code=409, detail="analysis_cancelled")
         analysis_id = str(uuid4())
         try:
             store.create_analysis_run(analysis_id, correlation_id, access_token)
@@ -550,6 +592,19 @@ def create_app(
                 raise HTTPException(
                     status_code=502,
                     detail=f"analysis_{base_status}",
+                    headers={"X-Analysis-ID": analysis_id},
+                )
+            if cancellations.is_cancelled(access_token, request_id):
+                recorder.emit(
+                    "analysis_cancelled",
+                    operation="base_analysis",
+                    outcome="cancelled",
+                    error_code="analysis_cancelled",
+                )
+                store.complete_analysis_run(analysis_id, "cancelled", "analysis_cancelled")
+                raise HTTPException(
+                    status_code=409,
+                    detail="analysis_cancelled",
                     headers={"X-Analysis-ID": analysis_id},
                 )
             response_payload = serialize_analysis_payload(
@@ -658,6 +713,7 @@ def create_app(
         file: UploadFile = File(...),
         x_analysis_access_token: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
+        x_analysis_request_id: str | None = Header(default=None),
     ) -> JSONResponse:
         filename = file.filename or "upload.pdf"
         try:
@@ -675,8 +731,19 @@ def create_app(
                 _report_language(x_report_language),
                 access_token,
                 request.state.correlation_id,
+                x_analysis_request_id,
             )
         )
+
+    @app.post("/analyze/cancel", status_code=202)
+    def cancel_analysis(
+        x_analysis_access_token: str | None = Header(default=None),
+        x_analysis_request_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not x_analysis_access_token or not x_analysis_request_id:
+            raise HTTPException(status_code=400, detail="analysis_request_id_required")
+        cancellations.request(x_analysis_access_token, x_analysis_request_id)
+        return JSONResponse({"status": "cancel_requested"}, status_code=202)
 
     @app.get("/analyses")
     def list_analyses(

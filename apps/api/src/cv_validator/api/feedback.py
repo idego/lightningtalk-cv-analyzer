@@ -366,7 +366,6 @@ def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
     yield TargetKind.REPORT_OVERALL, "worth_knowing", "section", versions, None
-    yield TargetKind.REPORT_OVERALL, "remaining", "section", versions, None
     yield TargetKind.COMPANY_RESEARCH_RESULT, "company_research", "section", versions, None
     yield TargetKind.EDUCATION_RESEARCH_RESULT, "education_research", "section", versions, None
     yield TargetKind.LINKEDIN_RESEARCH_RESULT, "linkedin_discovery", "section", versions, None
@@ -444,9 +443,9 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
 
     comparisons = mechanical.get("comparisons") if isinstance(mechanical.get("comparisons"), list) else []
     seen_comparisons: set[tuple[Any, ...]] = set()
-    grouped: dict[str, list[dict[str, Any]]] = {"same": [], "different": []}
+    different: list[dict[str, Any]] = []
     for item in comparisons:
-        if not isinstance(item, dict) or item.get("relationship") not in grouped:
+        if not isinstance(item, dict) or item.get("relationship") != "different":
             continue
         key = (
             item.get("kind"), item.get("relationship"),
@@ -456,11 +455,9 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         if key in seen_comparisons:
             continue
         seen_comparisons.add(key)
-        grouped[item["relationship"]].append(item)
-    for relationship, items in grouped.items():
-        section = "remaining" if relationship == "same" else "attention"
-        for index, _item in enumerate(items):
-            yield TargetKind.REVIEW_FINDING, section, f"comparison-{relationship}-{index}", versions, None
+        different.append(item)
+    for index, _item in enumerate(different):
+        yield TargetKind.REVIEW_FINDING, "attention", f"comparison-different-{index}", versions, None
 
     email_findings = mechanical.get("email_findings") if isinstance(mechanical.get("email_findings"), list) else []
     seen_emails: set[tuple[Any, ...]] = set()

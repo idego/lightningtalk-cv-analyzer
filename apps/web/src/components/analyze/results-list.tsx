@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, ListChecks, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
@@ -303,9 +303,6 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
-              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} feedbackSnapshotLabel={t("remaining")} action={!readOnly && feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
-                <FlagList flags={presentation.remaining} />
-              </HoverDisclosure> : null}
             </CardContent>
           </Card>
         );
