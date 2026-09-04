@@ -1,73 +1,86 @@
-# cv-analyzer
+# CV Analyzer
 
-Local document and CV analysis pipeline.
+CV Analyzer analyzes CVs with Docling document conversion and pinned OpenAI
+model passes, producing reports in the `base-analysis-v2` contract.
 
-The backend parses and validates CVs with a selected analysis strategy, runs
-optional public company, education, and LinkedIn research against explicit
-whitelist patterns, records detailed token usage and USD/PLN cost estimates,
-and serves a Next.js web review UI.
+The previous deterministic Document Understanding, Structural Audit, ESCO,
+national-ID redaction, score/band, file metadata, and live-link checker have
+been removed. They are not compatibility surfaces.
 
 ## Architecture
 
-- `apps/api`: FastAPI backend with a pluggable analysis strategy (`document-analysis`),
-  hybrid rule/model pipeline, SQLite persistence, and public research providers.
-- `apps/web`: Next.js frontend with document preview (PDF and DOCX), findings
-  review, LinkedIn confirmation, contextual feedback capture, and a maintainer inbox.
-- `packages/shared-types`: TypeScript contracts aligned with the API payload schema.
-
-## Requirements
-
-- Python 3.12+
-- Node.js 22+
-- `pnpm` 10+
-- `uv` 0.5+
-- Docker and Docker Compose (production deployment and integration verification)
-
-## Quick start
-
-```bash
-# 1. Install dependencies
-pnpm install
-(cd apps/api && uv sync)
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env and set at least:
-# CV_VALIDATOR_ANALYSIS_STRATEGY=document-analysis
-# CV_VALIDATOR_OPENAI_API_KEY=sk-...   # required if AI features enabled
-# BETTER_AUTH_SECRET=...                # generate with: openssl rand -base64 32
-
-# 3. Start development stack
-make dev
+```text
+PDF or DOCX upload
+    -> Docling 2.124.0 native-text conversion (OCR disabled)
+    -> thin SourceDocument evidence projection
+    -> concurrent profile, employment, and education model specialists
+    -> field and relation validation plus mechanical candidates
+    -> sequential model reviewer with validated ID-based operations
+    -> base-analysis-v2 validation
+    -> persistence and UI
+    -> automatic company, education, and LinkedIn research
 ```
 
-The web app is available at `http://localhost:3001`.
+Every semantic value needs literal source evidence. A reviewer may add a missing candidate
+only when the same evidence and relation validation accepts it.
 
-## Core workflows
+The specialists use pinned `gpt-5.6-luna` with reasoning effort `none`; the
+reviewer uses `low`; public research calls use `medium`. Responses API storage is disabled and base analysis uses
+no tools. Without AI credentials the strategy still converts documents and
+returns an explicit unavailable/partial result instead of another parser.
 
-- **Analyze**: Upload a CV (PDF or DOCX), inspect parsed profile data, review
-  findings, and browse research outcomes.
-- **Recent analyses**: Reopen previously analyzed CVs with their original
-  stored document preview.
-- **Contextual feedback**: Submit targeted feedback on any finding, structured
-  fact, or failure diagnostic.
-- **Feedback inbox** (`/feedback`): Triage feedback items with status updates
-  and team notes. Requires an `owner` or `reviewer` role.
-- **Usage dashboard** (`/dashboard`): View lifetime token consumption, USD/PLN
-  cost breakdown, and per-analysis expense details.
+Mechanical code is limited to phones, e-mails, literal URLs, postal-pattern
+candidates, e-mail provider typos, geographic resolution, and informational EU
+status. A postal-looking token is not accepted as the candidate's address
+without supported context.
 
-## Analysis strategy
+See the current [architecture](docs/architecture.md) for durable boundaries and
+the authoritative executable contracts.
 
-The active strategy is controlled by `CV_VALIDATOR_ANALYSIS_STRATEGY`. The default
-production strategy is `document-analysis`, which:
+## Development
 
-1. Converts PDF or DOCX input to clean structural text and document blocks.
-2. Extracts candidate profile fields, work history, and education records.
-3. Resolves locations against the local GeoNames and postal code index.
-4. Identifies email patterns and flags potential anomalies.
-5. Runs optional AI analysis for deep review findings and coverage gaps.
-6. Surfaces high-confidence public research targets for company, education, and
-   LinkedIn profiles.
+```bash
+make dev
+make dev-down
+cd apps/api && PYTHONPATH=src .venv/bin/pytest -q
+cd apps/web && pnpm test        # requires Node 22 (type stripping)
+cd apps/web && pnpm typecheck
+cd apps/web && pnpm build
+```
+
+`make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
+through `docker-compose.dev.yml`; `make deploy` never does.
+
+The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
+database `/app/data/auth.db`. A stack created under the former project name
+`cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
+data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to the old `docling_luna*.db`
+paths in the env file, or copy the volumes once while the stack is stopped.
+
+On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
+downloads the configured official GeoNames sources and builds both locality and
+postal indexes in the project-scoped `geonames_data` volume. The API waits for
+that job and mounts its completed `current` release read-only. Later starts
+validate and reuse the volume without downloading. Set `GEONAMES_SNAPSHOT_VERSION`
+to a new date to request an explicit refresh; allow at least 3 GiB of free space
+for archives, staging files, and indexes.
+
+For a host with no outbound access, prepare an approved directory containing
+both index/manifest pairs and run `REFERENCE_DATA_MODE=operator make deploy` with
+`CV_VALIDATOR_REFERENCE_DATA_DIR` set in `.env`. See
+[`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for recovery,
+refresh, and rollback details.
+
+`GET /health` reports `ready: false` when the analysis model client is not
+configured; uploads then fail with `analysis_strategy_unavailable` and are not
+persisted as successful reports. Each attempted analysis has owner-scoped,
+PII-safe diagnostics and an immutable AI token/cost ledger at
+`GET /analyses/{analysis_id}/diagnostics`. Rates are versioned in code and can
+be overridden with `CV_VALIDATOR_PRICING_PATH`; unknown model pricing leaves
+the cost null without discarding token usage. Reusable research cache hits
+record zero current-call tokens and separate saved usage/cost provenance.
 
 ## Privacy and persistence
 
@@ -83,8 +96,8 @@ Contextual feedback is enabled by default. It stores the signed-in author's
 email, target identity, classification, short sanitized comment, the displayed
 CV/report fragment being reviewed, and safe technical diagnostics. It never
 stores the uploaded original, raw model output, or raw logs. Analysis data is
-transient and recruiter-owned. Feedback is long-lived platform and review data
-that survives analysis deletion and retention purge, similar to the AI usage
+transient and recruiter-owned, while feedback is long-lived platform/review
+data that survives analysis deletion and retention purge, like the AI usage
 ledger. Setup and access management are documented in
 [`docs/operations.md`](docs/operations.md).
 
@@ -107,28 +120,8 @@ visible public subject; self-employment entries get none.
 
 ## Supported documents and limitations
 
-- Formats: PDF and DOCX.
-- Maximum file size: 10 MB.
-- Password-protected or encrypted files are rejected.
-- Scanned documents require a readable text layer; raw image OCR is out of scope.
-- Phone number matching uses libphonenumber formats.
-
-## Testing
-
-```bash
-# Backend unit and integration tests
-uv run --directory apps/api pytest tests
-
-# Frontend tests
-pnpm --dir apps/web test
-
-# Linting and type checks
-pnpm lint
-(cd apps/api && uv run ruff check)
-```
-
-## Documentation
-
-- [`docs/operations.md`](docs/operations.md): Deployment, rollback, volume
-  management, and feedback access.
-- [`openspec/specs/`](openspec/specs/): Detailed component specifications.
+Only text-bearing PDF and DOCX files are supported. Image-only or scan-only
+documents fail with `document_text_layer_unavailable`; OCR is never attempted.
+The minimal Docling runtime installs only PDF/DOCX conversion extras and sets
+offline flags, so it has no model assets to download at runtime. Results are
+recruiter decision support and never verify a candidate or their location.

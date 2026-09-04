@@ -34,6 +34,13 @@ def test_targets_are_stable_and_feedback_is_idempotent(tmp_path):
     value = FeedbackInput(rating="not_helpful", reason="inaccurate")
     assert store.put("analysis-1", target["target_id"], "actor", value)
     assert store.put("analysis-1", target["target_id"], "actor", value)
+    manifest_target = next(
+        item for item in store.manifest("analysis-1", "actor")["targets"]
+        if item["target_id"] == target["target_id"]
+    )
+    assert manifest_target["response"]["rating"] == "not_helpful"
+    assert manifest_target["response"]["reason"] == "inaccurate"
+    assert "rating" not in manifest_target
     inbox = store.inbox()
     assert len(inbox["items"]) == 1
     assert inbox["items"][0]["comment"] is None

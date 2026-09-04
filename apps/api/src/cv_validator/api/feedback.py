@@ -504,54 +504,15 @@ def _versions(payload: dict[str, Any]) -> dict[str, str]:
     return values
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "target_id": row["target_id"],
-        "kind": row["kind"],
-        "source_category": row["source_category"],
-        "source_key": row["source_key"],
-        "versions": json.loads(row["versions_json"]),
-        "rating": row["rating"],
-        "reason": row["reason"],
-        "comment": row["comment"],
-        "updated_at": row["updated_at"],
-        "withdrawn_at": row["withdrawn_at"],
-    }
+    response = None if row["updated_at"] is None or row["withdrawn_at"] is not None else {"rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "updated_at": row["updated_at"]}
+    return {"target_id": row["target_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "response": response}
 
 
 def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
-    failure = None
-    if row["operation_kind"]:
-        failure = {
-            "operation_kind": row["operation_kind"],
-            "error_code": row["error_code"],
-            "retryable": bool(row["retryable"]) if row["retryable"] is not None else None,
-            "attempt_count": row["attempt_count"],
-            "occurred_at": row["occurred_at"],
-            "correlation_id": row["correlation_id"],
-            "versions": json.loads(row["failure_versions"]),
-        }
-    return {
-        "cursor": row["cursor"],
-        "target_id": row["target_id"],
-        "analysis_id": row["analysis_id"],
-        "kind": row["kind"],
-        "source_category": row["source_category"],
-        "source_key": row["source_key"],
-        "versions": json.loads(row["versions_json"]),
-        "actor_hash": row["actor_hash"],
-        "actor_email": row["actor_email"],
-        "rating": row["rating"],
-        "reason": row["reason"],
-        "comment": row["comment"],
-        "context_label": row["context_label"],
-        "context_text": row["context_text"],
-        "updated_at": row["updated_at"],
-        "triage_status": row["triage_status"],
-        "triage_note": row["note"],
-        "failure": failure,
-    }
+    failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
+    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
