@@ -11,7 +11,6 @@ export function feedbackContext(item: FeedbackContextInput) {
     report: "CV overview",
     attention: "Needs attention",
     worth_knowing: "Worth knowing",
-    remaining: "Remaining signals",
     company_research: "Company research",
     education_research: "Education research",
     linkedin_discovery: "LinkedIn Profile Research",
@@ -23,7 +22,6 @@ export function feedbackContext(item: FeedbackContextInput) {
   else if (key.startsWith("location-ambiguous")) subject = "GeoNames location is ambiguous";
   else if (key.startsWith("location-unresolved")) subject = "GeoNames did not resolve the declared location";
   else if (key.startsWith("location-mismatch")) subject = "Declared city and country mismatch";
-  else if (key.startsWith("comparison-same")) subject = "Declared country and phone country are consistent";
   else if (key.startsWith("comparison-different")) subject = "Declared country and phone country differ";
   else if (key.startsWith("email-")) subject = "Possible email-domain typo";
   else if (key.startsWith("gap-")) subject = "Missing CV information";

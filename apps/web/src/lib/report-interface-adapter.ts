@@ -43,7 +43,6 @@ export type ReportOverview = {
 export type ReportInterface = {
   attention: ReportFinding[];
   worthKnowing: ReportFinding[];
-  remaining: ReportFinding[];
   overview: ReportOverview;
 };
 
@@ -125,9 +124,6 @@ function localized(language: ReportLanguage) {
     emailTypo: "Adres e-mail może zawierać literówkę w popularnej domenie.",
     emailTypoWhy: "Literówka może uniemożliwić kontakt z kandydatem.",
     emailTypoCheck: "Porównaj adres z oryginalnym CV przed użyciem.",
-    match: "Deklarowany kraj i kraj numeru telefonu są zgodne.",
-    matchWhy: "To informacyjny sygnał spójności, nie weryfikacja lokalizacji.",
-    matchCheck: "Nie traktuj tego sygnału jako dowodu miejsca pobytu.",
     linkedinMissing: "Nie znaleziono dopasowanego profilu LinkedIn w ograniczonym wyszukiwaniu.",
     linkedinMissingWhy: "Brak wyniku z ograniczonego wyszukiwania nie oznacza, że profil nie istnieje.",
     linkedinMissingCheck: "Wyszukaj profil ręcznie, używając danych kandydata z CV.",
@@ -158,9 +154,6 @@ function localized(language: ReportLanguage) {
     emailTypo: "The email address may contain a typo in a common provider domain.",
     emailTypoWhy: "A typo may prevent contact with the candidate.",
     emailTypoCheck: "Compare the address with the original CV before using it.",
-    match: "The declared country and phone country are consistent.",
-    matchWhy: "This is an informational consistency signal, not location verification.",
-    matchCheck: "Do not treat this signal as proof of residence.",
     linkedinMissing: "No matching LinkedIn profile was found by the limited search.",
     linkedinMissingWhy: "No result from a limited search does not mean that a profile does not exist.",
     linkedinMissingCheck: "Search manually using the candidate details stated in the CV.",
@@ -386,17 +379,5 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
     ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
   ];
 
-  const remaining: ReportFinding[] = [
-    ...comparisons
-      .filter((item) => item.relationship === "same")
-      .map((_item, index) => findingFromEvidence(
-        `comparison-same-${index}`,
-        copy.match,
-        copy.matchWhy,
-        copy.matchCheck,
-        comparisonEvidence,
-      )),
-  ];
-
-  return { attention, worthKnowing, remaining, overview: overview(report) };
+  return { attention, worthKnowing, overview: overview(report) };
 }

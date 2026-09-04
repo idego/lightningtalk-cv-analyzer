@@ -110,7 +110,7 @@ def test_materializes_feedback_for_each_visible_signal(tmp_path):
     targets = store.materialize("analysis-1", payload)
     locations = {(target["source_category"], target["source_key"]) for target in targets}
     assert ("worth_knowing", "location-resolved-same") in locations
-    assert ("remaining", "comparison-same-0") in locations
+    assert ("remaining", "comparison-same-0") not in locations
 
 
 def test_withdrawal_and_analysis_delete_preserves_feedback_graph(tmp_path):

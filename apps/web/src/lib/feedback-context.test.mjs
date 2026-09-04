@@ -5,8 +5,8 @@ import { feedbackContext } from "./feedback-context.ts";
 
 test("describes feedback location and subject", () => {
   assert.deepEqual(
-    feedbackContext({ source_category: "remaining", source_key: "comparison-same-0" }),
-    { section: "Remaining signals", subject: "Declared country and phone country are consistent" },
+    feedbackContext({ source_category: "attention", source_key: "comparison-different-0" }),
+    { section: "Needs attention", subject: "Declared country and phone country differ" },
   );
   assert.deepEqual(
     feedbackContext({ source_category: "report", source_key: "overall" }),

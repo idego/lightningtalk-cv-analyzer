@@ -21,7 +21,7 @@ Every displayed research source SHALL be a safe external link labeled with a rea
 - **THEN** the link label uses its normalized hostname and the link remains keyboard accessible
 
 ### Requirement: EU status is neutral overview information
-Inside/outside-EU classification SHALL appear as a separate informational row in the CV overview and MUST NOT create an attention, worth-knowing, or remaining finding by itself. The row MUST state that it classifies supplied CV information and does not determine residence, nationality, or work eligibility.
+Inside/outside-EU classification SHALL appear as a separate informational row in the CV overview and MUST NOT create an attention or worth-knowing finding by itself. The row MUST state that it classifies supplied CV information and does not determine residence, nationality, or work eligibility.
 
 #### Scenario: Mechanical evidence points outside the EU
 - **WHEN** the accepted declared-location or phone evidence is classified outside the EU

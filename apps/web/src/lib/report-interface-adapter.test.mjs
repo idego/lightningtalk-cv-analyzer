@@ -118,10 +118,9 @@ test("shows only deduplicated recruiter-facing signals", () => {
 
   assert.equal(presentation.attention.length, 2);
   assert.equal(presentation.worthKnowing.length, 1);
-  assert.equal(presentation.remaining.length, 1);
   assert.equal(presentation.attention[1].evidence[0].source_id, "block-1");
   assert.equal(
-    [...presentation.attention, ...presentation.worthKnowing, ...presentation.remaining]
+    [...presentation.attention, ...presentation.worthKnowing]
       .every((item) => item.evidence.length > 0),
     true,
   );

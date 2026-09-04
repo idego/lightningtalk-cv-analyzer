@@ -1,6 +1,6 @@
 "use client";
 
-import { Lightbulb, ListChecks } from "lucide-react";
+import { Lightbulb } from "lucide-react";
 import type { AnalysisReport } from "@/lib/analyze-types";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
@@ -11,7 +11,7 @@ import { FlagList, StructuredFacts } from "@/components/analyze/results-list";
 import { SectionTitle } from "@/components/analyze/section-title";
 import { useCopy } from "@/lib/app-settings";
 
-export const reportModuleCategories = ["report", "attention", "worth_knowing", "remaining", "company_research", "education_research", "linkedin_discovery"] as const;
+export const reportModuleCategories = ["report", "attention", "worth_knowing", "company_research", "education_research", "linkedin_discovery"] as const;
 export type ReportModuleCategory = (typeof reportModuleCategories)[number];
 
 export function isReportModuleCategory(value: unknown): value is ReportModuleCategory {
@@ -39,10 +39,6 @@ export function ReportModule({ report, category }: { report: AnalysisReport; cat
     case "worth_knowing":
       return <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} defaultOpen contentClassName="pt-3">
         <FlagList flags={presentation.worthKnowing} />
-      </HoverDisclosure>;
-    case "remaining":
-      return <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} defaultOpen contentClassName="pt-3">
-        <FlagList flags={presentation.remaining} />
       </HoverDisclosure>;
     case "company_research":
       return <CompanyResearchPanel report={report} readOnly />;
