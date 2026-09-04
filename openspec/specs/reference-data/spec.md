@@ -7,7 +7,7 @@ versioned, and mounted so runtime CV analysis never downloads reference data.
 ## Requirements
 
 ### Requirement: One-shot index build
-The `geonames-init` Compose service SHALL download the official GeoNames dumps (overridable with `GEONAMES_*_URL`), build locality and postal index/manifest pairs under `GEONAMES_SNAPSHOT_VERSION` in the `geonames_data` volume, validate them, and promote the release to `current`. `api` mounts the volume read-only and requires the resolver via `CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER=true`, reporting readiness in `GET /health`.
+The checked-in `config/geonames.lock` SHALL pin the accepted snapshot version, and preflight SHALL reject a configured `GEONAMES_SNAPSHOT_VERSION` that disagrees with it. The `geonames-init` Compose service SHALL download the official GeoNames dumps (overridable with `GEONAMES_*_URL`), build locality and postal index/manifest pairs under `GEONAMES_SNAPSHOT_VERSION` in the `geonames_data` volume, validate them, and promote the release to `current`. `api` mounts the volume read-only and requires the resolver via `CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER=true`, reporting readiness in `GET /health`.
 
 #### Scenario: Snapshot already built
 - **WHEN** the volume already holds the configured snapshot version

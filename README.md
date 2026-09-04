@@ -63,8 +63,7 @@ On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
 downloads the configured official GeoNames sources and builds both locality and
 postal indexes in the project-scoped `geonames_data` volume. The API waits for
 that job and mounts its completed `current` release read-only. Later starts
-validate and reuse the volume without downloading. Set `GEONAMES_SNAPSHOT_VERSION`
-to a new date to request an explicit refresh; allow at least 3 GiB of free space
+validate and reuse the volume without downloading. The checked-in `config/geonames.lock` pins the accepted `GEONAMES_SNAPSHOT_VERSION`; refresh the lock and version together when intentionally updating upstream data; allow at least 3 GiB of free space
 for archives, staging files, and indexes.
 
 For a host with no outbound access, prepare an approved directory containing
@@ -82,12 +81,16 @@ be overridden with `CV_VALIDATOR_PRICING_PATH`; unknown model pricing leaves
 the cost null without discarding token usage. Reusable research cache hits
 record zero current-call tokens and separate saved usage/cost provenance.
 
+## Deployment
+
+Production is Compose-based. Copy and fill `.env`, keep `WEB_HOST=127.0.0.1`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the loopback-bound web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](docs/operations.md).
+
 ## Privacy and persistence
 
 - OpenAI requests use `store=false`.
 - Never log raw CV text or raw model output.
-- The API stores the validated report, not the uploaded original.
-- Access tokens are hashed for ownership and are not written into audit JSON.
+- The API stores the validated report and, after report commit, the original PDF/DOCX only for owner-scoped preview within the same retention window.
+- Analysis ownership uses the authenticated Better Auth user id server-side; no owner capability token is returned to the browser or written into report/audit JSON.
 - Private CV fixtures and evaluation outputs belong under ignored `data/`.
 - Old pilot reports are not migrated. The new default database is
   `data/cv_analyzer.db`; existing databases are never deleted implicitly.

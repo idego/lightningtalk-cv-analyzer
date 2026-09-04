@@ -114,7 +114,7 @@ The analyze UI SHALL provide manual Google Search actions for each visible compa
 - **THEN** each visible entry retains its own contextual Google Search action
 
 ### Requirement: Deterministic public-subject search queries
-Google Search actions SHALL construct their query only from the visible public subject and the allowed disambiguating fields for that entry. A company query SHALL contain its organization name and SHALL append its available company location. An education query SHALL contain its institution and SHALL append its program when present, otherwise its certificate when present. The query MUST NOT include candidate name, contact details, dates, raw CV evidence, or hidden report context.
+Google Search actions SHALL construct their query only from the visible public subject and the allowed disambiguating fields for that entry. A company query SHALL contain its organization name and SHALL append its available company location. An education query SHALL use its institution when present, otherwise its certificate as the public subject. With an institution it SHALL append the program when present, otherwise the certificate when present; certificate-only entries SHALL search the certificate once. The query MUST NOT include candidate name, contact details, dates, raw CV evidence, or hidden report context.
 
 #### Scenario: Company has location context
 - **WHEN** a company entry contains organization `Edclub` and location `USA`
@@ -128,9 +128,9 @@ Google Search actions SHALL construct their query only from the visible public s
 - **WHEN** an education entry contains an institution and a program
 - **THEN** its action searches Google for the institution followed by the program
 
-#### Scenario: Education has no program but has a certificate
-- **WHEN** an education entry contains an institution, no program, and a certificate
-- **THEN** its action searches Google for the institution followed by the certificate
+#### Scenario: Education has only a certificate
+- **WHEN** an education entry has no institution but has a supported certificate
+- **THEN** it appears in the Certifications group and its action searches Google for the certificate
 
 #### Scenario: Education has only an institution
 - **WHEN** an education entry contains an institution without a program or certificate
@@ -159,7 +159,7 @@ Each Google Search action SHALL use the fixed HTTPS Google Search origin, encode
 The analyze UI SHALL omit a Google Search action when its required public subject is empty or when a company entry represents a non-organization work mode such as self-employment or freelance work.
 
 #### Scenario: Subject is missing
-- **WHEN** a company or education entry has no non-empty organization or institution name
+- **WHEN** a company or education entry has no eligible non-empty organization, institution, or certificate subject
 - **THEN** no Google Search action is rendered for that entry
 
 #### Scenario: Work entry is not an organization
