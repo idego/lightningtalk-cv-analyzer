@@ -13,7 +13,7 @@ MECHANICAL_VERSION = "mechanical-extraction-v1"
 
 _EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+")
-_PHONE_RE = re.compile(r"(?<!\w)(?:\+|00)\d[\d\s().-]{6,}\d(?!\w)")
+_PHONE_RE = re.compile(r"(?<!\w)\(?(?:\+|00)\d[\d\s().-]{6,}\d(?!\w)")
 _POSTAL_PATTERNS = {
     "PL": re.compile(r"\b\d{2}-\d{3}\b"),
     "GB": re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b", re.I),
@@ -102,7 +102,10 @@ def _extract_phones(segments: tuple[TextSegment, ...]) -> list[dict[str, object]
     for segment in segments:
         for match in _PHONE_RE.finditer(segment.text):
             literal = match.group(0).strip()
-            parse_value = f"+{literal[2:]}" if literal.startswith("00") else literal
+            digits_start = literal.lstrip("(")
+            parse_value = (
+                f"+{digits_start[2:]}" if digits_start.startswith("00") else literal
+            )
             normalized = re.sub(r"[^\d+]", "", parse_value)
             if normalized in seen:
                 continue
