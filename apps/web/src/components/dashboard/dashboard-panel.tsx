@@ -14,25 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { type AppLanguage, useCopy } from "@/lib/app-settings";
-
-type DeploymentUsageSummary = {
-  reports_processed: number;
-  total_tokens: number;
-  input_tokens: number;
-  cached_input_tokens: number;
-  output_tokens: number;
-  estimated_cost_usd: string;
-  estimated_cost_pln: string;
-  average_tokens_per_report: number;
-  average_estimated_cost_usd: string;
-  average_estimated_cost_pln: string;
-  fx_rate: string;
-  by_operation: Record<string, {
-    calls: number;
-    tokens: number;
-    estimated_cost_usd: string;
-  }>;
-};
+import type { DeploymentUsageSummary } from "@/lib/usage-types";
 
 const DASHBOARD_CURRENCY_STORAGE_KEY = "cv-analyzer-dashboard-currency";
 
@@ -129,7 +111,8 @@ function formatNumber(value: number, locale: string, fractionDigits = 0): string
   }).format(value);
 }
 
-function formatCurrency(amount: string | number, currency: "USD" | "PLN", locale: string): string {
+function formatCurrency(amount: string | number | null, currency: "USD" | "PLN", locale: string): string {
+  if (amount === null) return "—";
   const numeric = typeof amount === "number" ? amount : Number.parseFloat(amount);
   if (Number.isNaN(numeric)) return "—";
   return new Intl.NumberFormat(locale, {
@@ -293,7 +276,7 @@ export function DashboardPanel() {
           <CardDescription>{copy.breakdownDescription}</CardDescription>
         </CardHeader>
         <CardContent>
-          {summary && Object.keys(summary.by_operation).length > 0 ? (
+          {summary?.operations.length ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -305,12 +288,12 @@ export function DashboardPanel() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {Object.entries(summary.by_operation).map(([op, stats]) => (
-                    <tr key={op} className="hover:bg-muted/30">
-                      <td className="py-3 pr-4 font-mono text-xs">{op}</td>
-                      <td className="py-3 px-4 text-right tabular-nums">{formatNumber(stats.calls, locale)}</td>
-                      <td className="py-3 px-4 text-right tabular-nums">{formatNumber(stats.tokens, locale)}</td>
-                      <td className="py-3 pl-4 text-right tabular-nums">{formatCurrency(stats.estimated_cost_usd, "USD", locale)}</td>
+                  {summary.operations.map((operation) => (
+                    <tr key={operation.key} className="hover:bg-muted/30">
+                      <td className="py-3 pr-4 font-mono text-xs">{operation.key}</td>
+                      <td className="py-3 px-4 text-right tabular-nums">{formatNumber(operation.attempts, locale)}</td>
+                      <td className="py-3 px-4 text-right tabular-nums">{formatNumber(operation.total_tokens, locale)}</td>
+                      <td className="py-3 pl-4 text-right tabular-nums">{formatCurrency(operation.estimated_cost_usd, "USD", locale)}</td>
                     </tr>
                   ))}
                 </tbody>
