@@ -6,6 +6,7 @@ import {
   currentBatchIndex,
   deriveBatchStatuses,
   hasPendingBatchFiles,
+  isSupportedCvFilename,
   resolveDocumentSource,
 } from "./batch-progress.ts";
 
@@ -30,6 +31,14 @@ test("current index and pending flag track finished results", () => {
 
 test("completed ids skip failed files", () => {
   assert.deepEqual(completedBatchIds([ok("a"), failed, ok("c")]), ["a", "c"]);
+});
+
+test("supported CV filenames accept only PDF and DOCX extensions", () => {
+  assert.equal(isSupportedCvFilename("candidate.pdf"), true);
+  assert.equal(isSupportedCvFilename("candidate.DOCX"), true);
+  assert.equal(isSupportedCvFilename("candidate.png"), false);
+  assert.equal(isSupportedCvFilename("candidate.txt"), false);
+  assert.equal(isSupportedCvFilename("candidate.pdf.exe"), false);
 });
 
 test("document source prefers the session upload, then the stored copy", () => {

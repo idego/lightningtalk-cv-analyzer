@@ -19,6 +19,13 @@ The analyze page SHALL process selected files one request at a time, in selectio
 - **WHEN** the final file completes with a result or an error
 - **THEN** the Analyzing card briefly shows a complete state pointing to Recent analyses and then disappears, leaving the upload form and Recent analyses
 
+### Requirement: Unsupported uploads are explained by filename
+The analyze page SHALL accept only PDF and DOCX files. When drag-and-drop adds one or more unsupported files, the queue SHALL keep those filenames visible, distinguish them as invalid, and show a clear error naming the unsupported files and the accepted formats. The Analyze action SHALL remain disabled when the queue contains no supported files.
+
+#### Scenario: Recruiter drops an unsupported image
+- **WHEN** the recruiter drops `candidate.png`
+- **THEN** the page identifies `candidate.png` as unsupported, tells the recruiter to use PDF or DOCX, and does not enable analysis for that file
+
 ### Requirement: Finished files appear in Recent analyses immediately
 Each time a batch file finishes, successfully or with an error, the Recent analyses list SHALL reload so that the finished analysis is listed without waiting for the rest of the batch. Analyses finished in the current session SHALL be marked as new in the list. Automatic research scheduling for successful results SHALL continue to happen per file as it completes.
 

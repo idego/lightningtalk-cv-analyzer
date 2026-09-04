@@ -10,7 +10,7 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
-import { type BatchProgress, completedBatchIds, currentBatchIndex, deriveBatchStatuses, resolveDocumentSource } from "@/lib/batch-progress";
+import { type BatchProgress, completedBatchIds, currentBatchIndex, deriveBatchStatuses, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ACCEPT = ".pdf,.docx";
@@ -127,7 +127,8 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     return () => window.removeEventListener("popstate", syncFromLocation);
   }, [openRoutedAnalysis]);
 
-  const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
+  const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
+  const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
   async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
@@ -197,7 +198,8 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
           <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
         </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`}>• {file.name}</li>)}</ul></div> : null}
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={!isSupportedCvFilename(file.name) ? "text-destructive" : undefined}>• {file.name}</li>)}</ul></div> : null}
+        {unsupportedFiles.length ? <p className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset}>{t("reset")}</Button></div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </CardContent>
