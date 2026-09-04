@@ -32,6 +32,17 @@ A signed-in user who can open an analysis SHALL be able to submit a comment with
 - **WHEN** an actor exceeds 30 feedback writes in a minute
 - **THEN** the API responds 422 `feedback_rate_limit`
 
+### Requirement: Feedback lifecycle and analysis decoupling
+Analysis data is transient and recruiter-owned. Feedback is long-lived platform and review data that survives analysis deletion and retention purge, similar to the AI usage ledger. When an analysis is deleted through single deletion (`DELETE /analyses/{id}`), bulk deletion (`DELETE /analyses`), or automated retention purge, all associated feedback targets, responses, triage notes, displayed context snapshots, and diagnostic context SHALL remain intact. The `analysis_id` SHALL be retained as a historical correlation identifier without a foreign key cascade to `reports`.
+
+#### Scenario: Single analysis deletion preserves feedback
+- **WHEN** an analysis is deleted by an authorized recruiter
+- **THEN** its associated feedback targets, responses, comments, and triage notes remain queryable in the maintainer inbox
+
+#### Scenario: Retention purge preserves feedback
+- **WHEN** expired analysis reports are removed by automated retention purge
+- **THEN** all associated feedback data and displayed context snapshots remain preserved
+
 ### Requirement: Maintainer inbox and triage
 Users holding an active `owner` or `reviewer` role SHALL see the `/feedback` inbox listing responses with filters for rating, reason, kind, triage status, source, version, operation, error code, and date range. They SHALL be able to set a triage status (`new`, `reviewing`, `planned`, `resolved`, `wont_fix`) with a team note of up to 500 characters (2 KiB request cap, same contact-data rule as comments) and delete a response. The API SHALL record the acting maintainer from the `X-Feedback-Maintainer` header that only the web proxy sets. The inbox MUST NOT store the uploaded original, raw model output, raw exceptions, request bodies, or logs.
 

@@ -113,13 +113,67 @@ class TriageInput(BaseModel):
 
 
 def init_feedback_schema(conn: sqlite3.Connection) -> None:
+    targets_exists = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'feedback_targets'"
+        ).fetchone()
+        is not None
+    )
+    if targets_exists:
+        fk_list = conn.execute("PRAGMA foreign_key_list(feedback_targets)").fetchall()
+        has_reports_fk = any(
+            (row["table"] if isinstance(row, sqlite3.Row) else row[2]) == "reports"
+            for row in fk_list
+        )
+        if has_reports_fk:
+            conn.commit()
+            was_fk_enabled = bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+            if was_fk_enabled:
+                conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE feedback_targets__new (
+                      target_id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, kind TEXT NOT NULL,
+                      source_category TEXT NOT NULL, source_key TEXT NOT NULL, versions_json TEXT NOT NULL,
+                      created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key)
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO feedback_targets__new (
+                      target_id, analysis_id, kind, source_category, source_key, versions_json, created_at
+                    )
+                    SELECT target_id, analysis_id, kind, source_category, source_key, versions_json, created_at
+                    FROM feedback_targets
+                    """
+                )
+                conn.execute("DROP TABLE feedback_targets")
+                conn.execute("ALTER TABLE feedback_targets__new RENAME TO feedback_targets")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS feedback_targets_analysis ON feedback_targets(analysis_id)"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                if was_fk_enabled:
+                    conn.execute("PRAGMA foreign_keys = ON")
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key check failed after feedback migration: {violations}"
+                )
+
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS feedback_targets (
           target_id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, kind TEXT NOT NULL,
           source_category TEXT NOT NULL, source_key TEXT NOT NULL, versions_json TEXT NOT NULL,
-          created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key),
-          FOREIGN KEY(analysis_id) REFERENCES reports(analysis_id) ON DELETE CASCADE
+          created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key)
         );
         CREATE INDEX IF NOT EXISTS feedback_targets_analysis ON feedback_targets(analysis_id);
         CREATE TABLE IF NOT EXISTS feedback_responses (
@@ -450,15 +504,54 @@ def _versions(payload: dict[str, Any]) -> dict[str, str]:
     return values
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
-    response = None if row["updated_at"] is None or row["withdrawn_at"] is not None else {"rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "updated_at": row["updated_at"]}
-    return {"target_id": row["target_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "response": response}
+    return {
+        "target_id": row["target_id"],
+        "kind": row["kind"],
+        "source_category": row["source_category"],
+        "source_key": row["source_key"],
+        "versions": json.loads(row["versions_json"]),
+        "rating": row["rating"],
+        "reason": row["reason"],
+        "comment": row["comment"],
+        "updated_at": row["updated_at"],
+        "withdrawn_at": row["withdrawn_at"],
+    }
 
 
 def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
-    failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
-    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    failure = None
+    if row["operation_kind"]:
+        failure = {
+            "operation_kind": row["operation_kind"],
+            "error_code": row["error_code"],
+            "retryable": bool(row["retryable"]) if row["retryable"] is not None else None,
+            "attempt_count": row["attempt_count"],
+            "occurred_at": row["occurred_at"],
+            "correlation_id": row["correlation_id"],
+            "versions": json.loads(row["failure_versions"]),
+        }
+    return {
+        "cursor": row["cursor"],
+        "target_id": row["target_id"],
+        "analysis_id": row["analysis_id"],
+        "kind": row["kind"],
+        "source_category": row["source_category"],
+        "source_key": row["source_key"],
+        "versions": json.loads(row["versions_json"]),
+        "actor_hash": row["actor_hash"],
+        "actor_email": row["actor_email"],
+        "rating": row["rating"],
+        "reason": row["reason"],
+        "comment": row["comment"],
+        "context_label": row["context_label"],
+        "context_text": row["context_text"],
+        "updated_at": row["updated_at"],
+        "triage_status": row["triage_status"],
+        "triage_note": row["note"],
+        "failure": failure,
+    }
