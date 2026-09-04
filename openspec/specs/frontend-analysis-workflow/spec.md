@@ -19,6 +19,27 @@ The analyze page SHALL process selected files one request at a time, in selectio
 - **WHEN** the final file completes with a result or an error
 - **THEN** the Analyzing card briefly shows a complete state pointing to Recent analyses and then disappears, leaving the upload form and Recent analyses
 
+### Requirement: Batch state survives navigation within the app
+The upload queue, the in-flight batch, the session's new-analysis markers, and the in-memory uploads SHALL live outside the analyze page so that leaving through the sidebar and returning while files are still processing shows the Analyzing card, its statuses, and the new markers again. A finished result MUST NOT be lost because the analyze page was unmounted while its request was pending.
+
+#### Scenario: Return from another section mid-batch
+- **WHEN** the recruiter opens Dashboard or Settings while the second of three files is analyzing and then returns to Analyze
+- **THEN** the Analyzing card is shown with the first file completed and the second analyzing, and Recent analyses marks the first as new
+
+### Requirement: Queued files can be removed individually
+Each queued file row SHALL offer a remove control that drops only that file, in addition to the reset control that clears the whole queue.
+
+#### Scenario: Remove one queued file
+- **WHEN** the recruiter removes the second of three queued files
+- **THEN** the other two remain queued in their original order
+
+### Requirement: A running batch can be cancelled without leaving partial results
+The Analyzing card SHALL offer a Cancel control. Cancelling SHALL close the card at once, return every unfinished file, including the one currently analyzing, to the upload queue in upload order, and ask the API to discard the in-flight analysis. The API SHALL honor a cancel request identified by the client request id at the latest before persisting the report: the run is marked cancelled, no report is stored, the file does not appear in Recent analyses, and the response is 409 `analysis_cancelled`. Files that finished before the cancel keep their reports and new markers. If a result is persisted before the cancel takes effect, it SHALL be marked as new and its file SHALL leave the queue so it is not analyzed twice.
+
+#### Scenario: Cancel, remove a file, and start again
+- **WHEN** the recruiter cancels a running batch of four files after the first completed, removes one of the restored files, and starts the batch again
+- **THEN** the cancelled second file is not listed in Recent analyses, the new batch analyzes exactly the three remaining files, and the first file keeps its new marker
+
 ### Requirement: Finished files appear in Recent analyses immediately
 Each time a batch file finishes, successfully or with an error, the Recent analyses list SHALL reload so that the finished analysis is listed without waiting for the rest of the batch. Analyses finished in the current session SHALL be marked as new in the list. Automatic research scheduling for successful results SHALL continue to happen per file as it completes.
 

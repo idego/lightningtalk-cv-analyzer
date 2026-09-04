@@ -44,18 +44,44 @@ test("complete then clear keeps highlights and files", () => {
   assert.equal(store.getSnapshot().sessionFiles.get("a").name, "a.pdf");
 });
 
-test("cancel returns the waiting files and still highlights the in-flight result", () => {
+test("queue edits persist in the store", () => {
+  const store = new BatchSessionStore();
+  const files = [file("a.pdf"), file("b.pdf"), file("c.pdf")];
+  store.enqueue(files);
+  store.removeQueued(1);
+  assert.deepEqual(store.getSnapshot().queue, [files[0], files[2]]);
+  store.clearQueue();
+  assert.deepEqual(store.getSnapshot().queue, []);
+});
+
+test("cancel restores unfinished files ahead of the queue and names the in-flight request", () => {
   const store = new BatchSessionStore();
   const files = [file("a.pdf"), file("b.pdf"), file("c.pdf"), file("d.pdf")];
   const token = store.start(files);
+  assert.deepEqual(store.getSnapshot().queue, []);
+  store.beginFile(token, files[0], "req-a");
   assert.equal(store.record(ok("a"), files[0], token), true);
-  assert.deepEqual(store.cancel(), [files[2], files[3]]);
+  store.beginFile(token, files[1], "req-b");
+  store.enqueue([file("late.pdf")]);
+  assert.deepEqual(store.cancel(), { requestId: "req-b" });
   assert.equal(store.getSnapshot().batch, null);
-  assert.equal(store.record(ok("b"), files[1], token), false);
-  assert.equal(store.getSnapshot().batch, null);
-  assert.deepEqual([...store.getSnapshot().sessionIds], ["a", "b"]);
-  assert.equal(store.getSnapshot().sessionFiles.get("b").name, "b.pdf");
-  assert.deepEqual(store.cancel(), []);
+  assert.deepEqual(store.getSnapshot().queue.map((queued) => queued.name), ["b.pdf", "c.pdf", "d.pdf", "late.pdf"]);
+  assert.deepEqual(store.cancel(), { requestId: null });
+});
+
+test("after cancel a discarded result is ignored and a late success leaves the queue", () => {
+  const store = new BatchSessionStore();
+  const files = [file("a.pdf"), file("b.pdf")];
+  const token = store.start(files);
+  store.beginFile(token, files[0], "req-a");
+  store.cancel();
+  assert.equal(store.record({ filename: "a.pdf", status: "error", error: "cancelled" }, files[0], token), false);
+  assert.deepEqual(store.getSnapshot().queue, files);
+  assert.deepEqual([...store.getSnapshot().sessionIds], []);
+  assert.equal(store.record(ok("a"), files[0], token), false);
+  assert.deepEqual(store.getSnapshot().queue, [files[1]]);
+  assert.deepEqual([...store.getSnapshot().sessionIds], ["a"]);
+  assert.equal(store.getSnapshot().sessionFiles.get("a"), files[0]);
 });
 
 test("a stale token never records into a newer batch", () => {

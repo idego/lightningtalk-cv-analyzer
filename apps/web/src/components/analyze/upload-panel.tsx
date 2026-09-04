@@ -15,6 +15,7 @@ import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSes
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
 const COMPLETE_CARD_MS = 1200;
+const CANCELLED_STATUS = 409;
 
 function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -38,9 +39,8 @@ function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchPro
 
 export function UploadPanel() {
   const { settings, t } = useCopy();
-  const [files, setFiles] = useState<File[]>([]);
   const store = getBatchSessionStore();
-  const { batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -56,14 +56,13 @@ export function UploadPanel() {
     return () => window.clearInterval(timer);
   }, [running, startedAt]);
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
-  function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
+  function onFilesSelected(list: FileList | null) { if (list) store.enqueue(Array.from(list)); }
 
-  function removeFile(index: number) { setFiles((previous) => previous.filter((_, position) => position !== index)); }
-
-  async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
+  async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
-    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage } });
+    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
     const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
+    if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
     if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
     return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(payload, payload.analysis_access_token) };
@@ -73,11 +72,13 @@ export function UploadPanel() {
     setError(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     if (running) return;
     const queue = acceptedFiles;
-    setFiles([]); setElapsedSeconds(0);
+    setElapsedSeconds(0);
     const token = store.start(queue);
     for (const file of queue) {
+      const requestId = crypto.randomUUID();
+      store.beginFile(token, file, requestId);
       let result: AnalyzeItemResult;
-      try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
+      try { result = await analyzeFile(file, requestId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       if (result.status !== "error") void getAutoResearchOrchestrator()?.schedule(result.report, settings);
       if (!store.record(result, file, token)) return;
     }
@@ -86,8 +87,12 @@ export function UploadPanel() {
     store.clearBatch();
   }
 
-  function reset() { if (running) return; setFiles([]); setError(null); }
-  function cancel() { const remaining = store.cancel(); setElapsedSeconds(0); setFiles((previous) => [...previous, ...remaining]); }
+  function reset() { if (running) return; store.clearQueue(); setError(null); }
+  function cancel() {
+    const { requestId } = store.cancel();
+    setElapsedSeconds(0);
+    if (requestId) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
+  }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
     setOpened({ file: resolveDocumentSource(item, sessionFiles), result: { filename: item.filename, status: "ok", report } });
   }
@@ -101,7 +106,7 @@ export function UploadPanel() {
           <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
         </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => removeFile(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset}>{t("reset")}</Button></div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
       </CardContent>

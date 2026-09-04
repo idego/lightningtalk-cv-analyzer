@@ -21,12 +21,14 @@ export async function POST(req: Request) {
   payload.append("file", file, file.name);
 
   const analysisAccessToken = analysisAccessTokenForUser(user.id);
+  const requestId = req.headers.get("X-Analysis-Request-Id");
   const upstream = await fetch(`${INTERNAL_API_URL}/analyze`, {
     method: "POST",
     body: payload,
     headers: {
       "X-Analysis-Access-Token": analysisAccessToken,
       "X-Report-Language": req.headers.get("X-Report-Language") ?? "en",
+      ...(requestId ? { "X-Analysis-Request-Id": requestId } : {}),
     },
   });
 
