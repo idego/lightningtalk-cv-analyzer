@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "outcome", "possible_profiles", "linkedin_not_found", "not_found_caveat", "searches_performed", "search_limitations"],
+  "properties": {
+    "schema_version": {"type": "string", "const": "linkedin-discovery-schema-v3"},
+    "outcome": {"type": "string", "enum": ["completed", "ambiguous", "insufficient_evidence"]},
+    "possible_profiles": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/profile"}},
+    "linkedin_not_found": {"type": "boolean"},
+    "not_found_caveat": {"type": "string", "minLength": 1},
+    "searches_performed": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1}},
+    "search_limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "sourceUrls": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
+    "count": {"type": "object", "additionalProperties": false, "required": ["visibility", "minimum", "maximum", "display", "source_url"], "properties": {
+      "visibility": {"type": "string", "enum": ["visible", "unknown"]}, "minimum": {"type": ["integer", "null"], "minimum": 0}, "maximum": {"type": ["integer", "null"], "minimum": 0}, "display": {"type": ["string", "null"]}, "source_url": {"type": ["string", "null"]}
+    }},
+    "profile": {"type": "object", "additionalProperties": false, "required": ["profile_url", "source_urls", "confidence", "uncertainty", "photo_visible", "photo_source_url", "connection_count", "connection_completeness_flag"], "properties": {
+      "profile_url": {"type": "string", "pattern": "^https://(www\\.)?linkedin\\.com/in/"}, "source_urls": {"$ref": "#/$defs/sourceUrls"},
+      "confidence": {"type": "string", "enum": ["low", "medium", "high"]}, "uncertainty": {"type": "string", "minLength": 1},
+      "photo_visible": {"type": "string", "enum": ["true", "false", "unknown"]}, "photo_source_url": {"type": ["string", "null"]},
+      "connection_count": {"$ref": "#/$defs/count"}, "connection_completeness_flag": {"type": "boolean"}
+    }}
+  }
+}

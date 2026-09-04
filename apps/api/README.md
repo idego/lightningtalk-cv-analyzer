@@ -1,9 +1,27 @@
-## CV Validator API
+# CV Analyzer API
 
-Backend service for CV location-consistency analysis.
+The API installs `DocumentAnalysisStrategy` as the default producer of
+the `base-analysis-v2` contract. It accepts text-layer PDF and DOCX uploads,
+projects a real Docling document into evidence blocks, runs three parallel model
+specialists, validates their candidates, and applies a sequential reviewer
+before deterministic report assembly. With AI disabled, conversion and
+mechanical extraction still run and the unavailable model passes are explicit.
 
-Run tests from this directory:
+Run tests:
 
 ```bash
-PYTHONPATH=src pytest
+PYTHONPATH=src .venv/bin/pytest -q
 ```
+
+The retained shared capabilities are:
+
+- upload boundaries;
+- report schema validation;
+- SQLite ownership, audit, retention, and deletion;
+- phone, e-mail, literal URL, postal-candidate, and e-mail typo primitives;
+- GeoNames resolution infrastructure;
+- company, education, and LinkedIn research with reusable cache provenance.
+
+There is no score, band, Document Understanding, Structural Audit, ESCO,
+national-ID redaction, file metadata, live link inspection, or manual retry of
+the deleted monolithic analysis pass.

@@ -1,43 +1,94 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
-from cv_validator.config import WeightsConfig, load_weights
-from cv_validator.domain import Report
-from cv_validator.extraction.claim import identify_claim
-from cv_validator.extraction.signals import extract_all_signals
-from cv_validator.ingestion import ParsedCV
-from cv_validator.ingestion.router import ingest_cv
-from cv_validator.scoring.engine import score_signals
+from cv_validator.analysis import (
+    AnalysisInput,
+    AnalysisStrategy,
+    UnavailableAnalysisStrategy,
+    validate_analysis_report,
+)
 
 
-def analyze_cv_text(text: str, weights: WeightsConfig | None = None) -> Report:
-    cfg = weights or load_weights()
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    from cv_validator.ingestion.regions import split_contact_and_body
+@dataclass(frozen=True)
+class PipelineResult:
+    report: dict[str, Any]
+    input_hash: str
+    source_filename: str
+    report_language: str
 
-    contact, body = split_contact_and_body(lines)
-    parsed = ParsedCV(
-        lines=tuple(lines),
-        contact_region=tuple(contact),
-        body_region=tuple(body),
-        source_format="text",
+
+def analyze_cv_bytes_result(
+    content: bytes,
+    filename: str,
+    *,
+    strategy: AnalysisStrategy | None = None,
+    report_language: str = "en",
+    analysis_id: str | None = None,
+    correlation_id: str | None = None,
+    recorder: Any = None,
+) -> PipelineResult:
+    request = AnalysisInput.from_upload(content, filename, report_language)
+    request = replace(
+        request,
+        analysis_id=analysis_id,
+        correlation_id=correlation_id,
+        recorder=recorder,
     )
-    return _analyze_parsed(parsed, cfg)
+    selected_strategy = strategy or UnavailableAnalysisStrategy()
+    payload = selected_strategy.analyze(request)
+    _require_strategy_identity(payload, selected_strategy, request)
+    return PipelineResult(
+        report=validate_analysis_report(payload),
+        input_hash=request.sha256,
+        source_filename=filename,
+        report_language=report_language,
+    )
 
 
-def analyze_cv_bytes(content: bytes, filename: str, weights: WeightsConfig | None = None) -> Report:
-    cfg = weights or load_weights()
-    parsed = ingest_cv(content, filename=filename)
-    return _analyze_parsed(parsed, cfg)
+def analyze_cv_bytes(
+    content: bytes,
+    filename: str,
+    *,
+    strategy: AnalysisStrategy | None = None,
+    report_language: str = "en",
+) -> dict[str, Any]:
+    return analyze_cv_bytes_result(
+        content,
+        filename,
+        strategy=strategy,
+        report_language=report_language,
+    ).report
 
 
-def analyze_cv_file(path: Path, weights: WeightsConfig | None = None) -> Report:
-    content = path.read_bytes()
-    return analyze_cv_bytes(content, filename=path.name, weights=weights)
+def analyze_cv_file(
+    path: Path,
+    *,
+    strategy: AnalysisStrategy | None = None,
+    report_language: str = "en",
+) -> dict[str, Any]:
+    return analyze_cv_bytes(
+        path.read_bytes(),
+        path.name,
+        strategy=strategy,
+        report_language=report_language,
+    )
 
 
-def _analyze_parsed(parsed: ParsedCV, weights: WeightsConfig) -> Report:
-    claim = identify_claim(parsed)
-    signals = extract_all_signals(parsed, claim, weights)
-    return score_signals(claim, signals, weights)
+def _require_strategy_identity(
+    payload: dict[str, Any],
+    strategy: AnalysisStrategy,
+    request: AnalysisInput,
+) -> None:
+    strategy_payload = payload.get("strategy")
+    source_payload = payload.get("source")
+    if strategy_payload != {"name": strategy.name, "version": strategy.version}:
+        raise ValueError("analysis strategy returned a mismatched identity")
+    if not isinstance(source_payload, dict):
+        raise ValueError("analysis strategy omitted source identity")
+    if source_payload.get("format") != request.source_format.value:
+        raise ValueError("analysis strategy returned a mismatched source format")
+    if source_payload.get("sha256") != request.sha256:
+        raise ValueError("analysis strategy returned a mismatched input hash")

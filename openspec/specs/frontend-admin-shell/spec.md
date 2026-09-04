@@ -1,7 +1,8 @@
 # frontend-admin-shell Specification
 
 ## Purpose
-TBD - created by archiving change frontend-idego-design-system. Update Purpose after archive.
+Defines the authenticated Idego-branded application shell, theme behavior,
+navigation, stable layout, and containerized frontend build.
 ## Requirements
 ### Requirement: Frontend service scaffold
 The system SHALL provide a standalone frontend service at `apps/web` built with Next.js App Router, TypeScript, and pnpm.
@@ -37,11 +38,18 @@ The frontend SHALL support light/dark mode with early theme bootstrap to prevent
 - **THEN** theme class is applied before visible paint to avoid flash of incorrect theme
 
 ### Requirement: Admin shell layout baseline
-The frontend SHALL provide a reusable admin shell with sidebar, sticky header, centered content container, and footer, including an `Analyze` placeholder navigation target.
+The frontend SHALL provide a reusable admin shell with sidebar, sticky header,
+centered content container, and footer, including the `Analyze` navigation
+target.
 
-#### Scenario: Analyze placeholder route
+#### Scenario: Analyze route
 - **WHEN** a user opens the app shell
-- **THEN** an `Analyze` navigation item and corresponding placeholder screen are present
+- **THEN** an `Analyze` navigation item and corresponding analysis screen are present
+
+#### Scenario: Role-gated Feedback route
+- **WHEN** the signed-in user holds an active feedback `owner` or `reviewer` role
+- **THEN** a `Feedback` navigation item pointing at `/feedback` is also present
+- **AND** users without a role see no `Feedback` item and are redirected from `/feedback` to `/analyze`
 
 #### Scenario: Layout structure
 - **WHEN** shell pages are rendered
@@ -62,4 +70,3 @@ The frontend SHALL include a Docker build/runtime definition suitable for later 
 #### Scenario: Web image builds
 - **WHEN** the web Dockerfile is built
 - **THEN** it produces a runnable image that serves the Next.js app
-

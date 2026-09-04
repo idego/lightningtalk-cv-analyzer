@@ -1,5 +1,4 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
-onlyBuiltDependencies:
-  - better-sqlite3
+allowBuilds:
+  better-sqlite3: true
+  sharp: false
+  unrs-resolver: false

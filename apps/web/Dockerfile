@@ -6,7 +6,7 @@ ENV CI=true
 RUN corepack enable
 
 FROM base AS deps
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN apk add --no-cache python3 make g++ \
   && pnpm install --frozen-lockfile --config.minimumReleaseAge=0 --config.strictDepBuilds=false \
   && pnpm approve-builds --all \
@@ -16,6 +16,10 @@ FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN ./node_modules/.bin/next build
+
+FROM deps AS feedback-init
+COPY scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+CMD ["node", "scripts/init-feedback-access.mjs"]
 
 FROM base AS runtime
 ENV NODE_ENV=production

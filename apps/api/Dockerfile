@@ -4,10 +4,11 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CV_VALIDATOR_DB_PATH=/app/data/cv_validator.db \
-    CV_VALIDATOR_WEIGHTS_PATH=/app/weights.yaml
+    CV_VALIDATOR_DB_PATH=/app/data/cv_analyzer.db \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
-COPY pyproject.toml README.md weights.yaml ./
+COPY pyproject.toml README.md ./
 COPY src ./src
 
 RUN pip install --no-cache-dir --upgrade pip \
@@ -17,6 +18,8 @@ FROM base AS dev
 
 COPY tests ./tests
 COPY fixtures ./fixtures
+COPY scripts ./scripts
+COPY reference_data ./reference_data
 
 RUN pip install --no-cache-dir ".[dev]"
 
@@ -27,6 +30,6 @@ FROM base AS runtime
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 --start-period=5s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+    CMD python -c "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); sys.exit(0 if data.get('ready') is True else 1)"
 
 CMD ["uvicorn", "cv_validator.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,7 @@
+# Local development only. Publishes the API on loopback so Swagger
+# (http://127.0.0.1:8001/docs) is reachable. Never use in production;
+# /internal/feedback relies on the web layer for authorization.
+services:
+  api:
+    ports:
+      - "127.0.0.1:${API_DEV_PORT:-8001}:8000"

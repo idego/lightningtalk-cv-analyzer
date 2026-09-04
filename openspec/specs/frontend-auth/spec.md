@@ -1,7 +1,8 @@
 # frontend-auth Specification
 
 ## Purpose
-TBD - created by archiving change google-auth-sqlite. Update Purpose after archive.
+Defines Google SSO, allowed-domain enforcement, protected application routes,
+and SQLite-backed session persistence.
 ## Requirements
 ### Requirement: Google SSO integration for web app
 The frontend SHALL support Google sign-in via Better Auth and maintain authenticated sessions for protected routes.
@@ -37,6 +38,17 @@ The `(app)` route group SHALL require an authenticated user and redirect unauthe
 - **WHEN** an authenticated user requests `/analyze`
 - **THEN** the page renders inside the app shell
 
+### Requirement: Local development auth bypass
+The web app SHALL support `LOCAL_DEV_AUTH_BYPASS=true` only when `BASE_URL` is a loopback address. In that mode the `(app)` group treats every request as the synthetic user `local-dev@localhost`, and `feedback-init` grants that user an active feedback `owner` role on every run. The production preflight SHALL refuse an env file where the bypass is enabled.
+
+#### Scenario: Bypass in make dev
+- **WHEN** `make dev` starts the stack
+- **THEN** `LOCAL_DEV_AUTH_BYPASS=true` is set and `/analyze` and `/feedback` render without Google sign-in
+
+#### Scenario: Bypass rejected in production
+- **WHEN** `make deploy-check` reads an env file with `LOCAL_DEV_AUTH_BYPASS` not equal to `false`
+- **THEN** preflight fails before compose runs
+
 #### Scenario: Unauthenticated access to analysis proxy API
 - **WHEN** an unauthenticated request targets `POST /api/analyze`
 - **THEN** the route returns HTTP 401 and does not call backend analysis endpoints
@@ -47,4 +59,3 @@ Authentication data SHALL persist in SQLite storage suitable for local and conta
 #### Scenario: SQLite file used by auth layer
 - **WHEN** the web app is running
 - **THEN** Better Auth reads/writes session/account records from the configured SQLite file
-

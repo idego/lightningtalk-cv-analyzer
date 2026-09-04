@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .eggs/
+.venv/
 dist/
 build/
 .pytest_cache/
@@ -9,5 +10,6 @@ build/
 .ruff_cache/
 .env
 .env.*
+.codex/config.toml
 data/
 *.db

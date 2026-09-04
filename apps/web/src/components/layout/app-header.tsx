@@ -7,10 +7,13 @@ import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { Button } from "@/components/ui/button";
 import { titleFromPathname } from "@/components/layout/sidebar-data";
+import { useCopy } from "@/lib/app-settings";
 
 export function AppHeader() {
   const pathname = usePathname();
-  const title = titleFromPathname(pathname);
+  const { t } = useCopy();
+  const fallbackTitle = titleFromPathname(pathname);
+  const title = pathname.startsWith("/settings") ? t("settings") : pathname.startsWith("/dashboard") ? t("dashboard") : pathname.startsWith("/analyze") ? t("analyze") : fallbackTitle;
 
   return (
     <header className="sticky top-0 z-30 flex h-14 min-h-14 shrink-0 w-full min-w-0 items-center gap-2 border-b bg-background/85 px-4 py-0 backdrop-blur sm:gap-3 sm:px-6">
@@ -25,8 +28,8 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           className="size-8"
-          aria-label="Open feature list board"
-          title="Open feature list board"
+          aria-label={t("openFeatureListBoard")}
+          title={t("openFeatureListBoard")}
           onClick={() => {
             window.open("https://boards.s18i.io/boards/S3q9Xbo5w63D", "_blank", "noopener,noreferrer");
           }}

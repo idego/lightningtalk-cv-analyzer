@@ -1,0 +1,35 @@
+import { ExternalLink } from "lucide-react";
+import { HoverDisclosure } from "@/components/ui/hover-disclosure";
+import { useCopy } from "@/lib/app-settings";
+import { sourceLabel } from "@/lib/source-label";
+
+export function ResearchSources({ urls }: { urls: Array<string | null | undefined> }) {
+  const { t } = useCopy();
+  const sources = Array.from(new Set(urls.filter((url): url is string => Boolean(url))));
+  if (!sources.length) return null;
+
+  return (
+    <HoverDisclosure
+      className="ml-2 text-xs"
+      triggerClassName="w-fit flex-none font-medium text-foreground"
+      title={t("viewSources", { count: sources.length })}
+      contentClassName="pl-3 pt-2"
+    >
+      <ul className="space-y-1.5">
+        {sources.map((url) => (
+          <li key={url}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex max-w-full items-center gap-1 text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              <span className="truncate">{sourceLabel(url)}</span>
+              <ExternalLink aria-hidden="true" className="size-3 shrink-0" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </HoverDisclosure>
+  );
+}

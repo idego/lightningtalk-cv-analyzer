@@ -1,113 +1,127 @@
-# CV Location Consistency Analyzer
+# CV Analyzer
 
-Decision-support tool that checks whether a candidate's **stated location** on their CV is **consistent** with other location-bearing evidence in the same document.
+CV Analyzer analyzes CVs with Docling document conversion and pinned OpenAI
+model passes, producing reports in the `base-analysis-v2` contract.
 
-> **This does not verify physical location.** A batch CV cannot prove where a person sits. Outputs are for human review only — no automated rejection or advancement.
+The previous deterministic Document Understanding, Structural Audit, ESCO,
+national-ID redaction, score/band, file metadata, and live-link checker have
+been removed. They are not compatibility surfaces.
 
-## Scope (v1)
+## Architecture
 
-- **Inputs:** text-extractable PDF and DOCX, English-primary
-- **Not supported:** scanned/image PDFs (no OCR), non-English CVs, live online enrichment
-- **Enrichment:** offline only (`phonenumbers`, static TLD→country table)
-- **Output:** JSON report with score (0–100), band (`green` / `amber` / `red` / `gray`), itemized findings, and plain-language summary
+```text
+PDF or DOCX upload
+    -> Docling 2.124.0 native-text conversion (OCR disabled)
+    -> thin SourceDocument evidence projection
+    -> concurrent profile, employment, and education model specialists
+    -> field and relation validation plus mechanical candidates
+    -> sequential model reviewer with validated ID-based operations
+    -> base-analysis-v2 validation
+    -> persistence and UI
+    -> automatic company, education, and LinkedIn research
+```
 
-## Monorepo Layout
+Every semantic value needs literal source evidence. A reviewer may add a missing candidate
+only when the same evidence and relation validation accepts it.
 
-- `apps/api` — FastAPI backend service (current implementation)
-- `apps/web` — Next.js frontend (Google auth, upload panel, analysis results)
+The specialists use pinned `gpt-5.6-luna` with reasoning effort `none`; the
+reviewer uses `low`; public research calls use `medium`. Responses API storage is disabled and base analysis uses
+no tools. Without AI credentials the strategy still converts documents and
+returns an explicit unavailable/partial result instead of another parser.
 
-## Docker (recommended)
+Mechanical code is limited to phones, e-mails, literal URLs, postal-pattern
+candidates, e-mail provider typos, geographic resolution, and informational EU
+status. A postal-looking token is not accepted as the candidate's address
+without supported context.
 
-Run the full stack (web + private api):
+See the current [architecture](docs/architecture.md) for durable boundaries and
+the authoritative executable contracts.
+
+## Development
 
 ```bash
-docker compose up --build
+make dev
+make dev-down
+cd apps/api && PYTHONPATH=src .venv/bin/pytest -q
+cd apps/web && pnpm test        # requires Node 22 (type stripping)
+cd apps/web && pnpm typecheck
+cd apps/web && pnpm build
 ```
 
-The web app is available at `http://localhost:3000` by default. Set `WEB_PORT=3001` in `.env` to publish on port 3001 instead (container always listens on `3000`).
+`make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
+through `docker-compose.dev.yml`; `make deploy` never does.
 
-- `web` is the only host-exposed service.
-- `api` is reachable only on the internal compose network (`http://api:8000`).
-- SQLite data persists in named volumes: `web_auth_data` (auth) and `cv_validator_data` (backend audit DB).
+The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
+database `/app/data/auth.db`. A stack created under the former project name
+`cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
+data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
+`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to the old `docling_luna*.db`
+paths in the env file, or copy the volumes once while the stack is stopped.
 
-Run the test suite in a container:
+On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
+downloads the configured official GeoNames sources and builds both locality and
+postal indexes in the project-scoped `geonames_data` volume. The API waits for
+that job and mounts its completed `current` release read-only. Later starts
+validate and reuse the volume without downloading. Set `GEONAMES_SNAPSHOT_VERSION`
+to a new date to request an explicit refresh; allow at least 3 GiB of free space
+for archives, staging files, and indexes.
 
-```bash
-docker compose --profile test run --rm test
-```
+For a host with no outbound access, prepare an approved directory containing
+both index/manifest pairs and run `REFERENCE_DATA_MODE=operator make deploy` with
+`CV_VALIDATOR_REFERENCE_DATA_DIR` set in `.env`. See
+[`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for recovery,
+refresh, and rollback details.
 
-Optional environment variables (via shell or `.env`):
+`GET /health` reports `ready: false` when the analysis model client is not
+configured; uploads then fail with `analysis_strategy_unavailable` and are not
+persisted as successful reports. Each attempted analysis has owner-scoped,
+PII-safe diagnostics and an immutable AI token/cost ledger at
+`GET /analyses/{analysis_id}/diagnostics`. Rates are versioned in code and can
+be overridden with `CV_VALIDATOR_PRICING_PATH`; unknown model pricing leaves
+the cost null without discarding token usage. Reusable research cache hits
+record zero current-call tokens and separate saved usage/cost provenance.
 
-- `WEB_PORT` — host port for the web app (default `3000`; set to `3001` in `.env` when needed)
-- `BASE_URL` / `BETTER_AUTH_URL` — external URL used by web auth callbacks
-- `BETTER_AUTH_SECRET` — random 32+ char secret for Better Auth
-- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — Google OAuth credentials
-- `ALLOWED_EMAIL_DOMAINS` — comma-separated allowed domains (default `idego.io`)
-- `CV_VALIDATOR_RETENTION_DAYS` — audit/report retention window (default `90`)
+## Privacy and persistence
 
-Start from the root `.env.example`:
+- OpenAI requests use `store=false`.
+- Never log raw CV text or raw model output.
+- The API stores the validated report, not the uploaded original.
+- Access tokens are hashed for ownership and are not written into audit JSON.
+- Private CV fixtures and evaluation outputs belong under ignored `data/`.
+- Old pilot reports are not migrated. The new default database is
+  `data/cv_analyzer.db`; existing databases are never deleted implicitly.
 
-```bash
-cp .env.example .env
-```
+Contextual feedback is enabled by default. It stores the signed-in author's
+email, target identity, classification, short sanitized comment, the displayed
+CV/report fragment being reviewed, and safe technical diagnostics. It never
+stores the uploaded original, raw model output, or raw logs. Analysis data is
+transient and recruiter-owned, while feedback is long-lived platform/review
+data that survives analysis deletion and retention purge, like the AI usage
+ledger. Setup and access management are documented in
+[`docs/operations.md`](docs/operations.md).
 
-## Deployment note (subdomain + TLS)
+## Public research
 
-Deploy this stack behind your host reverse proxy (nginx/Caddy/Cloudflare Tunnel):
+Company, education, and LinkedIn research remains optional. Subjects come only
+from accepted, evidence-supported base-analysis records. Reusable cache entries
+are keyed per public subject, support partial hits, and carry hit/miss
+provenance, original research timestamps, refresh, and cache audit entries.
 
-- terminate TLS at the host proxy for your `<name>.idego.*` subdomain,
-- forward public traffic to `web` only,
-- keep `api` unexposed from the host network.
+Research confidence is intentionally conservative: high confidence requires
+multiple consistent public signals, and LinkedIn discovery requires both name
+support and compatible experience or education context. Results remain possible
+matches, never identity verification. The LinkedIn Profiles header also provides
+one user-initiated people-search shortcut; it does not replace or trigger LinkedIn
+Research and no per-profile search shortcuts are shown. Each company and
+education entry in the CV overview, and each completed company or education
+research result, carries a compact Google Search shortcut built only from the
+visible public subject; self-employment entries get none.
 
-This project is intended for container-hosted deployment, not Vercel.
+## Supported documents and limitations
 
-## Install (local backend)
-
-```bash
-cd apps/api
-pip install -e ".[dev]"
-```
-
-## CLI usage (library)
-
-```python
-from pathlib import Path
-from cv_validator.pipeline import analyze_cv_file, analyze_cv_text
-
-report = analyze_cv_file(Path("cv.docx"))
-print(report.band, report.score, report.summary)
-```
-
-## API
-
-```bash
-cd apps/api
-uvicorn cv_validator.api.app:app --reload
-```
-
-- `POST /analyze` — single CV upload
-- `POST /analyze/batch` — multiple CVs; per-file errors isolated
-- `GET /health` — health check
-
-## Calibration fixtures
-
-Synthetic fixtures live in `apps/api/fixtures/calibration/`:
-
-- `consistent_berlin.txt` — aligned signals
-- `mismatch_us_phone.txt` — strong conflict (US phone vs claimed Germany)
-- `sparse_cv.txt` — insufficient evidence → gray band
-
-Run tests:
-
-```bash
-cd apps/api
-PYTHONPATH=src pytest
-```
-
-## Weights
-
-Signal weights and band thresholds are in `apps/api/weights.yaml`. Strong signals (phone, address) are calibrated to dominate the full weak-signal pool.
-
-## Disclaimer
-
-Every report is stamped: **decision-support only — not verification.** Human review is required.
+Only text-bearing PDF and DOCX files are supported. Image-only or scan-only
+documents fail with `document_text_layer_unavailable`; OCR is never attempted.
+The minimal Docling runtime installs only PDF/DOCX conversion extras and sets
+offline flags, so it has no model assets to download at runtime. Results are
+recruiter decision support and never verify a candidate or their location.

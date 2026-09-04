@@ -1,154 +1,70 @@
 # AGENTS.md
 
-Canonical instructions for AI coding agents working in this repo
-(Cursor, Claude Code, Codex, etc.). Tool-specific files (`CLAUDE.md`,
-`.cursor/rules/*.mdc`) defer to this document for shared rules and only
-add tool-specific notes.
+Canonical instructions for coding agents in this repository.
 
----
+## Current architecture
 
-## 1. Project at a glance
+The API runs the `document-analysis` strategy against the shared
+`base-analysis-v2` schema. Read `docs/architecture.md` before changing the
+analysis pipeline. The shared layer owns validation, persistence, mechanical
+primitives, UI, and research.
 
-- **Product:** CV Location Consistency Analyzer — decision-support tool
-  for recruiters reviewing candidate CVs.
-- **What it does:** Compares a candidate's **stated location** (from the
-  CV header/contact block) against independent circumstantial evidence in
-  the same document (phone country code, postal format, employer location,
-  date conventions, etc.).
-- **What it does NOT do:** Verify physical location. A batch CV cannot
-  prove where a person sits. Never auto-reject or auto-advance candidates.
-- **Stack:** Python 3.11+, FastAPI, pdfplumber, python-docx, phonenumbers,
-  SQLite (audit/persistence), Docker Compose.
-- **Monorepo layout:** `apps/api` (backend), `apps/web` (frontend placeholder).
-- **Package:** `apps/api/src/cv_validator/` — library-first, FastAPI wrapper.
+Do not reintroduce the removed deterministic Document Understanding,
+Structural Audit, ESCO, national-ID redaction, score/band/weights, file
+metadata, live link inspection, or the old monolithic document-AI retry path.
+Old pilot reports are not a compatibility requirement.
 
-See `README.md` for usage. Specs and active work live under `openspec/`.
+## Product boundaries
 
----
+- The system is recruiter decision support, never automatic hiring judgment.
+- Do not claim to verify identity, honesty, residence, physical location,
+  nationality, or work eligibility.
+- Semantic profile, employment, and education values require literal evidence.
+- Record relations require evidence that their fields belong together.
+- A reviewer may add a missing candidate only when the normal evidence and
+  relation validation accepts it.
+- A postal-looking token remains a candidate until supported address context
+  accepts it.
+- Public research receives only accepted evidence-supported subjects.
+- Never log or commit private CV content, excerpts, model output, or secrets.
+- OpenAI response storage remains disabled.
 
-## 2. Commands you can run
+## Commands
 
 | Task | Command |
 | --- | --- |
-| Run API (Docker) | `docker compose up --build` |
-| Run tests (Docker) | `docker compose --profile test run --rm test` |
-| Run tests (local) | `cd apps/api && PYTHONPATH=src pytest` |
-| Run API (local) | `cd apps/api && uvicorn cv_validator.api.app:app --reload` |
-| OpenSpec status | `openspec status --change "<name>"` |
-| OpenSpec validate | `openspec validate "<name>"` |
+| Run the stack | `make dev` |
+| Stop stack | `make dev-down` |
+| Backend tests | `cd apps/api && PYTHONPATH=src .venv/bin/pytest -q` |
+| Web tests | `cd apps/web && pnpm test` (Node 22) |
+| Web typecheck | `cd apps/web && pnpm typecheck` |
+| Web build | `cd apps/web && pnpm build` |
 
-API endpoints: `GET /health`, `POST /analyze`, `POST /analyze/batch`.
-Swagger UI: `http://localhost:8000/docs`
+API endpoints include `GET /health`, `GET /operations/{metrics,status}`,
+`POST /analyze`, analysis lifecycle endpoints,
+settings/retention, per-analysis feedback, the `/internal/feedback` inbox
+(authorized only by the web proxy), and company/education/LinkedIn research.
+The browser reaches the API only through Next.js routes under
+`apps/web/src/app/api/`.
 
----
+## Code conventions
 
-## 3. Domain constraints (NON-NEGOTIABLE)
+- Core backend logic lives in `apps/api/src/cv_validator/`; FastAPI remains a
+  thin boundary in `cv_validator/api/`.
+- Preserve auth, upload limits, preview, ownership, retention, deletion,
+  recent analyses, GeoNames, and research unless the owner changes scope.
+- Match existing style and keep diffs focused.
+- Use environment variables for runtime configuration.
+- Use Conventional Commits (`<type>[scope]: <description>`).
+- Create commits only when explicitly asked.
+- Never push unless explicitly asked.
+- If elevated access is needed, use graphical Polkit rather than `sudo`.
 
-These are product/legal boundaries, not implementation preferences:
+## OpenSpec
 
-1. **Decision-support only** — every report is stamped accordingly; human
-   review is required.
-2. **No verification claims** — frame output as consistency analysis,
-   not proof of location.
-3. **National ID redaction** — detect presence/type only; never store or
-   emit raw national-ID values.
-4. **Offline enrichment only** — no third-party API calls that expose
-   candidate PII (phone→country via libphonenumber, static TLD table).
-5. **Four bands:** green / amber / red / gray (insufficient evidence).
-   Sparse CVs must be gray, never silently green.
-6. **Deterministic scoring** — pure rules + config weights; no LLM in the
-   verdict path.
-
-Weights and band thresholds: `apps/api/weights.yaml`. Tune via config, not
-hard-coded magic numbers.
-
----
-
-## 4. Code conventions
-
-- **Minimize scope** — focused diffs; don't refactor unrelated code.
-- **Match existing style** — read surrounding modules before adding code.
-- **Library-first** — core logic in `apps/api/src/cv_validator/`; API is a thin
-  wrapper in `apps/api/src/cv_validator/api/`.
-- **Tests** — `apps/api/tests/` mirrors capabilities; fixtures in
-  `apps/api/fixtures/calibration/`.
-- **Env vars** for container/runtime config:
-  - `CV_VALIDATOR_DB_PATH`
-  - `CV_VALIDATOR_RETENTION_DAYS`
-  - `CV_VALIDATOR_WEIGHTS_PATH`
-- **Conventional Commits** — always use [Conventional Commits](https://www.conventionalcommits.org/)
-  for git commit messages in this repo:
-  - Format: `<type>[optional scope]: <description>` (imperative mood, lowercase
-    subject, no trailing period; keep subject ≤ 72 chars).
-  - Common types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
-    `build`, `ci`, `chore`, `revert`.
-  - Use `feat` for user-facing capability, `fix` for bug fixes, `chore` for
-    tooling/config/docs-only housekeeping, `refactor` when behavior is unchanged.
-  - Breaking changes: append `!` after type/scope or add a `BREAKING CHANGE:`
-    footer.
-  - Examples: `feat: add batch CV upload panel`, `fix: align sidebar header
-    borders`, `chore: archive cv-location-consistency openspec change`.
-
-Only create commits when explicitly asked.
-
----
-
-## 5. OpenSpec workflow
-
-This project uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) with
-the **spec-driven** schema.
-
-```
-openspec/
-├── config.yaml          # Project context + per-artifact rules
-├── specs/               # Source-of-truth specifications (after archive)
-└── changes/<name>/      # Active change proposals
-    ├── proposal.md
-    ├── design.md
-    ├── specs/
-    └── tasks.md
-```
-
-**Workflow commands** (also available as skills/commands):
-
-| Step | Cursor | Claude Code |
-| --- | --- | --- |
-| Propose | `/opsx-propose` | `.claude/commands/opsx/propose.md` |
-| Implement | `/opsx-apply` | `.claude/commands/opsx/apply.md` |
-| Explore | `/opsx-explore` | `.claude/commands/opsx/explore.md` |
-| Archive | `/opsx-archive` | `.claude/commands/opsx/archive.md` |
-
-Use OpenSpec for non-trivial features (new capabilities, API contracts,
-scoring changes). Skip for pure tooling/config unless the user asks.
-
-Active change: `cv-location-consistency` (implementation complete; ready
-to archive when accepted).
-
----
-
-## 6. Where to find what
-
-| Topic | Location |
-| --- | --- |
-| Usage & Docker | `README.md` |
-| Signal weights | `apps/api/weights.yaml` |
-| Domain types | `apps/api/src/cv_validator/domain.py` |
-| Ingestion (PDF/DOCX) | `apps/api/src/cv_validator/ingestion/` |
-| Signal extractors | `apps/api/src/cv_validator/extraction/` |
-| Scoring engine | `apps/api/src/cv_validator/scoring/engine.py` |
-| FastAPI app | `apps/api/src/cv_validator/api/app.py` |
-| Change proposal | `openspec/changes/cv-location-consistency/` |
-| Calibration fixtures | `apps/api/fixtures/calibration/` |
-| Cursor skills | `.cursor/skills/openspec-*/SKILL.md` |
-| Claude skills | `.claude/skills/openspec-*/SKILL.md` |
-
----
-
-## 7. When in doubt
-
-Ask the user before:
-
-- changing scoring weights or band logic without calibration fixtures,
-- adding online enrichment or LLM-based verdicts,
-- storing raw PII beyond what the audit spec allows,
-- claiming the system "verifies" location.
+OpenSpec is optional. Use `/opsx:propose` → apply → archive for larger
+behavior changes where an upfront design helps; small fixes, refactors, and
+doc updates do not need a change proposal. When a change touches behavior
+that an `openspec/specs/*/spec.md` already describes, update that spec in the
+same commit so specs stay truthful. Do not restore archived contracts for
+removed analysis systems.
