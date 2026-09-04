@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 TARGET_NAMESPACE = UUID("b1541b7f-e1ec-44b2-bac8-e30bf2445772")
 CONTACT_RE = re.compile(r"(?i)(?:https?://|www\.)\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:\+?\d[\d ()-]{7,}\d)")
+CONTEXT_REPORT_MAX_CHARS = 400_000
 
 
 class TargetKind(StrEnum):
@@ -62,6 +63,7 @@ class FeedbackInput(BaseModel):
     comment: str | None = Field(default=None, max_length=180)
     context_label: str | None = Field(default=None, max_length=200)
     context_text: str | None = Field(default=None, max_length=12000)
+    context_report: dict[str, Any] | None = None
 
     @field_validator("comment")
     @classmethod
@@ -79,6 +81,15 @@ class FeedbackInput(BaseModel):
         if value is None:
             return None
         return value.strip() or None
+
+    @field_validator("context_report")
+    @classmethod
+    def limit_context_report(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if len(json.dumps(value, separators=(",", ":"))) > CONTEXT_REPORT_MAX_CHARS:
+            raise ValueError("context_report_too_large")
+        return value
 
     @model_validator(mode="after")
     def validate_combination(self) -> "FeedbackInput":
@@ -208,6 +219,8 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_label TEXT")
     if "context_text" not in response_columns:
         conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_text TEXT")
+    if "context_report_json" not in response_columns:
+        conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_report_json TEXT")
     if "actor_email" not in response_columns:
         conn.execute("ALTER TABLE feedback_responses ADD COLUMN actor_email TEXT")
 
@@ -270,17 +283,18 @@ class FeedbackStore:
             if target["kind"] == TargetKind.OPERATION_FAILURE:
                 if value.rating != Rating.NOT_HELPFUL or value.reason != Reason.OPERATION_FAILED:
                     raise ValueError("failure_feedback_is_closed")
-            existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
-            equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, normalized_email)
+            context_report_json = None if value.context_report is None else json.dumps(value.context_report, separators=(",", ":"))
+            existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, context_report_json, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
+            equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["context_report_json"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, context_report_json, normalized_email)
             if not equivalent:
                 conn.execute(
                     """INSERT INTO feedback_responses(
-                         target_id,actor_hash,rating,reason,comment,created_at,updated_at,withdrawn_at,context_label,context_text,actor_email
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+                         target_id,actor_hash,rating,reason,comment,created_at,updated_at,withdrawn_at,context_label,context_text,context_report_json,actor_email
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
                        ON CONFLICT(target_id, actor_hash) DO UPDATE SET rating=excluded.rating, reason=excluded.reason,
                        comment=excluded.comment, updated_at=excluded.updated_at, withdrawn_at=NULL,
-                       context_label=excluded.context_label, context_text=excluded.context_text, actor_email=excluded.actor_email""",
-                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now, value.context_label, value.context_text, normalized_email),
+                       context_label=excluded.context_label, context_text=excluded.context_text, context_report_json=excluded.context_report_json, actor_email=excluded.actor_email""",
+                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now, value.context_label, value.context_text, context_report_json, normalized_email),
                 )
                 conn.execute("INSERT INTO feedback_events(target_id,actor_hash,event_type,rating,reason,created_at) VALUES(?,?,?,?,?,?)", (target_id, actor_hash, "submitted", value.rating, value.reason, now))
                 conn.execute("INSERT OR IGNORE INTO feedback_triage(target_id,actor_hash,status,updated_at) VALUES(?,?,?,?)", (target_id, actor_hash, TriageStatus.NEW, now))
@@ -321,7 +335,7 @@ class FeedbackStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""SELECT r.rowid AS cursor,t.target_id,t.analysis_id,t.kind,t.source_category,t.source_key,t.versions_json,
-                    r.actor_hash,r.actor_email,r.rating,r.reason,r.comment,r.context_label,r.context_text,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
+                    r.actor_hash,r.actor_email,r.rating,r.reason,r.comment,r.context_label,r.context_text,r.context_report_json,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
                     f.operation_kind,f.error_code,f.retryable,f.attempt_count,f.occurred_at,f.correlation_id,f.versions_json AS failure_versions
                     FROM feedback_responses r JOIN feedback_targets t ON t.target_id=r.target_id
                     LEFT JOIN feedback_triage g ON g.target_id=r.target_id AND g.actor_hash=r.actor_hash
@@ -511,7 +525,7 @@ def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
 
 def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
     failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
-    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
+    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None, "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
 
 
 def _now() -> str:

@@ -19,7 +19,7 @@ import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { ReportAiCost } from "@/components/analyze/report-ai-cost";
 
-function FlagList({ flags }: { flags: ReportFinding[] }) {
+export function FlagList({ flags }: { flags: ReportFinding[] }) {
   const { t } = useCopy();
   return (
     <div className="space-y-2">
@@ -107,7 +107,7 @@ function joinDisplay(...values: Array<string | null | undefined>) {
   return values.filter(Boolean).join(" · ") || null;
 }
 
-function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview: ReportOverview; analysisId: string; feedbackManifest?: FeedbackManifest }) {
+export function StructuredFacts({ overview, report, feedbackManifest, readOnly = false }: { overview: ReportOverview; report: AnalysisReport; feedbackManifest?: FeedbackManifest; readOnly?: boolean }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
@@ -124,7 +124,7 @@ function StructuredFacts({ overview, analysisId, feedbackManifest }: { overview:
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
   return (
-    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} action={feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={analysisId} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen={readOnly} action={!readOnly && feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
           {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
@@ -281,17 +281,17 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
                 <FlagList flags={presentation.attention} />
               </HoverDisclosure> : null}
 
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.worthKnowing} />
               </HoverDisclosure> : null}
 
-              <StructuredFacts overview={presentation.overview} analysisId={report.analysis_id} feedbackManifest={feedback[report.analysis_id]} />
+              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} />
 
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
               {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
-              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} feedbackSnapshotLabel={t("remaining")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} feedbackSnapshotLabel={t("remaining")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.remaining} />
               </HoverDisclosure> : null}
             </CardContent>

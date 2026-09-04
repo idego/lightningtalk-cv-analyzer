@@ -50,10 +50,12 @@ export function EducationResearchPanel({
   report,
   onResearchChange,
   feedbackManifest,
+  readOnly = false,
 }: {
   report: AnalysisReport;
   onResearchChange?: (research: EducationResearch) => void;
   feedbackManifest?: FeedbackManifest;
+  readOnly?: boolean;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "education");
@@ -92,10 +94,11 @@ export function EducationResearchPanel({
     triggerClassName="font-medium"
     title={<SectionTitle className="font-medium" icon={<GraduationCap className="size-4" />}>{t("educationResearch")}</SectionTitle>}
     collapsible={hasContent}
+    defaultOpen={readOnly}
     contentClassName="space-y-3 pt-3"
     feedbackSnapshotLabel={t("educationResearch")}
     action={<div className="flex items-center gap-2">
-      {!completed ? <ResearchAction
+      {!readOnly && !completed ? <ResearchAction
         busy={busy}
         disabled={!enabled || busy}
         onClick={startResearch}
@@ -104,7 +107,7 @@ export function EducationResearchPanel({
         busyAriaLabel={t("educationResearchInProgress")}
         disabledReason={!enabled ? t("noEducationEntries") : undefined}
       /> : null}
-      {hasContent && feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section")!} /> : null}
+      {!readOnly && hasContent && feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "education_research_result", "education_research", "section")!} /> : null}
     </div>}
   >
     {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}

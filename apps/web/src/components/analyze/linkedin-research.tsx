@@ -91,10 +91,12 @@ export function LinkedInResearchPanel({
   report,
   onDiscoveryChange,
   feedbackManifest,
+  readOnly = false,
 }: {
   report: AnalysisReport;
   onDiscoveryChange?: (discovery: LinkedInDiscovery) => void;
   feedbackManifest?: FeedbackManifest;
+  readOnly?: boolean;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "linkedin");
@@ -128,11 +130,12 @@ export function LinkedInResearchPanel({
     className="rounded-md border p-3"
     title={<SectionTitle className="font-medium" icon={<LinkedInIcon className="size-4" />}>{t("linkedinProfiles")}</SectionTitle>}
     collapsible={hasContent}
+    defaultOpen={readOnly}
     feedbackSnapshotLabel={t("linkedinProfiles")}
     contentClassName="space-y-3 pt-3"
     action={<div className="flex items-center gap-2">
       {searchHref ? <Tooltip><TooltipTrigger render={<Button variant="outline" size="icon-sm" className="active:scale-[0.92]" nativeButton={false} render={<a href={searchHref} target="_blank" rel="noreferrer" aria-label={t("searchLinkedIn")}><ProviderActionIcon provider="linkedin" /></a>} />} /><TooltipContent>{t("searchLinkedIn")}</TooltipContent></Tooltip> : null}
-      {!discoveryCompleted ? <ResearchAction
+      {!readOnly && !discoveryCompleted ? <ResearchAction
         busy={discoveryBusy}
         disabled={!enabled || discoveryBusy}
         onClick={discover}
@@ -141,7 +144,7 @@ export function LinkedInResearchPanel({
         busyAriaLabel={t("linkedinDiscoveryInProgress")}
         disabledReason={!enabled ? t("noCandidateDetails") : undefined}
       /> : null}
-      {hasContent && feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section")!} /> : null}
+      {!readOnly && hasContent && feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "linkedin_research_result", "linkedin_discovery", "section")!} /> : null}
     </div>}
   >
     {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}

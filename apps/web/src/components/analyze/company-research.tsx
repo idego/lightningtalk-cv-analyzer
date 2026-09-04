@@ -29,10 +29,12 @@ export function CompanyResearchPanel({
   report,
   onResearchChange,
   feedbackManifest,
+  readOnly = false,
 }: {
   report: AnalysisReport;
   onResearchChange?: (research: CompanyResearch) => void;
   feedbackManifest?: FeedbackManifest;
+  readOnly?: boolean;
 }) {
   const { settings, t } = useCopy();
   const automatic = useAutoResearchState(report.analysis_id, "company");
@@ -72,10 +74,11 @@ export function CompanyResearchPanel({
       triggerClassName="font-medium"
       title={<SectionTitle className="font-medium" icon={<Building2 className="size-4" />}>{t("companyResearch")}</SectionTitle>}
       collapsible={hasContent}
+      defaultOpen={readOnly}
       contentClassName="space-y-3 pt-3"
       feedbackSnapshotLabel={t("companyResearch")}
       action={<div className="flex items-center gap-2">
-        {!completed ? <ResearchAction
+        {!readOnly && !completed ? <ResearchAction
             busy={busy}
             disabled={!enabled || busy}
             onClick={startResearch}
@@ -84,7 +87,7 @@ export function CompanyResearchPanel({
             busyAriaLabel={t("companyResearchInProgress")}
             disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
           /> : null}
-        {hasContent && feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section") ? <FeedbackControl analysisId={report.analysis_id} target={feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section")!} /> : null}
+        {!readOnly && hasContent && feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section")!} /> : null}
       </div>}
     >
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
