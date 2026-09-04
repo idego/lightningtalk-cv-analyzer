@@ -51,6 +51,17 @@ An owner SHALL be able to copy a share link for an opened persisted analysis. Th
 - **WHEN** an authenticated colleague opens a valid shared analysis URL
 - **THEN** the persisted report and stored document load read-only even though the colleague is not the analysis owner
 
+### Requirement: Destructive analysis actions use scope-appropriate confirmation
+Deleting one analysis from Recent analyses SHALL use an inline click-again confirmation on the same delete control and SHALL NOT open a modal or native browser confirmation. Deleting all analyses from Settings SHALL instead open a destructive confirmation dialog explaining that all saved analyses and stored CVs are permanently removed, with separate cancel and confirm actions.
+
+#### Scenario: Delete one recent analysis
+- **WHEN** the recruiter clicks the delete icon for one Recent analyses row
+- **THEN** the control enters a click-again confirmation state and deletion runs only after the second click
+
+#### Scenario: Delete all analyses from Settings
+- **WHEN** the recruiter clicks Delete all analyses
+- **THEN** a confirmation dialog opens and no deletion occurs until the destructive confirm action is chosen
+
 ### Requirement: Document preview source for opened reports
 When a report is opened from Recent analyses, the document preview SHALL use the in-memory file uploaded in the current browser session when that analysis was produced in this session, otherwise the stored document served by the analysis document endpoint when the history item reports a stored document, otherwise no document preview.
 
