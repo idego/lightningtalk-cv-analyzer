@@ -203,9 +203,25 @@ def test_docx_source_document_uses_docx_content_type(tmp_path) -> None:
 
 
 def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
-    client = TestClient(_document_app(tmp_path))
+    app = _document_app(tmp_path)
+    client = TestClient(app)
     owner_headers = {"X-Analysis-Access-Token": "owner-token"}
     analysis_id = _analyze(client, owner_headers, filename="candidate.pdf")
+    completed_company_research = {
+        "versions": {
+            "research": "company-research-v2",
+            "prompt": "test-prompt",
+            "schema": "test-schema",
+        },
+        "model": {"configured": "test-model", "response": "test-model"},
+        "status": "completed",
+        "accessed_at": "2026-09-04T00:00:00+00:00",
+        "usage": {},
+        "organizations": [],
+        "searches_performed": [],
+        "search_limitations": [],
+    }
+    app.state.store.persist_company_research(analysis_id, completed_company_research)
 
     assert client.post(
         f"/analyses/{analysis_id}/share",
@@ -228,6 +244,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     assert shared.json()["filename"] == "candidate.pdf"
     assert shared.json()["has_document"] is True
     assert shared.json()["report"]["analysis_id"] == analysis_id
+    assert shared.json()["report"]["company_research"] == completed_company_research
     assert "analysis_access_token" not in shared.json()["report"]
 
     shared_document = client.get(

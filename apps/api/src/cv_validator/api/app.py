@@ -728,6 +728,7 @@ def create_app(
         view = store.get_analysis_view(analysis_id)
         if view is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
+        _attach_completed_research(store, analysis_id, view["report"])
         attach_capabilities(view["report"])
         return JSONResponse(view)
 
@@ -1343,6 +1344,22 @@ def _inline_disposition(filename: str) -> str:
     return disposition
 
 
+def _attach_completed_research(
+    store: PersistenceStore,
+    analysis_id: str,
+    payload: dict,
+) -> dict:
+    completed_rows = (
+        ("company_research", store.get_company_research(analysis_id)),
+        ("education_research", store.get_education_research(analysis_id)),
+        ("linkedin_discovery", store.get_linkedin_discovery(analysis_id)),
+    )
+    for key, row in completed_rows:
+        if row is not None:
+            payload[key] = json.loads(row["result_json"])
+    return payload
+
+
 def _owned_payload(
     store: PersistenceStore,
     analysis_id: str,
@@ -1353,15 +1370,7 @@ def _owned_payload(
     payload = store.get_analysis_payload(analysis_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="analysis_not_found")
-    completed_rows = (
-        ("company_research", store.get_company_research(analysis_id)),
-        ("education_research", store.get_education_research(analysis_id)),
-        ("linkedin_discovery", store.get_linkedin_discovery(analysis_id)),
-    )
-    for key, row in completed_rows:
-        if row is not None:
-            payload[key] = json.loads(row["result_json"])
-    return payload
+    return _attach_completed_research(store, analysis_id, payload)
 
 
 def _default_app() -> FastAPI:
