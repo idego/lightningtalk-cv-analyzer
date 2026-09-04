@@ -150,7 +150,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                 {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} tone={locationTone} /> : null}
                 {overview.postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(overview.postalCountry, settings.uiLanguage)} tone={locationTone} /> : null}
                 {overview.postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")} tone={locationTone} /> : null}
-                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} detail={t("euStatusDisclaimer")} tone={locationTone} /> : null}
+                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
               </div>
             </section> : null}
           </div> : null}
