@@ -57,6 +57,8 @@ type Listener = () => void;
 export class BatchSessionStore {
   private state: BatchSession = { batch: null, sessionIds: new Set(), sessionFiles: new Map() };
   private listeners = new Set<Listener>();
+  private queue: File[] = [];
+  private controller: AbortController | null = null;
 
   getSnapshot = (): BatchSession => this.state;
 
@@ -65,8 +67,24 @@ export class BatchSessionStore {
     return () => { this.listeners.delete(listener); };
   };
 
-  start(filenames: string[], startedAt = Date.now()) {
-    this.update({ batch: { filenames, results: [], startedAt, phase: "running" } });
+  /** Begin a batch; the returned signal aborts the in-flight request when the user cancels. */
+  start(queue: File[], startedAt = Date.now()): AbortSignal {
+    this.queue = queue;
+    this.controller = new AbortController();
+    this.update({ batch: { filenames: queue.map((file) => file.name), results: [], startedAt, phase: "running" } });
+    return this.controller.signal;
+  }
+
+  /** Abort the running batch and hand back the files that did not finish, in upload order. */
+  cancel(): File[] {
+    const { batch } = this.state;
+    if (!batch || batch.phase !== "running") return [];
+    const remaining = this.queue.slice(batch.results.length);
+    this.controller?.abort();
+    this.controller = null;
+    this.queue = [];
+    this.update({ batch: null });
+    return remaining;
   }
 
   record(result: AnalyzeItemResult, file: File) {
