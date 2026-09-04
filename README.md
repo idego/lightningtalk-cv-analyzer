@@ -51,7 +51,7 @@ cd apps/web && pnpm build
 `make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
 through `docker-compose.dev.yml`; `make deploy` never does.
 
-The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+The web app is available at `http://localhost:3000/analyze`. Compose uses
 project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
 database `/app/data/auth.db`. A stack created under the former project name
 `cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its

@@ -9,7 +9,7 @@ pnpm dev
 ```
 
 The root-level `make dev` command runs the complete Docker stack on
-`http://127.0.0.1:3001/analyze` with local-only authentication bypassed.
+`http://localhost:3000/analyze` with local-only authentication bypassed.
 
 ## Build
 

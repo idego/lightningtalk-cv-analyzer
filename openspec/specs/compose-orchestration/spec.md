@@ -5,7 +5,7 @@ Defines the containerized web/API runtime, internal service networking,
 persistent storage, test profile, and deployment configuration.
 ## Requirements
 ### Requirement: Compose runtime services
-The root compose configuration SHALL run the long-lived `web` and `api` services plus two one-shot init services: `geonames-init`, which builds the offline reference-data indexes `api` depends on, and `feedback-init`, which seeds feedback access in the web auth database before `web` starts. `web` SHALL be the only host-published service in `docker-compose.yml`, bound to `${WEB_HOST:-127.0.0.1}:${WEB_PORT}`.
+The root compose configuration SHALL run the long-lived `web` and `api` services plus two one-shot init services: `geonames-init`, which builds the offline reference-data indexes `api` depends on, and `feedback-init`, which seeds feedback access in the web auth database before `web` starts. `web` SHALL be the only host-published service in `docker-compose.yml`, published as `${WEB_PORT:-3000}:3000`.
 
 #### Scenario: Full stack startup
 - **WHEN** `make dev` or `make deploy` runs the stack
