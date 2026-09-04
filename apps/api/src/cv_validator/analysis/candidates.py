@@ -85,6 +85,7 @@ def validate_specialists(
         conflicts,
     )
     _remove_duplicate_ids(employment, education, rejected)
+    _remove_duplicate_field_ids(source, profile, employment, education, rejected, conflicts)
     return CandidateState(profile, employment, education, rejected, conflicts)
 
 
@@ -505,6 +506,72 @@ def _public_field(field: Any, include_field_id: bool = False) -> Any:
     if include_field_id:
         public["field_id"] = field["_id"]
     return public
+
+
+def _remove_duplicate_field_ids(
+    source: SourceDocument,
+    profile: dict[str, Any],
+    employment: list[dict[str, Any]],
+    education: list[dict[str, Any]],
+    rejected: list[dict[str, str]],
+    conflicts: list[dict[str, Any]],
+) -> None:
+    occurrences: dict[str, int] = {}
+
+    def count(field: Any) -> None:
+        if not isinstance(field, dict):
+            return
+        field_id = field.get("_id")
+        if isinstance(field_id, str):
+            occurrences[field_id] = occurrences.get(field_id, 0) + 1
+
+    for value in profile.values():
+        for field in value if isinstance(value, list) else [value]:
+            count(field)
+    for collection, fields in ((employment, EMPLOYMENT_FIELDS), (education, EDUCATION_FIELDS)):
+        for record in collection:
+            for name in fields:
+                count(record.get(name))
+
+    duplicate_ids = {field_id for field_id, count_value in occurrences.items() if count_value > 1}
+    if not duplicate_ids:
+        return
+    rejected.extend(
+        {"id": field_id, "reason_code": "duplicate_field_id"}
+        for field_id in sorted(duplicate_ids)
+    )
+
+    def is_duplicate(field: Any) -> bool:
+        return (
+            isinstance(field, dict)
+            and isinstance(field.get("_id"), str)
+            and field["_id"] in duplicate_ids
+        )
+
+    for name, field in list(profile.items()):
+        if isinstance(field, list):
+            profile[name] = [item for item in field if not is_duplicate(item)]
+        elif is_duplicate(field):
+            profile[name] = None
+
+    for collection, fields in ((employment, EMPLOYMENT_FIELDS), (education, EDUCATION_FIELDS)):
+        for record in collection:
+            removed = False
+            for name in fields:
+                if not is_duplicate(record.get(name)):
+                    continue
+                record[name] = None
+                removed = True
+                conflicts.append(
+                    {
+                        "record_id": record["id"],
+                        "field": name,
+                        "reason_code": "duplicate_field_id",
+                    }
+                )
+            if removed:
+                remaining = [record[name] for name in fields if isinstance(record.get(name), dict)]
+                record["relation_status"] = _relation_status(source, remaining)
 
 
 def _remove_duplicate_ids(employment, education, rejected) -> None:

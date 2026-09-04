@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sqlite3
@@ -10,6 +9,7 @@ from urllib.parse import quote
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from cv_validator.location.checksum import sha256_fd, sha256_file
 from cv_validator.location.index import INDEX_APPLICATION_ID, INDEX_SCHEMA_VERSION
 
 
@@ -165,24 +165,6 @@ def open_pinned_read_only_connection(artifact_fd: int) -> sqlite3.Connection:
     connection.execute("PRAGMA query_only = ON")
     connection.execute("PRAGMA trusted_schema = OFF")
     return connection
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def sha256_fd(artifact_fd: int) -> str:
-    digest = hashlib.sha256()
-    duplicate = os.dup(artifact_fd)
-    with os.fdopen(duplicate, "rb", closefd=True) as source:
-        source.seek(0)
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _load_manifest(path: Path) -> dict[str, object]:

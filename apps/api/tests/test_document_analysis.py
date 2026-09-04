@@ -503,7 +503,7 @@ def test_upload_persistence_ownership_and_health_with_real_strategy(tmp_path) ->
         openai_settings=OpenAISettings(enabled=False),
         analysis_strategy=strategy,
     ))
-    owner = {"X-Analysis-Access-Token": "owner"}
+    owner = {"X-Analysis-Owner-Id": "owner"}
     created = client.post(
         "/analyze",
         files={"file": ("candidate.pdf", pdf_bytes(
@@ -518,7 +518,7 @@ def test_upload_persistence_ownership_and_health_with_real_strategy(tmp_path) ->
     report = created.json()
     assert report["contract_version"] == "base-analysis-v2"
     assert client.get(f"/analyses/{report['analysis_id']}", headers=owner).status_code == 200
-    assert client.get(f"/analyses/{report['analysis_id']}", headers={"X-Analysis-Access-Token": "other"}).status_code == 404
+    assert client.get(f"/analyses/{report['analysis_id']}", headers={"X-Analysis-Owner-Id": "other"}).status_code == 404
 
 
 def test_openai_contract_pins_model_store_and_reasoning() -> None:
@@ -745,3 +745,73 @@ def test_detached_fields_do_not_make_the_review_partial() -> None:
     })
     assert review["status"] == "completed"
     assert review["accepted_ids"] == ["employment_1"]
+
+
+def test_duplicate_field_ids_are_rejected_across_records_and_cannot_be_repatched() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems Developer", order=0),
+        SourceBlock("b-1", "Other Systems Engineer", order=1),
+    ), "pdf")
+    empty = {"start_date": None, "end_date": None, "location": None, "relationship_type": None}
+    state = validate_specialists(source, {}, {"records": [
+        {
+            "id": "employment_1", **empty,
+            "organization": field("duplicate-field", "Example Systems", "b-0", "Example Systems"),
+            "role": field("role-1", "Developer", "b-0", "Developer"),
+        },
+        {
+            "id": "employment_2", **empty,
+            "organization": field("duplicate-field", "Other Systems", "b-1", "Other Systems"),
+            "role": field("role-2", "Engineer", "b-1", "Engineer"),
+        },
+    ]}, {})
+
+    assert state.employment[0]["organization"] is None
+    assert state.employment[1]["organization"] is None
+    assert "duplicate-field" not in state.field_ids
+    assert {"id": "duplicate-field", "reason_code": "duplicate_field_id"} in state.rejected
+
+    reviewed, review = apply_review(source, state, {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [],
+        "relation_patches": [{"record_id": "employment_2", "field_ids": ["duplicate-field"]}],
+        "added_profile_fields": [], "added_candidates": [], "conflicts": [],
+        "coverage_gaps": [], "status": "completed",
+    })
+    assert reviewed.employment[1]["organization"] is None
+    assert any(item["reason_code"] == "unknown_reviewer_patch_id" for item in review["conflicts"])
+
+
+def test_telemetry_persistence_failure_does_not_retry_successful_model_calls() -> None:
+    class FailingRecorder:
+        def emit(self, *_args, **_kwargs):
+            return None
+
+        def record_ai_attempt(self, **_kwargs):
+            raise OSError("sqlite unavailable")
+
+    client = FakeModel(complete_payloads())
+    strategy = DocumentAnalysisStrategy(client=client)
+    base_request = AnalysisInput.from_upload(
+        pdf_bytes(
+            "Alex Example", "Developer in Opole, Poland", "Python MongoDB",
+            "Example Systems Developer", "2022 - present", "Example University Computer Science",
+        ),
+        "candidate.pdf",
+        "en",
+    )
+    request = AnalysisInput(
+        content=base_request.content,
+        filename=base_request.filename,
+        source_format=base_request.source_format,
+        report_language=base_request.report_language,
+        sha256=base_request.sha256,
+        recorder=FailingRecorder(),
+    )
+
+    report = strategy.analyze(request)
+
+    assert report["base_analysis"]["status"] in {"complete", "partial"}
+    assert [name for name, _ in client.calls].count("profile") == 1
+    assert [name for name, _ in client.calls].count("employment") == 1
+    assert [name for name, _ in client.calls].count("education") == 1
+    assert [name for name, _ in client.calls].count("review") == 1

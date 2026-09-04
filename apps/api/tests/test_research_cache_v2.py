@@ -71,14 +71,16 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v3",
+        "schema_version": "education-research-schema-v4",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
             "program": "Computer Science",
+            "certificate": None,
             "degree": None,
             "program_exists": "supported",
             "degree_exists": "evidence_unavailable",
+            "certificate_exists": "evidence_unavailable",
             "dates": None,
             "city": None,
             "country": None,
@@ -112,7 +114,7 @@ def seed_two_reports(app) -> None:
 def client_for(app) -> TestClient:
     return TestClient(
         app,
-        headers={"X-Analysis-Access-Token": "test-access-token"},
+        headers={"X-Analysis-Owner-Id": "test-owner"},
     )
 
 
@@ -265,3 +267,49 @@ def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
     usage = response.json()["company_research"]["usage"]
     assert usage["input_tokens"] == 10
     assert usage["output_tokens"] == 20
+
+
+def test_per_subject_cache_payload_drops_batch_queries_and_splits_usage() -> None:
+    from cv_validator.research.cache import reusable_payload, single_subject_result
+
+    result = company_result()
+    second = deepcopy(result["organizations"][0])
+    second["query_subject"] = "Another Systems"
+    result["organizations"].append(second)
+    result.update({
+        "status": "completed",
+        "source": "openai_web_search",
+        "accessed_at": "2026-09-04T12:00:00+00:00",
+        "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+        "searches_performed": ["both subjects in one provider batch"],
+        "search_limitations": ["batch-level limitation"],
+    })
+
+    first = single_subject_result("company", result, 0)
+    second_result = single_subject_result("company", result, 1)
+    first_cache = reusable_payload("company", first)
+    second_cache = reusable_payload("company", second_result)
+
+    assert first["usage"] == {"input_tokens": 6, "output_tokens": 4, "total_tokens": 10}
+    assert second_result["usage"] == {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8}
+    assert first_cache["searches_performed"] == second_cache["searches_performed"] == []
+    assert first_cache["search_limitations"] == second_cache["search_limitations"] == []
+    assert first_cache["source_usage"] != second_cache["source_usage"]
+
+
+def test_education_cache_subject_encoding_avoids_delimiter_collisions() -> None:
+    from cv_validator.research.cache import education_cache_descriptor
+    from cv_validator.research.domain import EducationResearchRequest
+
+    first = education_cache_descriptor(EducationResearchRequest(({
+        "institution": "A",
+        "program": "B|C",
+        "certificate": None,
+    },)))
+    second = education_cache_descriptor(EducationResearchRequest(({
+        "institution": "A|B",
+        "program": "C",
+        "certificate": None,
+    },)))
+
+    assert first.cache_key != second.cache_key

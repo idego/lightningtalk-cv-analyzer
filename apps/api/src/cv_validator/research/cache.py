@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.company import PROMPT_VERSION as COMPANY_PROMPT_VERSION
 from cv_validator.research.company import RESEARCH_VERSION as COMPANY_RESEARCH_VERSION
 from cv_validator.research.company import SCHEMA_VERSION as COMPANY_SCHEMA_VERSION
@@ -15,10 +16,14 @@ from cv_validator.research.education import PROMPT_VERSION as EDUCATION_PROMPT_V
 from cv_validator.research.education import RESEARCH_VERSION as EDUCATION_RESEARCH_VERSION
 from cv_validator.research.education import SCHEMA_VERSION as EDUCATION_SCHEMA_VERSION
 
-CACHE_FORMAT_VERSION = "public-research-per-subject-cache-v2"
-MODEL_VERSION = "gpt-5.6-luna"
+CACHE_FORMAT_VERSION = "public-research-per-subject-cache-v3"
+MODEL_VERSION = PINNED_OPENAI_MODEL
 SEARCH_POLICY_VERSION = "openai-web-search-low-max4-v1"
 CacheCategory = Literal["company", "education"]
+_RESULT_KEYS: dict[CacheCategory, str] = {
+    "company": "organizations",
+    "education": "credentials",
+}
 
 
 @dataclass(frozen=True)
@@ -54,8 +59,7 @@ def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheD
 
 def education_cache_descriptor(request: EducationResearchRequest) -> CacheDescriptor:
     subjects = tuple(sorted(
-        "|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program"))
-        for fact in request.input_facts
+        _education_subject(fact) for fact in request.input_facts
     ))
     return _descriptor("education", subjects, EDUCATION_RESEARCH_VERSION, EDUCATION_PROMPT_VERSION, EDUCATION_SCHEMA_VERSION)
 
@@ -64,7 +68,7 @@ def education_subject_descriptors(request: EducationResearchRequest) -> tuple[Ca
     return tuple(
         _descriptor(
             "education",
-            ("|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program")),),
+            (_education_subject(fact),),
             EDUCATION_RESEARCH_VERSION,
             EDUCATION_PROMPT_VERSION,
             EDUCATION_SCHEMA_VERSION,
@@ -74,15 +78,13 @@ def education_subject_descriptors(request: EducationResearchRequest) -> tuple[Ca
 
 
 def single_subject_result(category: CacheCategory, result: dict[str, Any], index: int) -> dict[str, Any]:
-    key = "organizations" if category == "company" else "credentials"
+    key = _RESULT_KEYS[category]
+    count = len(result.get(key, []))
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("research_subject_index_out_of_range")
     single = deepcopy(result)
     single[key] = [deepcopy(result[key][index])]
-    if index > 0:
-        single["usage"] = {
-            name: 0
-            for name, value in result.get("usage", {}).items()
-            if isinstance(value, int) and not isinstance(value, bool)
-        }
+    single["usage"] = _split_usage(result.get("usage", {}), index, count)
     return single
 
 
@@ -93,7 +95,7 @@ def merge_subject_results(
 ) -> dict[str, Any]:
     if not results or len(results) != len(descriptors):
         raise ValueError("research_subject_merge_incomplete")
-    key = "organizations" if category == "company" else "credentials"
+    key = _RESULT_KEYS[category]
     statuses = [result.get("cache", {}).get("status", "miss") for result in results]
     combined = deepcopy(results[0])
     combined[key] = [deepcopy(result[key][0]) for result in results]
@@ -138,35 +140,70 @@ def reusable_payload(category: CacheCategory, result: dict[str, Any]) -> dict[st
     common = {
         "schema_version": result["schema_version"],
         "outcome": result["outcome"],
-        "searches_performed": deepcopy(result["searches_performed"]),
-        "search_limitations": deepcopy(result["search_limitations"]),
+        "searches_performed": [],
+        "search_limitations": [],
         "accessed_at": result["accessed_at"],
         "source": result["source"],
         "source_usage": deepcopy(result.get("usage", {})),
     }
-    if category == "company":
-        common["organizations"] = []
-        for item in result["organizations"]:
-            cached = {key: deepcopy(item[key]) for key in (
-                "query_subject", "existence", "activity", "operating_periods", "offices",
-                "official_website", "company_pages", "registries", "confidence", "uncertainty",
-                "findings", "limited_online_presence", "limited_online_presence_reason",
-            )}
-            cached["findings"] = [finding for finding in cached["findings"] if finding["kind"] != "relationship"]
-            cached["relationship"] = None
-            common["organizations"].append(cached)
-    else:
-        common["credentials"] = []
-        for item in result["credentials"]:
-            public_findings = [deepcopy(finding) for finding in item["findings"] if finding["kind"] not in {"dates", "cv_consistency"}]
-            cached = {key: deepcopy(item[key]) for key in (
-                "institution", "program", "degree",
-                "program_exists", "degree_exists",
-                "city", "country", "confidence", "uncertainty",
-            )}
-            cached.update({"dates": None, "cv_consistency": "evidence_unavailable", "location_difference_for_review": None, "findings": public_findings})
-            common["credentials"].append(cached)
+    common.update(_REUSABLE_PAYLOAD_BUILDERS[category](result))
     return common
+
+
+def _company_reusable_payload(result: dict[str, Any]) -> dict[str, Any]:
+    organizations: list[dict[str, Any]] = []
+    for item in result["organizations"]:
+        cached = {
+            key: deepcopy(item[key])
+            for key in (
+                "query_subject", "existence", "activity", "operating_periods",
+                "offices", "official_website", "company_pages", "registries",
+                "confidence", "uncertainty", "findings",
+                "limited_online_presence", "limited_online_presence_reason",
+            )
+        }
+        cached["findings"] = [
+            finding
+            for finding in cached["findings"]
+            if finding["kind"] != "relationship"
+        ]
+        cached["relationship"] = None
+        organizations.append(cached)
+    return {"organizations": organizations}
+
+
+def _education_reusable_payload(result: dict[str, Any]) -> dict[str, Any]:
+    credentials: list[dict[str, Any]] = []
+    for item in result["credentials"]:
+        public_findings = [
+            deepcopy(finding)
+            for finding in item["findings"]
+            if finding["kind"] not in {"dates", "cv_consistency"}
+        ]
+        cached = {
+            key: deepcopy(item[key])
+            for key in (
+                "institution", "program", "certificate", "degree",
+                "program_exists", "degree_exists", "certificate_exists",
+                "city", "country", "confidence", "uncertainty",
+            )
+        }
+        cached.update(
+            {
+                "dates": None,
+                "cv_consistency": "evidence_unavailable",
+                "location_difference_for_review": None,
+                "findings": public_findings,
+            }
+        )
+        credentials.append(cached)
+    return {"credentials": credentials}
+
+
+_REUSABLE_PAYLOAD_BUILDERS = {
+    "company": _company_reusable_payload,
+    "education": _education_reusable_payload,
+}
 
 
 def materialize_cache_hit(category: CacheCategory, payload: dict[str, Any], *, descriptor: CacheDescriptor) -> dict[str, Any]:
@@ -191,6 +228,31 @@ def _descriptor(category: CacheCategory, subjects: tuple[str, ...], research: st
                 "prompt": prompt, "schema": schema, "model": MODEL_VERSION, "search_policy": SEARCH_POLICY_VERSION}
     key = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return CacheDescriptor(key, category, subjects, research, prompt, schema)
+
+
+def _education_subject(fact: dict[str, Any]) -> str:
+    parts = [
+        _normalize(str(fact.get(field) or ""))
+        for field in ("institution", "program", "certificate")
+    ]
+    return json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
+
+
+def _split_usage(usage: Any, index: int, count: int) -> dict[str, Any]:
+    if not isinstance(usage, dict) or count < 1:
+        return {}
+    split: dict[str, Any] = {}
+    for name, value in usage.items():
+        if isinstance(value, bool):
+            split[name] = value
+        elif isinstance(value, int):
+            base, remainder = divmod(value, count)
+            split[name] = base + (1 if index < remainder else 0)
+        else:
+            split[name] = deepcopy(value)
+    if isinstance(split.get("input_tokens"), int) and isinstance(split.get("output_tokens"), int):
+        split["total_tokens"] = split["input_tokens"] + split["output_tokens"]
+    return split
 
 
 def _normalize(value: str) -> str:

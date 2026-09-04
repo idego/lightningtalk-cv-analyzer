@@ -39,8 +39,36 @@ from cv_validator.location import (
 )
 from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
-from cv_validator.operations import utc_now
+from cv_validator.operations import safe_log, utc_now
 from cv_validator.usage import normalize_usage
+
+
+def _safe_recorder_emit(recorder: Any, event: str, **fields: Any) -> None:
+    if recorder is None:
+        return
+    try:
+        recorder.emit(event, **fields)
+    except Exception as exc:
+        safe_log(
+            "telemetry_write_failed",
+            operation=fields.get("operation"),
+            category=fields.get("category"),
+            error_code=type(exc).__name__,
+        )
+
+
+def _safe_record_ai_attempt(recorder: Any, **fields: Any) -> None:
+    if recorder is None:
+        return
+    try:
+        recorder.record_ai_attempt(**fields)
+    except Exception as exc:
+        safe_log(
+            "ai_accounting_failed",
+            operation=fields.get("operation"),
+            category=fields.get("category"),
+            error_code=type(exc).__name__,
+        )
 
 
 STRATEGY_NAME = "document-analysis"
@@ -277,17 +305,17 @@ class DocumentAnalysisStrategy:
         for attempt in range(1, MAX_PASS_ATTEMPTS + 1):
             attempt_started_at = utc_now()
             attempt_started = perf_counter()
-            if recorder:
-                recorder.emit(
-                    "ai_pass_started",
-                    operation=name,
-                    category="base_analysis",
-                    provider="openai",
-                    configured_model=PINNED_OPENAI_MODEL,
-                    reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
-                    attempt=attempt,
-                    outcome="started",
-                )
+            _safe_recorder_emit(
+                recorder,
+                "ai_pass_started",
+                operation=name,
+                category="base_analysis",
+                provider="openai",
+                configured_model=PINNED_OPENAI_MODEL,
+                reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                attempt=attempt,
+                outcome="started",
+            )
             try:
                 response = self._client.run(name, source, context)
                 if not Draft202012Validator(PASS_SCHEMAS[name]).is_valid(response.payload):
@@ -297,21 +325,21 @@ class DocumentAnalysisStrategy:
                         model=response.model,
                     )
                 latency_ms = int((perf_counter() - attempt_started) * 1000)
-                if recorder:
-                    recorder.record_ai_attempt(
-                        operation=name,
-                        category="base_analysis",
-                        provider="openai",
-                        configured_model=PINNED_OPENAI_MODEL,
-                        response_model=response.model,
-                        reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
-                        attempt=attempt,
-                        outcome="completed",
-                        started_at=attempt_started_at,
-                        completed_at=utc_now(),
-                        latency_ms=latency_ms,
-                        usage=response.usage,
-                    )
+                _safe_record_ai_attempt(
+                    recorder,
+                    operation=name,
+                    category="base_analysis",
+                    provider="openai",
+                    configured_model=PINNED_OPENAI_MODEL,
+                    response_model=response.model,
+                    reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                    attempt=attempt,
+                    outcome="completed",
+                    started_at=attempt_started_at,
+                    completed_at=utc_now(),
+                    latency_ms=latency_ms,
+                    usage=response.usage,
+                )
                 return _PassOutcome(
                     response.payload,
                     "completed",
@@ -325,26 +353,32 @@ class DocumentAnalysisStrategy:
                 failure = exc.code
                 failure_usage = exc.usage
                 failure_model = exc.model
-            except Exception:
+            except Exception as exc:
                 failure = "client_error"
                 failure_usage = {}
                 failure_model = None
-            if recorder:
-                recorder.record_ai_attempt(
+                safe_log(
+                    "ai_pass_client_error",
                     operation=name,
                     category="base_analysis",
-                    provider="openai",
-                    configured_model=PINNED_OPENAI_MODEL,
-                    response_model=failure_model,
-                    reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
-                    attempt=attempt,
-                    outcome="failed",
-                    error_code=failure,
-                    started_at=attempt_started_at,
-                    completed_at=utc_now(),
-                    latency_ms=int((perf_counter() - attempt_started) * 1000),
-                    usage=failure_usage,
+                    error_code=type(exc).__name__,
                 )
+            _safe_record_ai_attempt(
+                recorder,
+                operation=name,
+                category="base_analysis",
+                provider="openai",
+                configured_model=PINNED_OPENAI_MODEL,
+                response_model=failure_model,
+                reasoning_effort=REVIEWER_REASONING_EFFORT if name == "review" else SPECIALIST_REASONING_EFFORT,
+                attempt=attempt,
+                outcome="failed",
+                error_code=failure,
+                started_at=attempt_started_at,
+                completed_at=utc_now(),
+                latency_ms=int((perf_counter() - attempt_started) * 1000),
+                usage=failure_usage,
+            )
         return _PassOutcome(
             {},
             "failed",
@@ -497,14 +531,6 @@ def _enrich_mechanical(
     )
     mechanical["comparisons"] = _direct_comparisons(country_codes, phone_countries)
     return mechanical
-
-
-def _record_signature(record: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        (name, " ".join(field["value"].casefold().split()))
-        for name, field in sorted(record.items())
-        if isinstance(field, dict) and isinstance(field.get("value"), str)
-    )
 
 
 def _declared_location_parts(value: str) -> tuple[str, str | None]:

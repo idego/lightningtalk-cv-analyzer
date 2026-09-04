@@ -163,3 +163,25 @@ def test_cli_rejects_non_https_source(monkeypatch, capsys) -> None:
         main(["--cities500-url", "http://example.test/cities500.zip"])
     assert raised.value.code == 2
     assert "must use HTTPS" in capsys.readouterr().err
+
+
+def test_corrupt_sqlite_release_is_rebuilt_instead_of_crashing(tmp_path: Path) -> None:
+    sources = _sources(tmp_path)
+    target = tmp_path / "volume"
+    release = bootstrap_reference_data(
+        target,
+        snapshot_version="2026-09-02",
+        source_urls=URLS,
+        downloader=_downloader(sources, []),
+    )
+    (release / "locations.sqlite3").write_bytes(b"not-a-sqlite-database")
+
+    rebuilt = bootstrap_reference_data(
+        target,
+        snapshot_version="2026-09-02",
+        source_urls=URLS,
+        downloader=_downloader(sources, []),
+    )
+
+    validate_location_index(rebuilt / "locations.sqlite3", rebuilt / "locations.manifest.json")
+    assert (target / "current").resolve() == rebuilt

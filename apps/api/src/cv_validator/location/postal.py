@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import threading
@@ -11,6 +10,7 @@ from pathlib import Path
 from typing import Iterable, Literal, Protocol
 
 from cv_validator.domain import ComponentVersion
+from cv_validator.location.checksum import sha256_file
 from cv_validator.location.resolver import normalize_location
 
 
@@ -99,7 +99,7 @@ class SQLitePostalCodeResolver:
         if not isinstance(artifact, dict) or (
             manifest.get("manifest_schema_version") != 1
             or artifact.get("filename") != index_path.name
-            or artifact.get("sha256") != _sha256(index_path)
+            or artifact.get("sha256") != sha256_file(index_path)
             or not isinstance(reference_data_version, str)
             or not reference_data_version.strip()
         ):
@@ -190,7 +190,7 @@ def build_postal_index(
         raise ValueError("snapshot_date must use YYYY-MM-DD")
     if output_index.exists() or output_manifest.exists():
         raise ValueError("postal output already exists")
-    source_sha256 = _sha256(source_path)
+    source_sha256 = sha256_file(source_path)
     reference_data_version = f"geonames-postal-{snapshot_date}-{source_sha256[:12]}"
     output_index.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -254,7 +254,7 @@ def build_postal_index(
         "snapshot_date": snapshot_date,
         "artifact": {
             "filename": output_index.name,
-            "sha256": _sha256(output_index),
+            "sha256": sha256_file(output_index),
             "size_bytes": output_index.stat().st_size,
         },
         "source": {
@@ -273,11 +273,3 @@ def build_postal_index(
         encoding="utf-8",
     )
     return manifest
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()

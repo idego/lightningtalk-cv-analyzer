@@ -15,14 +15,16 @@ from cv_validator.research.domain import (
     LinkedInDiscoveryRequest,
     LinkedInResearchInvalidResponse,
 )
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
+from cv_validator.research.versions import LINKEDIN_DISCOVERY_VERSION
 from cv_validator.research.subjects import (
     accepted_records,
     supported_field,
     supported_profile_field,
+    safe_public_subject,
 )
 
-DISCOVERY_VERSION = "linkedin-discovery-v3"
-COMPARISON_VERSION = "linkedin-comparison-v2"
+DISCOVERY_VERSION = LINKEDIN_DISCOVERY_VERSION
 PROMPT_VERSION = "linkedin-research-prompt-v5"
 DISCOVERY_SCHEMA_VERSION = "linkedin-discovery-schema-v3"
 MAX_SEARCHES = 4
@@ -44,18 +46,22 @@ class LinkedInDiscoveryService:
     def run(self, stored_report: dict[str, Any]) -> dict[str, Any]:
         request = build_discovery_request(stored_report)
         payload, response_model, usage = self.researcher.discover(request)
-        if isinstance(payload, dict) and isinstance(payload.get("possible_profiles"), list):
-            payload["possible_profiles"] = sorted(
-                payload["possible_profiles"],
-                key=lambda profile: str(profile.get("profile_url", "")) if isinstance(profile, dict) else "",
-            )[: self.max_profiles]
         try:
             validate_discovery(
                 payload,
                 request=request,
                 connection_threshold=self.connection_threshold,
-                max_profiles=self.max_profiles,
+                max_profiles=MAX_PROFILES_LIMIT,
             )
+            profiles = payload["possible_profiles"]
+            confidence_rank = {"high": 0, "medium": 1, "low": 2}
+            payload["possible_profiles"] = sorted(
+                profiles,
+                key=lambda profile: (
+                    confidence_rank.get(str(profile.get("confidence", "low")), 3),
+                    str(profile.get("profile_url", "")),
+                ),
+            )[: self.max_profiles]
         except LinkedInResearchInvalidResponse as exc:
             exc.usage = usage
             exc.model = response_model
@@ -65,7 +71,7 @@ class LinkedInDiscoveryService:
 
 def build_discovery_request(stored_report: dict[str, Any]) -> LinkedInDiscoveryRequest:
     name = supported_profile_field(stored_report, "candidate_name")
-    if name is None or not _safe_text(name, 160):
+    if name is None or not safe_public_subject(name, limit=160):
         raise ValueError("no_unambiguous_linkedin_candidate")
     candidate: dict[str, Any] = {"name": name}
     search_hints = []
@@ -73,7 +79,7 @@ def build_discovery_request(stored_report: dict[str, Any]) -> LinkedInDiscoveryR
         hint: dict[str, str] = {}
         for key in ("organization", "role"):
             value = supported_field(record, key)
-            if value is not None and _safe_text(value, 200):
+            if value is not None and safe_public_subject(value, limit=200):
                 hint[key] = value
         if hint:
             search_hints.append(hint)
@@ -141,17 +147,13 @@ def _completed(payload: dict[str, Any], version: str, schema: str, response_mode
     result = deepcopy(payload)
     result.update({"status": "completed", "authority": "ai_research", "source": "openai_web_search", "accessed_at": datetime.now(timezone.utc).isoformat(),
                    "versions": {"research": version, "prompt": PROMPT_VERSION, "schema": schema},
-                   "model": {"provider": "openai", "configured": "gpt-5.6-luna", "response": response_model}, "usage": deepcopy(usage)})
+                   "model": {"provider": "openai", "configured": PINNED_OPENAI_MODEL, "response": response_model}, "usage": deepcopy(usage)})
     return result
 
 
-def _safe_text(value: str, limit: int) -> bool:
-    stripped = value.strip()
-    return bool(stripped) and len(stripped) <= limit and not any(ord(c) < 32 for c in stripped) and "@" not in stripped and not re.search(r"(?:https?://|www\.)|\+?\d[\d\s().-]{6,}\d", stripped, re.I)
-
 
 def _reject_protected_claims(values: list[str]) -> None:
-    blocked = re.compile(r"(?:definit(?:e|ely).{0,30}(?:candidate|person|identity)|photo.{0,30}(?:look|resembl|identical|same person)|appearance|fraud|decept|fake (?:person|candidate|cv)|ethnic|nationalit|race|racial|origin|gender|\bage\b|\bsex\b)", re.I)
+    blocked = re.compile(r"(?:definit(?:e|ely).{0,30}(?:candidate|person|identity)|photo.{0,30}(?:look|resembl|identical|same person)|appearance|fraud|decept|fake (?:person|candidate|cv)|ethnic|nationalit|\brace\b|\bracial\b|\borigin\b|gender|\bage\b|\bsex\b)", re.I)
     def authored_claim(value: str) -> str:
-        return re.sub(r"(?:does not|do not|not|never|cannot|must not).{0,35}(?:fraud|decept|appearance|ethnic|nationalit|race|racial|origin|gender|age|sex|identity)", "", value, flags=re.I)
+        return re.sub(r"(?:does not|do not|not|never|cannot|must not).{0,35}(?:fraud|decept|appearance|ethnic|nationalit|\brace\b|\bracial\b|\borigin\b|gender|age|sex|identity)", "", value, flags=re.I)
     if any(blocked.search(authored_claim(value)) for value in values): raise LinkedInResearchInvalidResponse("protected_claim")

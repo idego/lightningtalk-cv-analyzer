@@ -48,3 +48,23 @@ def supported_profile_field(
     if not isinstance(base_analysis, dict):
         return None
     return supported_field(base_analysis.get("profile"), name)
+
+
+def safe_public_subject(value: str, *, limit: int = 200) -> bool:
+    """Return whether a literal field is safe to send as a public-search subject."""
+    import re
+
+    stripped = value.strip()
+    if (
+        not stripped
+        or len(stripped) > limit
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in stripped)
+    ):
+        return False
+    if "@" in stripped or re.search(
+        r"(?:https?://|www\.)|\+?\d[\d\s().-]{6,}\d",
+        stripped,
+        re.IGNORECASE,
+    ):
+        return False
+    return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2
