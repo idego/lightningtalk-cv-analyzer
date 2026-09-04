@@ -58,7 +58,7 @@ export class BatchSessionStore {
   private state: BatchSession = { batch: null, sessionIds: new Set(), sessionFiles: new Map() };
   private listeners = new Set<Listener>();
   private queue: File[] = [];
-  private controller: AbortController | null = null;
+  private generation = 0;
 
   getSnapshot = (): BatchSession => this.state;
 
@@ -67,37 +67,42 @@ export class BatchSessionStore {
     return () => { this.listeners.delete(listener); };
   };
 
-  /** Begin a batch; the returned signal aborts the in-flight request when the user cancels. */
-  start(queue: File[], startedAt = Date.now()): AbortSignal {
+  /** Begin a batch; the returned token identifies it so a cancelled batch cannot record into a later one. */
+  start(queue: File[], startedAt = Date.now()): number {
     this.queue = queue;
-    this.controller = new AbortController();
+    this.generation += 1;
     this.update({ batch: { filenames: queue.map((file) => file.name), results: [], startedAt, phase: "running" } });
-    return this.controller.signal;
+    return this.generation;
   }
 
-  /** Abort the running batch and hand back the files that did not finish, in upload order. */
+  /**
+   * Stop the running batch and hand back the files that were still waiting.
+   * The file currently being analyzed is not returned: the API keeps working
+   * on it, and its result is highlighted as new when it lands.
+   */
   cancel(): File[] {
     const { batch } = this.state;
     if (!batch || batch.phase !== "running") return [];
-    const remaining = this.queue.slice(batch.results.length);
-    this.controller?.abort();
-    this.controller = null;
+    const remaining = this.queue.slice(batch.results.length + 1);
+    this.generation += 1;
     this.queue = [];
     this.update({ batch: null });
     return remaining;
   }
 
-  record(result: AnalyzeItemResult, file: File) {
+  /** Record a finished file. Returns false when the batch was cancelled meanwhile; the result is still highlighted. */
+  record(result: AnalyzeItemResult, file: File, token: number): boolean {
     const { batch, sessionIds, sessionFiles } = this.state;
-    if (!batch) return;
-    const results = [...batch.results, result];
+    const current = token === this.generation && batch !== null;
+    const results = current ? [...batch.results, result] : [result];
     const nextFiles = new Map(sessionFiles);
     if (result.status !== "error") nextFiles.set(result.report.analysis_id, file);
     this.update({
-      batch: { ...batch, results },
+      batch: current ? { ...batch, results } : batch,
       sessionIds: new Set([...sessionIds, ...completedBatchIds(results)]),
       sessionFiles: nextFiles,
     });
+    return current;
   }
 
   complete() {

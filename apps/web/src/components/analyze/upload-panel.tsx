@@ -60,9 +60,9 @@ export function UploadPanel() {
 
   function removeFile(index: number) { setFiles((previous) => previous.filter((_, position) => position !== index)); }
 
-  async function analyzeFile(file: File, signal: AbortSignal): Promise<AnalyzeItemResult> {
+  async function analyzeFile(file: File): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
-    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage }, signal });
+    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage } });
     const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
     if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
     if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
@@ -74,13 +74,12 @@ export function UploadPanel() {
     if (running) return;
     const queue = acceptedFiles;
     setFiles([]); setElapsedSeconds(0);
-    const signal = store.start(queue);
+    const token = store.start(queue);
     for (const file of queue) {
       let result: AnalyzeItemResult;
-      try { result = await analyzeFile(file, signal); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
-      if (signal.aborted) return;
+      try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       if (result.status !== "error") void getAutoResearchOrchestrator()?.schedule(result.report, settings);
-      store.record(result, file);
+      if (!store.record(result, file, token)) return;
     }
     store.complete();
     await new Promise((resolve) => window.setTimeout(resolve, COMPLETE_CARD_MS));

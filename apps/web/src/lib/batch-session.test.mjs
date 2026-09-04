@@ -11,10 +11,10 @@ test("batch progress and highlights survive unsubscribing and resubscribing", ()
   const store = new BatchSessionStore();
   let notified = 0;
   const unsubscribe = store.subscribe(() => { notified += 1; });
-  store.start([file("a.pdf"), file("b.pdf"), file("c.pdf")], 100);
-  store.record(ok("a"), file("a.pdf"));
+  const token = store.start([file("a.pdf"), file("b.pdf"), file("c.pdf")], 100);
+  store.record(ok("a"), file("a.pdf"), token);
   unsubscribe();
-  store.record(failed, file("b.pdf"));
+  store.record(failed, file("b.pdf"), token);
   const snapshot = store.getSnapshot();
   assert.equal(notified, 2);
   assert.deepEqual(snapshot.batch, { filenames: ["a.pdf", "b.pdf", "c.pdf"], results: [ok("a"), failed], startedAt: 100, phase: "running" });
@@ -34,8 +34,8 @@ test("snapshot identity changes only on updates", () => {
 
 test("complete then clear keeps highlights and files", () => {
   const store = new BatchSessionStore();
-  store.start([file("a.pdf")]);
-  store.record(ok("a"), file("a.pdf"));
+  const token = store.start([file("a.pdf")]);
+  store.record(ok("a"), file("a.pdf"), token);
   store.complete();
   assert.equal(store.getSnapshot().batch.phase, "complete");
   store.clearBatch();
@@ -44,14 +44,27 @@ test("complete then clear keeps highlights and files", () => {
   assert.equal(store.getSnapshot().sessionFiles.get("a").name, "a.pdf");
 });
 
-test("cancel aborts the signal, clears the batch, and returns unfinished files", () => {
+test("cancel returns the waiting files and still highlights the in-flight result", () => {
   const store = new BatchSessionStore();
-  const files = [file("a.pdf"), file("b.pdf"), file("c.pdf")];
-  const signal = store.start(files);
-  store.record(ok("a"), files[0]);
-  assert.deepEqual(store.cancel(), [files[1], files[2]]);
-  assert.equal(signal.aborted, true);
+  const files = [file("a.pdf"), file("b.pdf"), file("c.pdf"), file("d.pdf")];
+  const token = store.start(files);
+  assert.equal(store.record(ok("a"), files[0], token), true);
+  assert.deepEqual(store.cancel(), [files[2], files[3]]);
   assert.equal(store.getSnapshot().batch, null);
-  assert.deepEqual([...store.getSnapshot().sessionIds], ["a"]);
+  assert.equal(store.record(ok("b"), files[1], token), false);
+  assert.equal(store.getSnapshot().batch, null);
+  assert.deepEqual([...store.getSnapshot().sessionIds], ["a", "b"]);
+  assert.equal(store.getSnapshot().sessionFiles.get("b").name, "b.pdf");
   assert.deepEqual(store.cancel(), []);
+});
+
+test("a stale token never records into a newer batch", () => {
+  const store = new BatchSessionStore();
+  const stale = store.start([file("a.pdf")]);
+  store.cancel();
+  const fresh = store.start([file("x.pdf")]);
+  assert.equal(store.record(ok("a"), file("a.pdf"), stale), false);
+  assert.deepEqual(store.getSnapshot().batch.results, []);
+  assert.equal(store.record(ok("x"), file("x.pdf"), fresh), true);
+  assert.deepEqual([...store.getSnapshot().sessionIds], ["a", "x"]);
 });
