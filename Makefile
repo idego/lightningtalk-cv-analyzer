@@ -3,7 +3,7 @@
 DOCKER_CONTEXT ?= default
 ALLOW_DEGRADED ?= false
 COMPOSE_PROJECT_NAME ?= cv-analyzer
-WEB_PORT ?= 3001
+WEB_PORT ?= 3000
 REFERENCE_DATA_MODE ?= automatic
 
 ifeq ($(REFERENCE_DATA_MODE),operator)
@@ -19,7 +19,6 @@ dev:
 		echo "GeoNames: validating the cached release; the first build can take several minutes."; \
 	fi
 	LOCAL_DEV_AUTH_BYPASS=true \
-	WEB_HOST=127.0.0.1 \
 	WEB_PORT=$(WEB_PORT) \
 	BASE_URL=http://localhost:$(WEB_PORT) \
 	BETTER_AUTH_URL=http://localhost:$(WEB_PORT) \

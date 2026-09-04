@@ -79,7 +79,7 @@ make dev
 make dev-down
 ```
 
-The command uses Compose project `cv-analyzer`, loopback web port 3001, API
+The command uses Compose project `cv-analyzer`, published web port 3000, API
 database `/app/data/cv_analyzer.db`, and auth database `/app/data/auth.db`.
 Named volumes are keyed by the project name, so do not change it casually. A
 stack created under the former project `cv-analyzer-document-analysis` with the
@@ -95,9 +95,9 @@ make deploy-check
 make deploy
 ```
 
-The reverse proxy terminates TLS and forwards only to the loopback-bound web
-port. Readiness requires the selected variant strategy; degraded optional
-research capabilities remain visible individually.
+The reverse proxy terminates TLS and forwards to the published web port.
+Readiness requires the selected variant strategy; degraded optional research
+capabilities remain visible individually.
 
 ## AI usage accounting
 
