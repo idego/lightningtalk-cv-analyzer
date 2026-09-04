@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check, CircleAlert, Clock3 } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
@@ -10,7 +10,7 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
-import { type BatchProgress, completedBatchIds, currentBatchIndex, deriveBatchStatuses, resolveDocumentSource } from "@/lib/batch-progress";
+import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, resolveDocumentSource } from "@/lib/batch-progress";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -38,21 +38,22 @@ function AnalysisProgress({ batch, elapsedSeconds }: { batch: BatchProgress; ela
 export function UploadPanel() {
   const { settings, t } = useCopy();
   const [files, setFiles] = useState<File[]>([]);
-  const [batch, setBatch] = useState<BatchProgress | null>(null);
+  const store = getBatchSessionStore();
+  const { batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [historyVersion, setHistoryVersion] = useState(0);
-  const [sessionIds, setSessionIds] = useState<ReadonlySet<string>>(() => new Set());
-  const sessionFiles = useRef(new Map<string, File>());
   const running = batch?.phase === "running";
+  const startedAt = batch?.startedAt;
+  const historyVersion = sessionIds.size;
 
   useEffect(() => {
-    if (!running || !batch) return;
-    const { startedAt } = batch;
-    const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    if (!running || startedAt === undefined) return;
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [running, batch]);
+  }, [running, startedAt]);
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
@@ -70,28 +71,21 @@ export function UploadPanel() {
     if (running) return;
     const queue = acceptedFiles;
     setFiles([]); setElapsedSeconds(0);
-    setBatch({ filenames: queue.map((file) => file.name), results: [], startedAt: Date.now(), phase: "running" });
-    const results: AnalyzeItemResult[] = [];
+    store.start(queue.map((file) => file.name));
     for (const file of queue) {
       let result: AnalyzeItemResult;
       try { result = await analyzeFile(file); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
-      results.push(result);
-      if (result.status !== "error") {
-        sessionFiles.current.set(result.report.analysis_id, file);
-        void getAutoResearchOrchestrator()?.schedule(result.report, settings);
-      }
-      setBatch((previous) => previous && { ...previous, results: [...results] });
-      setSessionIds((previous) => new Set([...previous, ...completedBatchIds(results)]));
-      setHistoryVersion((version) => version + 1);
+      if (result.status !== "error") void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+      store.record(result, file);
     }
-    setBatch((previous) => previous && { ...previous, phase: "complete" });
+    store.complete();
     await new Promise((resolve) => window.setTimeout(resolve, COMPLETE_CARD_MS));
-    setBatch(null);
+    store.clearBatch();
   }
 
   function reset() { if (running) return; setFiles([]); setError(null); }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
-    setOpened({ file: resolveDocumentSource(item, sessionFiles.current), result: { filename: item.filename, status: "ok", report } });
+    setOpened({ file: resolveDocumentSource(item, sessionFiles), result: { filename: item.filename, status: "ok", report } });
   }
   if (opened) return <AnalysisWorkspace entries={[opened]} onBack={() => setOpened(null)} />;
 
