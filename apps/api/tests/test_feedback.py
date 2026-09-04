@@ -53,12 +53,14 @@ def test_feedback_keeps_displayed_context_and_can_be_deleted_by_maintainer(tmp_p
         comment="The education section is incomplete",
         context_label="CV overview",
         context_text="Education\nUniversity of Gdansk · Computer Science",
+        context_report={"analysis_id": "analysis-1", "base_analysis": {"education": [{"id": "edu-1"}]}},
     )
     store.put("analysis-1", target["target_id"], "actor", value, actor_email="Recruiter@Idego.pl")
 
     item = store.inbox()["items"][0]
     assert item["context_label"] == "CV overview"
     assert item["context_text"] == "Education\nUniversity of Gdansk · Computer Science"
+    assert item["context_report"] == {"analysis_id": "analysis-1", "base_analysis": {"education": [{"id": "edu-1"}]}}
     assert item["actor_email"] == "recruiter@idego.pl"
     assert store.delete_response(target["target_id"], item["actor_hash"]) is True
     assert store.inbox()["items"] == []
@@ -391,3 +393,9 @@ def test_failure_feedback_contract_is_closed(tmp_path):
     with pytest.raises(ValueError, match="failure_feedback_is_closed"):
         store.put("analysis-1", failure["target_id"], "actor", FeedbackInput(rating="not_helpful", reason="inaccurate"))
     assert store.put("analysis-1", failure["target_id"], "actor", FeedbackInput(rating="not_helpful", reason="operation_failed"))
+
+
+def test_context_report_size_is_limited():
+    with pytest.raises(ValidationError):
+        FeedbackInput(comment="Too big", context_report={"blob": "x" * 400_001})
+    assert FeedbackInput(comment="Fits", context_report={"blob": "x" * 1000}).context_report is not None

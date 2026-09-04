@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AnalysisReport } from "@/lib/analyze-types";
 import type { FeedbackResponse, FeedbackTarget } from "@/lib/feedback-types";
 import { useCopy } from "@/lib/app-settings";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -59,10 +60,12 @@ const B = [
 export function FeedbackControl({
   analysisId,
   target,
+  report,
   failure = false,
 }: {
   analysisId: string;
   target: FeedbackTarget;
+  report?: AnalysisReport;
   failure?: boolean;
 }) {
   const { t } = useCopy();
@@ -230,6 +233,7 @@ export function FeedbackControl({
           comment: normalized || null,
           context_label: contextLabel,
           context_text: contextText,
+          context_report: report ?? null,
         }
       : {
           rating,
@@ -237,6 +241,7 @@ export function FeedbackControl({
           comment: normalized || null,
           context_label: contextLabel,
           context_text: contextText,
+          context_report: report ?? null,
         };
     try {
       const response = await fetch(
