@@ -86,7 +86,7 @@ export function AnalysisWorkspace({
         <div
           aria-hidden={!previewVisible}
           inert={!previewVisible}
-          className={`grid min-w-0 transition-[grid-template-rows,opacity] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none ${previewVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+          className={`grid min-w-0 self-start transition-[grid-template-rows,opacity] duration-[180ms] ease-[var(--motion-ease-out)] motion-reduce:transition-none ${previewVisible ? "sticky top-28 opacity-100" : "pointer-events-none opacity-0"}`}
           style={{ gridTemplateRows: previewVisible ? "minmax(0, 1fr)" : "minmax(0, 0fr)" }}
         >
           <div className={`min-h-0 min-w-0 ${previewVisible ? "overflow-visible" : "overflow-hidden"}`}>
