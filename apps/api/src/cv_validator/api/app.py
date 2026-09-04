@@ -704,6 +704,33 @@ def create_app(
         attach_capabilities(payload)
         return JSONResponse(payload)
 
+    @app.post("/analyses/{analysis_id}/share")
+    def create_analysis_share_link(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        share_token = secrets.token_urlsafe(32)
+        if not store.persist_analysis_share_token(
+            analysis_id,
+            x_analysis_access_token,
+            share_token,
+        ):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return JSONResponse({"share_token": share_token})
+
+    @app.get("/shared/analyses/{analysis_id}")
+    def get_shared_analysis(
+        analysis_id: str,
+        x_analysis_share_token: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not store.analysis_share_access_allowed(analysis_id, x_analysis_share_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        view = store.get_analysis_view(analysis_id)
+        if view is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        attach_capabilities(view["report"])
+        return JSONResponse(view)
+
     @app.get("/analyses/{analysis_id}/diagnostics")
     def get_analysis_diagnostics(
         analysis_id: str,
@@ -735,6 +762,25 @@ def create_app(
         x_analysis_access_token: str | None = Header(default=None),
     ) -> Response:
         if not store.analysis_access_allowed(analysis_id, x_analysis_access_token):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        document = store.get_source_document(analysis_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return Response(
+            content=document["content"],
+            media_type=document["content_type"],
+            headers={
+                "Content-Disposition": _inline_disposition(document["filename"]),
+                "Cache-Control": "private, no-store",
+            },
+        )
+
+    @app.get("/shared/analyses/{analysis_id}/document")
+    def get_shared_analysis_document(
+        analysis_id: str,
+        x_analysis_share_token: str | None = Header(default=None),
+    ) -> Response:
+        if not store.analysis_share_access_allowed(analysis_id, x_analysis_share_token):
             raise HTTPException(status_code=404, detail="analysis_not_found")
         document = store.get_source_document(analysis_id)
         if document is None:

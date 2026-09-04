@@ -27,11 +27,22 @@ Each time a batch file finishes, successfully or with an error, the Recent analy
 - **THEN** the second analysis is listed in Recent analyses with a new marker before the batch finishes
 
 ### Requirement: Reports open one at a time from Recent analyses
-The analyze page SHALL open a report only from a Recent analyses row, showing a single-report workspace for that analysis. The page MUST NOT render a combined multi-report workspace or an analyzed-count summary at the end of a batch. Pressing back SHALL return to the analyze page with the Analyzing card still visible when any file is still analyzing or waiting.
+The analyze page SHALL open a report only from a Recent analyses row, showing a single-report workspace for that analysis. The opened analysis SHALL be represented in the browser URL as `/analyze?analysis={analysis_id}`. Client-side report opening SHALL use browser history without remounting the analyze flow so an in-flight batch remains in memory. Direct navigation or refresh of that URL SHALL reload the persisted owner-scoped report instead of falling back to the empty upload form. The page MUST NOT render a combined multi-report workspace or an analyzed-count summary at the end of a batch. Pressing the browser Back action after opening from Recent analyses SHALL return to the analyze page with the Analyzing card still visible when any file is still analyzing or waiting.
 
 #### Scenario: Open a finished report during a batch
 - **WHEN** the recruiter opens a Recent analyses row while later files are still processing
-- **THEN** the single report opens, and pressing back shows the upload page with the Analyzing card still tracking the remaining files
+- **THEN** the single report opens at its analysis URL, and pressing browser Back shows the upload page with the Analyzing card still tracking the remaining files
+
+#### Scenario: Refresh an opened owner report
+- **WHEN** the owning recruiter refreshes `/analyze?analysis={analysis_id}` for a persisted analysis
+- **THEN** the persisted report and available stored document are reloaded instead of showing a blank upload form
+
+### Requirement: Shareable report URLs
+An owner SHALL be able to copy a share link for an opened persisted analysis. The link SHALL identify the analysis in the query string and carry the per-analysis share capability in the URL fragment so the capability is not sent in the initial page request. After the authenticated client loads, it SHALL exchange that fragment capability only through the scoped shared-analysis proxies and SHALL render the report read-only. Shared views MUST NOT expose feedback submission, research mutation, deletion, usage diagnostics, or creation of additional share links.
+
+#### Scenario: Open a share link as another authenticated user
+- **WHEN** an authenticated colleague opens a valid shared analysis URL
+- **THEN** the persisted report and stored document load read-only even though the colleague is not the analysis owner
 
 ### Requirement: Document preview source for opened reports
 When a report is opened from Recent analyses, the document preview SHALL use the in-memory file uploaded in the current browser session when that analysis was produced in this session, otherwise the stored document served by the analysis document endpoint when the history item reports a stored document, otherwise no document preview.

@@ -209,7 +209,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   );
 }
 
-export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void }) {
+export function ResultsList({ items, onActiveIndex, readOnly = false }: { items: AnalyzeItemResult[]; onActiveIndex?: (index: number) => void; readOnly?: boolean }) {
   const { settings, t } = useCopy();
   const reportRefs = useRef<Array<HTMLElement | null>>([]);
   const [reportOverrides, setReportOverrides] = useState<Record<string, AnalysisReport>>({});
@@ -221,6 +221,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
     .join(",");
 
   useEffect(() => {
+    if (readOnly) return;
     let cancelled = false;
     for (const analysisId of reportIds.split(",").filter(Boolean)) {
       if (feedbackLoads.current.has(analysisId)) continue;
@@ -231,7 +232,7 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
         .catch(() => feedbackLoads.current.delete(analysisId));
     }
     return () => { cancelled = true; };
-  }, [reportIds]);
+  }, [readOnly, reportIds]);
 
   function updateCompletedResearch(
     report: AnalysisReport,
@@ -285,24 +286,24 @@ export function ResultsList({ items, onActiveIndex }: { items: AnalyzeItemResult
           <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
               <CardTitle className="min-w-0 truncate text-base">{item.filename}</CardTitle>
-              <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction>
+              {!readOnly ? <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction> : null}
             </CardHeader>
             <CardContent className="space-y-3">
               {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
                 <FlagList flags={presentation.attention} />
               </HoverDisclosure> : null}
 
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "worth_knowing", "section")!} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.worthKnowing} />
               </HoverDisclosure> : null}
 
-              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} />
+              <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} />
 
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
-              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.company_research !== false ? <CompanyResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(companyResearch) => updateCompletedResearch(report, { company_research: companyResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.education_research !== false ? <EducationResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onResearchChange={(educationResearch) => updateCompletedResearch(report, { education_research: educationResearch })} /> : null}
+              {settings.aiEnabled && report.ai_features_enabled !== false && report.ai_capabilities?.linkedin_research !== false ? <LinkedInResearchPanel report={report} feedbackManifest={feedback[report.analysis_id]} readOnly={readOnly} onDiscoveryChange={(linkedinDiscovery) => updateCompletedResearch(report, { linkedin_discovery: linkedinDiscovery })} /> : null}
 
-              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} feedbackSnapshotLabel={t("remaining")} action={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
+              {presentation.remaining.length ? <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("remaining")} ({presentation.remaining.length})</SectionTitle>} feedbackSnapshotLabel={t("remaining")} action={!readOnly && feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedback[report.analysis_id], "report_overall", "remaining", "section")!} /> : null} contentClassName="pt-3">
                 <FlagList flags={presentation.remaining} />
               </HoverDisclosure> : null}
             </CardContent>

@@ -153,6 +153,12 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS analysis_share_tokens (
+                    analysis_id TEXT NOT NULL,
+                    token_hash TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -557,6 +563,54 @@ class PersistenceStore:
             ).fetchone()
         return row is not None and isinstance(row["access_token_hash"], str) and hmac.compare_digest(row["access_token_hash"], _token_hash(access_token))
 
+    def persist_analysis_share_token(
+        self,
+        analysis_id: str,
+        access_token: str | None,
+        share_token: str,
+    ) -> bool:
+        if not self.analysis_access_allowed(analysis_id, access_token):
+            return False
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at)
+                   VALUES (?, ?, ?)""",
+                (analysis_id, _token_hash(share_token), _utc_now()),
+            )
+        return True
+
+    def analysis_share_access_allowed(self, analysis_id: str, share_token: str | None) -> bool:
+        if not share_token:
+            return False
+        token_hash = _token_hash(share_token)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT token_hash FROM analysis_share_tokens WHERE analysis_id = ? AND token_hash = ?",
+                (analysis_id, token_hash),
+            ).fetchone()
+        return row is not None and hmac.compare_digest(str(row["token_hash"]), token_hash)
+
+    def get_analysis_view(self, analysis_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT reports.source_filename, audit_log.output_json,
+                          EXISTS (
+                            SELECT 1 FROM source_documents
+                            WHERE source_documents.analysis_id = reports.analysis_id
+                          ) AS has_document
+                   FROM reports
+                   JOIN audit_log USING (analysis_id)
+                   WHERE reports.analysis_id = ?""",
+                (analysis_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "filename": row["source_filename"] or "CV",
+            "has_document": bool(row["has_document"]),
+            "report": deserialize_analysis_payload(json.loads(row["output_json"])),
+        }
+
     def delete_analysis(self, analysis_id: str, access_token: str | None) -> bool:
         if not self.analysis_access_allowed(analysis_id, access_token):
             return False
@@ -590,6 +644,7 @@ class PersistenceStore:
                 "linkedin_discovery",
                 "linkedin_comparison",
                 "linkedin_confirmation",
+                "analysis_share_tokens",
                 "source_documents",
                 "audit_log",
             ):
@@ -907,7 +962,7 @@ class PersistenceStore:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in ("research_cache_audit", "company_research", "education_research",
                               "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation",
-                              "source_documents", "audit_log", "diagnostic_events"):
+                              "analysis_share_tokens", "source_documents", "audit_log", "diagnostic_events"):
                     deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
                 deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount

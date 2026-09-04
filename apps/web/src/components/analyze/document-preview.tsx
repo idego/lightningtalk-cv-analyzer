@@ -90,7 +90,7 @@ function DocumentPreviewContent({ source, onHide }: { source: DocumentSource; on
       adopt(source);
     } else {
       queueMicrotask(() => { if (!cancelled) setFetching(true); });
-      fetch(source.url, { cache: "no-store" })
+      fetch(source.url, { cache: "no-store", headers: source.headers })
         .then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.blob(); })
         .then(adopt)
         .catch(() => { if (cancelled) return; setFetching(false); setRendering(false); setError(t("documentFetchFailed")); });

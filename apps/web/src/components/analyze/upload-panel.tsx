@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleAlert, Clock3 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, CircleAlert, Clock3, LoaderCircle } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
+import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
@@ -11,6 +11,7 @@ import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
 import { type BatchProgress, completedBatchIds, currentBatchIndex, deriveBatchStatuses, resolveDocumentSource } from "@/lib/batch-progress";
+import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
@@ -20,6 +21,14 @@ function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
   const remainder = (seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function reportResult(filename: string, report: AnalysisReport): AnalyzeItemResult {
+  return {
+    filename,
+    status: report.base_analysis?.status === "partial" ? "partial" : "ok",
+    report,
+  };
 }
 
 function AnalysisProgress({ batch, elapsedSeconds }: { batch: BatchProgress; elapsedSeconds: number }) {
@@ -35,16 +44,20 @@ function AnalysisProgress({ batch, elapsedSeconds }: { batch: BatchProgress; ela
   </CardContent></Card>;
 }
 
-export function UploadPanel() {
+export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: string | null }) {
   const { settings, t } = useCopy();
   const [files, setFiles] = useState<File[]>([]);
   const [batch, setBatch] = useState<BatchProgress | null>(null);
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
+  const [openedReadOnly, setOpenedReadOnly] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [sessionIds, setSessionIds] = useState<ReadonlySet<string>>(() => new Set());
   const sessionFiles = useRef(new Map<string, File>());
+  const routeRequest = useRef(0);
+  const openedFromHistoryPush = useRef(false);
   const running = batch?.phase === "running";
 
   useEffect(() => {
@@ -53,6 +66,67 @@ export function UploadPanel() {
     const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
     return () => window.clearInterval(timer);
   }, [running, batch]);
+
+  const openRoutedAnalysis = useCallback(async (analysisId: string, shareToken: string | null) => {
+    const requestId = ++routeRequest.current;
+    setRouteLoading(true);
+    setError(null);
+    try {
+      let nextOpened: AnalyzedFile;
+      if (shareToken) {
+        const headers = { "X-Analysis-Share-Token": shareToken };
+        const response = await fetch(`/api/shared-analyses/${encodeURIComponent(analysisId)}`, { cache: "no-store", headers });
+        if (!response.ok) throw new Error("analysis_unavailable");
+        const body = await response.json() as { filename: string; has_document?: boolean; report: AnalysisReport };
+        const file: DocumentSource | null = body.has_document
+          ? { url: `/api/shared-analyses/${encodeURIComponent(analysisId)}/document`, name: body.filename, headers }
+          : null;
+        nextOpened = { file, result: reportResult(body.filename, body.report) };
+      } else {
+        const historyResponse = await fetch("/api/analyses", { cache: "no-store" });
+        if (!historyResponse.ok) throw new Error("history_unavailable");
+        const historyBody = await historyResponse.json() as { analyses?: AnalysisHistoryItem[] };
+        const item = (historyBody.analyses ?? []).find((candidate) => candidate.analysis_id === analysisId);
+        if (!item) throw new Error("analysis_unavailable");
+        const response = await fetch(`/api/analyses/${encodeURIComponent(analysisId)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("analysis_unavailable");
+        const report = await response.json() as AnalysisReport;
+        nextOpened = {
+          file: resolveDocumentSource(item, sessionFiles.current),
+          result: reportResult(item.filename, report),
+        };
+      }
+      if (routeRequest.current !== requestId) return;
+      setOpened(nextOpened);
+      setOpenedReadOnly(Boolean(shareToken));
+    } catch {
+      if (routeRequest.current !== requestId) return;
+      setOpened(null);
+      setOpenedReadOnly(false);
+      setError(t("analysisUnavailable"));
+    } finally {
+      if (routeRequest.current === requestId) setRouteLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    function syncFromLocation() {
+      openedFromHistoryPush.current = false;
+      const { analysisId, shareToken } = parseAnalysisRoute(window.location.href);
+      if (!analysisId) {
+        routeRequest.current += 1;
+        setOpened(null);
+        setOpenedReadOnly(false);
+        setRouteLoading(false);
+        return;
+      }
+      void openRoutedAnalysis(analysisId, shareToken);
+    }
+    syncFromLocation();
+    window.addEventListener("popstate", syncFromLocation);
+    return () => window.removeEventListener("popstate", syncFromLocation);
+  }, [openRoutedAnalysis]);
+
   const acceptedFiles = useMemo(() => files.filter((file) => /\.(pdf|docx)$/i.test(file.name)), [files]);
   function onFilesSelected(list: FileList | null) { if (list) setFiles((previous) => [...previous, ...Array.from(list)]); }
 
@@ -91,9 +165,29 @@ export function UploadPanel() {
 
   function reset() { if (running) return; setFiles([]); setError(null); }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
-    setOpened({ file: resolveDocumentSource(item, sessionFiles.current), result: { filename: item.filename, status: "ok", report } });
+    routeRequest.current += 1;
+    setError(null);
+    setOpenedReadOnly(false);
+    setOpened({ file: resolveDocumentSource(item, sessionFiles.current), result: reportResult(item.filename, report) });
+    openedFromHistoryPush.current = true;
+    window.history.pushState(null, "", relativeHref(withAnalysisRoute(window.location.href, item.analysis_id)));
   }
-  if (opened) return <AnalysisWorkspace entries={[opened]} onBack={() => setOpened(null)} />;
+  function closeOpened() {
+    if (openedFromHistoryPush.current) {
+      openedFromHistoryPush.current = false;
+      window.history.back();
+      return;
+    }
+    routeRequest.current += 1;
+    window.history.replaceState(null, "", relativeHref(withoutAnalysisRoute(window.location.href)));
+    setOpened(null);
+    setOpenedReadOnly(false);
+    setRouteLoading(false);
+    setError(null);
+  }
+
+  if (opened) return <AnalysisWorkspace entries={[opened]} onBack={closeOpened} readOnly={openedReadOnly} />;
+  if (routeLoading) return <div className="mx-auto max-w-5xl"><Card><CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />{t("loadingAnalysis")}</CardContent></Card></div>;
 
   return <div className="mx-auto max-w-5xl space-y-6">
     {batch ? <AnalysisProgress batch={batch} elapsedSeconds={elapsedSeconds} /> : <Card>
