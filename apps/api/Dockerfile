@@ -17,15 +17,28 @@ RUN pip install --no-cache-dir --upgrade pip \
 FROM base AS dev
 
 COPY tests ./tests
-COPY fixtures ./fixtures
 COPY scripts ./scripts
-COPY reference_data ./reference_data
 
-RUN pip install --no-cache-dir ".[dev]"
+RUN pip install --no-cache-dir ".[dev]" \
+    && addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app/data
 
+USER app
 CMD ["pytest", "-q"]
 
+FROM base AS geonames-init
+
+CMD ["cv-geonames-bootstrap"]
+
 FROM base AS runtime
+
+RUN addgroup --system app \
+    && adduser --system --ingroup app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app/data
+USER app
 
 EXPOSE 8000
 

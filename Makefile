@@ -36,7 +36,7 @@ deploy-check:
 	@./scripts/runtime-preflight.sh production .env $(REFERENCE_DATA_MODE)
 
 deploy: deploy-check
-	docker --context $(DOCKER_CONTEXT) compose $(COMPOSE_FILES) --env-file .env up --build -d --wait
+	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker --context $(DOCKER_CONTEXT) compose $(COMPOSE_FILES) --env-file .env up --build -d --wait
 	@./scripts/verify-stack.sh "$$(sed -n 's/^BASE_URL=//p' .env | tail -n 1)"
 	@echo "Deployed $$(git rev-parse HEAD)"
 	@echo "Rollback: git checkout <previous-reviewed-sha> && make deploy"

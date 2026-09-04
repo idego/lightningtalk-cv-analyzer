@@ -15,17 +15,21 @@ RUN apk add --no-cache python3 make g++ \
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN ./node_modules/.bin/next build
+RUN BETTER_AUTH_SECRET="$(head -c 32 /dev/urandom | base64)" ./node_modules/.bin/next build
 
 FROM deps AS feedback-init
-COPY scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+COPY --chown=node:node scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+RUN mkdir -p /app/data && chown -R node:node /app/data
+USER node
 CMD ["node", "scripts/init-feedback-access.mjs"]
 
 FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
-COPY --from=build /app/src/auth.ts ./src/auth.ts
+COPY --chown=node:node --from=build /app/.next/standalone ./
+COPY --chown=node:node --from=build /app/.next/static ./.next/static
+COPY --chown=node:node --from=build /app/public ./public
+COPY --chown=node:node --from=build /app/src/auth.ts ./src/auth.ts
+RUN mkdir -p /app/data /pnpm && chown -R node:node /app/data /pnpm
+USER node
 EXPOSE 3000
-CMD ["sh", "-lc", "pnpm --config.minimumReleaseAge=0 dlx @better-auth/cli@latest migrate --cwd /app --config ./src/auth.ts --yes || true; node server.js"]
+CMD ["sh", "-lc", "pnpm --config.minimumReleaseAge=0 dlx @better-auth/cli@1.6.20 migrate --cwd /app --config ./src/auth.ts --yes || true; node server.js"]
