@@ -557,6 +557,8 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
     assert specialist["store"] is reviewer["store"] is False
     assert "tools" not in specialist and "tools" not in reviewer
     assert specialist["text"]["format"]["strict"] is True
+    assert specialist["prompt_cache_key"] == "cv-analysis-profile-v1"
+    assert reviewer["prompt_cache_key"] == "cv-analysis-review-v1"
 
 
 def test_validated_records_are_accepted_by_default_and_reviewer_can_reject() -> None:

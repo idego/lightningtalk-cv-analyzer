@@ -114,8 +114,12 @@ an idempotent repeat of the same event key is ignored. Reusable company and
 education cache hits make no new paid usage event; the original cache-miss
 provider request remains counted once.
 
-Costs are estimates. Each usage row stores the pricing catalog version and its
-computed USD cost, plus the fixed conversion rate/version and derived PLN cost.
+Costs are estimates. Input tokens are priced in three tiers as reported by the
+provider: uncached, cached reads (`cached_input_tokens`), and prompt-cache
+writes (`cache_write_input_tokens`, billed above the uncached rate on GPT-5.6
+models). Each request carries a per-pass `prompt_cache_key` so repeated
+prefixes route to the same cache; the key never changes model output. Each
+usage row stores the pricing catalog version and its computed USD cost, plus the fixed conversion rate/version and derived PLN cost.
 The current fixed conversion is `1 USD = 3.75 PLN`; no live exchange-rate fetch
 is used and historical rows are never repriced when code/config changes. The
 pricing catalog can be overridden with `CV_VALIDATOR_PRICING_PATH`; changing it

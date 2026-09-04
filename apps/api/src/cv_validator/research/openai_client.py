@@ -39,6 +39,7 @@ class OpenAIResponsesCompanyResearcher:
                 max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "company_research", "strict": True, "schema": schema}},
                 store=False,
+                prompt_cache_key="cv-research-company-v1",
                 max_output_tokens=MAX_OUTPUT_TOKENS["company"],
             )
         except openai.APITimeoutError as exc:
@@ -89,7 +90,8 @@ class OpenAIResponsesEducationResearcher:
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "education_research", "strict": True, "schema": schema}},
-                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["education"],
+                store=False, prompt_cache_key="cv-research-education-v1",
+                max_output_tokens=MAX_OUTPUT_TOKENS["education"],
             )
         except openai.APITimeoutError as exc:
             raise EducationResearchTimeout() from exc
@@ -156,7 +158,8 @@ class OpenAIResponsesLinkedInResearcher:
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "linkedin_discovery", "strict": True, "schema": schema}},
-                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
+                store=False, prompt_cache_key="cv-research-linkedin-v1",
+                max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
             )
         except openai.APITimeoutError as exc:
             raise LinkedInResearchTimeout() from exc

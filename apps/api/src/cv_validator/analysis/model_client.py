@@ -87,6 +87,7 @@ class OpenAIResponsesAnalysisClient:
                     }
                 },
                 store=False,
+                prompt_cache_key=f"cv-analysis-{pass_name}-v1",
                 max_output_tokens=MAX_OUTPUT_TOKENS[pass_name],
             )
         except openai.APITimeoutError as exc:

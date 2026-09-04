@@ -87,6 +87,7 @@ _SAFE_LOG_FIELDS = {
     "coverage_gaps_count",
     "input_tokens",
     "cached_input_tokens",
+    "cache_write_input_tokens",
     "output_tokens",
     "total_tokens",
     "cache_outcome",

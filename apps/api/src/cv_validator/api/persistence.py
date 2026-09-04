@@ -201,6 +201,7 @@ class PersistenceStore:
                     latency_ms INTEGER NOT NULL,
                     input_tokens INTEGER NOT NULL,
                     cached_input_tokens INTEGER NOT NULL,
+                    cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
                     output_tokens INTEGER NOT NULL,
                     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL,
@@ -336,7 +337,8 @@ class PersistenceStore:
             "event_id", "event_key", "analysis_id", "correlation_id", "operation", "category", "provider",
             "configured_model", "response_model", "reasoning_effort", "attempt",
             "outcome", "error_code", "started_at", "completed_at", "latency_ms",
-            "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens",
+            "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "total_tokens",
             "estimated_cost_usd", "estimated_cost_pln", "pricing_version", "pricing_reason",
             "fx_rate", "fx_version", "billing_status", "cache_outcome",
             "saved_input_tokens", "saved_cached_input_tokens", "saved_output_tokens",
@@ -428,14 +430,14 @@ class PersistenceStore:
         ]
         usage = [{key: row[key] for key in row.keys() if key != "id"} for row in usage_rows]
         aggregate: dict[str, Any] = {
-            "attempts": len(usage), "input_tokens": 0, "cached_input_tokens": 0,
+            "attempts": len(usage), "input_tokens": 0, "cached_input_tokens": 0, "cache_write_input_tokens": 0,
             "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": "0.000000000",
         }
         cost = Decimal("0")
         cost_known = True
         for item in usage:
-            for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
-                aggregate[key] += item[key]
+            for key in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
+                aggregate[key] += item.get(key) or 0
             if item["estimated_cost_usd"] is None:
                 cost_known = False
             else:
@@ -1041,6 +1043,7 @@ def _group_usage(
             "attempts": 0,
             "input_tokens": 0,
             "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
             "estimated_cost_usd": Decimal("0"),
@@ -1049,8 +1052,8 @@ def _group_usage(
             "pln_cost_available": True,
         })
         group["attempts"] += 1
-        for token in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
-            group[token] += item[token]
+        for token in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
+            group[token] += item.get(token) or 0
         if item["estimated_cost_usd"] is None and item["total_tokens"] > 0:
             group["usd_cost_available"] = False
         else:
@@ -1079,6 +1082,7 @@ def _summarize_usage(usage: list[dict[str, Any]]) -> dict[str, Any]:
         "unpriced_requests": 0,
         "input_tokens": 0,
         "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
     }
@@ -1089,7 +1093,7 @@ def _summarize_usage(usage: list[dict[str, Any]]) -> dict[str, Any]:
     for item in usage:
         if item.get("billing_status") == "paid":
             summary["paid_requests"] += 1
-        for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
+        for key in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
             summary[key] += int(item.get(key) or 0)
         token_usage = int(item.get("total_tokens") or 0)
         item_usd = item.get("estimated_cost_usd")
@@ -1203,6 +1207,7 @@ def _ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
         "fx_version": "TEXT",
         "billing_status": "TEXT",
         "reasoning_output_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cache_write_input_tokens": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, definition in additions.items():
         if name not in columns:

@@ -4,6 +4,7 @@ export type UsageTotals = {
   unpriced_requests: number;
   input_tokens: number;
   cached_input_tokens: number;
+  cache_write_input_tokens: number;
   output_tokens: number;
   total_tokens: number;
   estimated_cost_usd: string | null;
@@ -17,6 +18,7 @@ export type UsageOperationSummary = {
   attempts: number;
   input_tokens: number;
   cached_input_tokens: number;
+  cache_write_input_tokens: number;
   output_tokens: number;
   total_tokens: number;
   estimated_cost_usd: string | null;
