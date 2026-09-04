@@ -120,6 +120,17 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   };
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
+  const resolvedLocationDetail = overview.statedLocation && overview.resolvedLocation
+    ? `${t("resolvedLocation")}: ${overview.resolvedLocation}`
+    : null;
+  const postalCountry = overview.postalCountry ? displayCountry(overview.postalCountry, settings.uiLanguage) : null;
+  const postalConsistency = overview.postalConsistency
+    ? t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")
+    : null;
+  const postalDetail = joinDisplay(
+    postalCountry ? `${t("postalCountry")}: ${postalCountry}` : null,
+    postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null,
+  );
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
@@ -145,11 +156,11 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
             {hasLocation ? <section aria-labelledby="overview-location">
               <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
               <div className="space-y-1">
-                {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} tone={locationTone} /> : null}
-                {overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
-                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} tone={locationTone} /> : null}
-                {overview.postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={displayCountry(overview.postalCountry, settings.uiLanguage)} tone={locationTone} /> : null}
-                {overview.postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")} tone={locationTone} /> : null}
+                {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} detail={resolvedLocationDetail} tone={locationTone} /> : null}
+                {!overview.statedLocation && overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
+                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} detail={postalDetail} tone={locationTone} /> : null}
+                {!overview.postalCode && postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={postalCountry} detail={postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null} tone={locationTone} /> : null}
+                {!overview.postalCode && !postalCountry && postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={postalConsistency} tone={locationTone} /> : null}
                 {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
               </div>
             </section> : null}
