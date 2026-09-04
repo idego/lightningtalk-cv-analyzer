@@ -113,13 +113,67 @@ class TriageInput(BaseModel):
 
 
 def init_feedback_schema(conn: sqlite3.Connection) -> None:
+    targets_exists = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'feedback_targets'"
+        ).fetchone()
+        is not None
+    )
+    if targets_exists:
+        fk_list = conn.execute("PRAGMA foreign_key_list(feedback_targets)").fetchall()
+        has_reports_fk = any(
+            (row["table"] if isinstance(row, sqlite3.Row) else row[2]) == "reports"
+            for row in fk_list
+        )
+        if has_reports_fk:
+            conn.commit()
+            was_fk_enabled = bool(conn.execute("PRAGMA foreign_keys").fetchone()[0])
+            if was_fk_enabled:
+                conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE feedback_targets__new (
+                      target_id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, kind TEXT NOT NULL,
+                      source_category TEXT NOT NULL, source_key TEXT NOT NULL, versions_json TEXT NOT NULL,
+                      created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key)
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO feedback_targets__new (
+                      target_id, analysis_id, kind, source_category, source_key, versions_json, created_at
+                    )
+                    SELECT target_id, analysis_id, kind, source_category, source_key, versions_json, created_at
+                    FROM feedback_targets
+                    """
+                )
+                conn.execute("DROP TABLE feedback_targets")
+                conn.execute("ALTER TABLE feedback_targets__new RENAME TO feedback_targets")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS feedback_targets_analysis ON feedback_targets(analysis_id)"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                if was_fk_enabled:
+                    conn.execute("PRAGMA foreign_keys = ON")
+            violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key check failed after feedback migration: {violations}"
+                )
+
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS feedback_targets (
           target_id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, kind TEXT NOT NULL,
           source_category TEXT NOT NULL, source_key TEXT NOT NULL, versions_json TEXT NOT NULL,
-          created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key),
-          FOREIGN KEY(analysis_id) REFERENCES reports(analysis_id) ON DELETE CASCADE
+          created_at TEXT NOT NULL, UNIQUE(analysis_id, kind, source_category, source_key)
         );
         CREATE INDEX IF NOT EXISTS feedback_targets_analysis ON feedback_targets(analysis_id);
         CREATE TABLE IF NOT EXISTS feedback_responses (

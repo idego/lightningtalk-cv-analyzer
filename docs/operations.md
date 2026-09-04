@@ -23,15 +23,22 @@ research. It does not disable the selected base-analysis strategy.
 ## Contextual feedback rollout
 
 Feedback is decision-neutral and never edits a report, analysis output,
-research result, retry state, or hiring action. Targets and responses live with
-the analysis in `cv_validator_data`; reviewer roles live with Better Auth in
-`web_auth_data`. Feedback is enabled by default. Responses retain the signed-in
-author's email and a snapshot of the displayed CV/report section (label up to
-200 characters, text up to 12000 characters) so maintainers can review the
-comment in its original context. Comments are 12 to 180 characters; team notes
-are limited to 500 characters; contact details and URLs are rejected from both.
-The web proxy caps a feedback write at 16 KiB and a triage note at 2 KiB. The inbox never stores the uploaded original, raw
-model output, raw exceptions, request bodies, or logs.
+research result, retry state, or hiring action. Targets and responses live
+in `cv_validator_data`; reviewer roles live with Better Auth in
+`web_auth_data`. Analysis data is transient and recruiter-owned, whereas
+feedback is long-lived platform and review data that survives analysis deletion
+and retention purge, similar to the AI usage ledger. Normal report deletion
+(`DELETE /analyses/{id}`, `DELETE /analyses`) and retention purge leave feedback
+targets, reviewer responses, triage notes, displayed context snapshots, and
+diagnostic failure context intact. The retained `analysis_id` is kept as a
+historical correlation identifier. Feedback is enabled by default. Responses
+retain the signed-in author's email and a snapshot of the displayed CV/report
+section (label up to 200 characters, text up to 12000 characters) so
+maintainers can review the comment in its original context. Comments are 12 to
+180 characters; team notes are limited to 500 characters; contact details and
+URLs are rejected from both. The web proxy caps a feedback write at 16 KiB and
+a triage note at 2 KiB. The inbox never stores the uploaded original, raw model
+output, raw exceptions, request bodies, or logs.
 
 Access is initialized automatically by the one-shot `feedback-init` Compose
 service from `config/feedback-access.json`. It seeds the initial owners only

@@ -95,8 +95,10 @@ record zero current-call tokens and separate saved usage/cost provenance.
 Contextual feedback is enabled by default. It stores the signed-in author's
 email, target identity, classification, short sanitized comment, the displayed
 CV/report fragment being reviewed, and safe technical diagnostics. It never
-stores the uploaded original, raw model output, or raw logs. Feedback is
-removed with its parent analysis. Setup and access management are documented in
+stores the uploaded original, raw model output, or raw logs. Analysis data is
+transient and recruiter-owned, while feedback is long-lived platform/review
+data that survives analysis deletion and retention purge, like the AI usage
+ledger. Setup and access management are documented in
 [`docs/operations.md`](docs/operations.md).
 
 ## Public research

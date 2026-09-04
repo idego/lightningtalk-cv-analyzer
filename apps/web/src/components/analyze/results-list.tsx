@@ -89,7 +89,7 @@ function OverviewRow({
   action?: ReactNode;
 }) {
   return (
-    <div className={`flex min-w-0 gap-3 py-1.5 ${detail ? "items-start" : "items-center"}`}>
+    <div className={`flex min-w-0 self-start gap-3 py-1.5 ${detail ? "items-start" : "items-center"}`}>
       <OverviewIcon label={label} tone={tone}>{icon}</OverviewIcon>
       <div className={`min-w-0 flex-1 ${detail ? "pt-0.5" : ""}`}>
         <p className="break-words text-sm font-medium leading-snug text-foreground">{value}</p>

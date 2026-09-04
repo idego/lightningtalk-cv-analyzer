@@ -7,7 +7,7 @@ how retention bounds their lifetime.
 ## Requirements
 
 ### Requirement: Owner-scoped analysis records
-Every analysis SHALL be persisted in the API SQLite volume and scoped to the `X-Analysis-Access-Token` that created it. `GET /analyses` lists the caller's analyses, `GET /analyses/{id}` returns a stored report with capability flags attached, `GET /analyses/{id}/diagnostics` returns usage and cost diagnostics, `DELETE /analyses/{id}` and `DELETE /analyses` remove records. Records the caller does not own SHALL be indistinguishable from missing ones.
+Every analysis SHALL be persisted in the API SQLite volume and scoped to the `X-Analysis-Access-Token` that created it. `GET /analyses` lists the caller's analyses, `GET /analyses/{id}` returns a stored report with capability flags attached, `GET /analyses/{id}/diagnostics` returns usage and cost diagnostics, `DELETE /analyses/{id}` and `DELETE /analyses` remove records. Records the caller does not own SHALL be indistinguishable from missing ones. Analysis data is transient and recruiter-owned. Deletion (`DELETE /analyses/{id}`, `DELETE /analyses`) and retention purge remove recruiter-owned analysis records (reports, runs, source documents, per-analysis research and cache-audit rows, audit logs), but SHALL leave long-lived platform records (the AI usage ledger and contextual feedback data) intact.
 
 #### Scenario: Foreign token
 - **WHEN** a request presents a token that did not create the analysis
@@ -29,7 +29,7 @@ After a report is persisted successfully, the API SHALL store the original uploa
 - **THEN** the analysis still succeeds, `has_document` is false, and a `persistence_failed` diagnostic event with `source_document_persistence_error` is recorded
 
 ### Requirement: Retention
-`GET`/`PUT /settings/retention` SHALL expose the retention window in days, defaulting to `CV_VALIDATOR_RETENTION_DAYS` (90). Out-of-range values are rejected with 422 `retention_days_out_of_range`. Expired analyses, including their stored source documents, are purged when the list endpoint runs.
+`GET`/`PUT /settings/retention` SHALL expose the retention window in days, defaulting to `CV_VALIDATOR_RETENTION_DAYS` (90). Out-of-range values are rejected with 422 `retention_days_out_of_range`. Expired analyses, including their stored source documents, are purged when the list endpoint runs. Purging expired analyses SHALL NOT delete associated feedback data or AI usage ledger rows.
 
 #### Scenario: Retention lowered
 - **WHEN** retention is lowered below the age of stored analyses
