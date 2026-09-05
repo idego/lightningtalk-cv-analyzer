@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 const MOBILE_QUERY = "(max-width: 767px)";
-const NARROW_WORKSPACE_QUERY = "(max-width: 1099px)";
+const NARROW_WORKSPACE_QUERY = "(max-width: 1399px)";
 
 function subscribeTo(query: string, onStoreChange: () => void) {
   const media = window.matchMedia(query);
