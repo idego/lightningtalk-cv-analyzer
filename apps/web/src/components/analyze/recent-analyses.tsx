@@ -73,8 +73,8 @@ export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) 
 
   return <section className="rounded-xl border bg-card">
     <div className="flex items-center gap-2 border-b px-5 py-4"><History className="size-4" /><h2 className="font-medium">{t("recentAnalyses")}</h2></div>
-    {loading && !items.length ? <div className="flex items-center justify-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
-    {!loading && !items.length ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noHistory")}</p> : null}
+    {loading && !items.length ? <div className="flex items-center justify-center gap-2 px-5 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingHistory")}</div> : null}
+    {!loading && !items.length ? <div className="px-5 py-6"><p className="text-sm font-medium text-foreground">{t("noHistory")}</p><p className="mt-1 text-xs text-muted-foreground">{t("noHistoryDescription")}</p></div> : null}
     {items.length ? <div className={expanded ? "max-h-[32rem] overflow-y-auto" : undefined}><ul className="divide-y">{primaryItems.map((item) => {
       return <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onRemove={remove} />;
     })}</ul>
@@ -131,9 +131,9 @@ function AnalysisHistoryRow({
     }
   }
   return <li className="flex min-w-0 items-center gap-2 px-3 py-2">
-    <button type="button" onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
-      <span className="flex items-baseline justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
-      {item.candidate_name ? <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.filename}</span> : null}
+    <button type="button" disabled={openingId === item.analysis_id} onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70">
+      <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
+      <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
     <div className="relative">
       <Button

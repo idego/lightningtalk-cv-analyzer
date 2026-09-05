@@ -135,6 +135,7 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(overview.phoneCountry, "PL");
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
+  assert.equal(overview.employment[0].detail, "2020 – 2024 · Example Systems · Warsaw");
   assert.equal(overview.employment.length, 1);
   assert.equal(overview.attentionRecords[0].value, "MongoDB");
   assert.equal(overview.attentionRecords[0].needsReview, true);

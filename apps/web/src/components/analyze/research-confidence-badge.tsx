@@ -21,7 +21,6 @@ function confidenceTone(confidence: string) {
 
 export function ResearchConfidenceBadge({ confidence }: { confidence: string }) {
   const { t } = useCopy();
-  const level = confidence === "high" ? 3 : confidence === "medium" ? 2 : 1;
   const tone = confidenceTone(confidence);
   const label = t("confidenceWithValue", { value: t(confidenceKey(confidence)) });
 
@@ -32,15 +31,10 @@ export function ResearchConfidenceBadge({ confidence }: { confidence: string }) 
           <span
             tabIndex={0}
             aria-label={label}
-            className={`inline-flex h-6 items-center gap-1 rounded-full px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone.shell}`}
+            className={`inline-flex h-6 items-center gap-1.5 rounded-full px-2 text-[0.7rem] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone.shell}`}
           >
-            {[1, 2, 3].map((dot) => (
-              <span
-                key={dot}
-                aria-hidden="true"
-                className={`size-1.5 rounded-full ${dot <= level ? tone.dot : "bg-muted-foreground/20"}`}
-              />
-            ))}
+            <span aria-hidden="true" className={`size-1.5 rounded-full ${tone.dot}`} />
+            <span>{label}</span>
           </span>
         }
       />

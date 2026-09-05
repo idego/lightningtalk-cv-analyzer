@@ -200,7 +200,10 @@ function join(values: Array<string | null | undefined>): string | null {
 }
 
 function dateRange(start: SupportedField | null, end: SupportedField | null): string | null {
-  return join([value(start), value(end)]);
+  const startValue = value(start);
+  const endValue = value(end);
+  if (startValue && endValue) return `${startValue} – ${endValue}`;
+  return startValue ?? endValue;
 }
 
 function educationRecord(item: AnalysisReport["base_analysis"]["education"][number]): OverviewRecord {

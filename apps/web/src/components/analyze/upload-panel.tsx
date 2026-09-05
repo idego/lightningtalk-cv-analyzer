@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, CircleAlert, Clock3, LoaderCircle, Trash2 } from "lucide-react";
+import { Check, CircleAlert, Clock3, LoaderCircle, Trash2, UploadCloud } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,10 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
   const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const routeRequest = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const openedFromHistoryPush = useRef(false);
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
@@ -133,18 +135,30 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
   function onFilesSelected(list: FileList | null) { if (list) store.enqueue(Array.from(list)); }
 
+  function analysisErrorMessage(detail: unknown) {
+    if (detail === "document_text_layer_unavailable") return t("cvNeedsTextLayer");
+    if (detail === "document_conversion_failed") return t("cvCouldNotRead");
+    if (detail === "upload_size_limit_exceeded") return t("cvTooLarge");
+    if (detail === "empty_upload") return t("cvEmptyFile");
+    if (detail === "unsupported_file_type") return t("cvUnsupportedType");
+    if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");
+    if (detail === "upload_read_error") return t("uploadCouldNotRead");
+    return t("analysisFailed");
+  }
+
   async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
     const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
-    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
+    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | { detail?: string } | null;
     if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
-    if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
-    if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
-    return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(payload, payload.analysis_access_token) };
+    if (!response.ok) throw new Error(analysisErrorMessage(payload && "detail" in payload ? payload.detail : null));
+    if (!payload || !("analysis_id" in payload) || !payload.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
+    const report = payload as AnalysisReport & { analysis_access_token?: string };
+    return { filename: file.name, status: report.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(report, report.analysis_access_token) };
   }
 
   async function submit() {
-    setError(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
+    setError(null); setNotice(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     if (running) return;
     const queue = acceptedFiles;
     setElapsedSeconds(0);
@@ -162,10 +176,11 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     store.clearBatch();
   }
 
-  function reset() { if (running) return; store.clearQueue(); setError(null); }
+  function reset() { if (running) return; store.clearQueue(); setError(null); setNotice(null); }
   function cancel() {
     const { requestId } = store.cancel();
     setElapsedSeconds(0);
+    setNotice(t("analysisCancelled"));
     if (requestId) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
   }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
@@ -197,14 +212,27 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     {batch ? <AnalysisProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancel} /> : <Card>
       <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-6 text-center" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}>
-          <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
+        <label
+          role="button"
+          tabIndex={0}
+          className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/15 p-5 text-center outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}
+        >
+          <input ref={fileInputRef} type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
+          <UploadCloud className="mb-2 size-5 text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
         </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
-        {unsupportedFiles.length ? <p className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
-        <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset}>{t("reset")}</Button></div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
+        {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
+        <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset} disabled={!files.length}>{t("reset")}</Button></div>
+        {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </CardContent>
     </Card>}
     <RecentAnalyses onOpen={openHistorical} refreshKey={historyVersion} highlightIds={sessionIds} />

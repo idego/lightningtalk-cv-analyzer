@@ -135,7 +135,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
 
   return (
-    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen={readOnly} action={!readOnly && feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
+    <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen action={!readOnly && feedbackTarget(feedbackManifest, "report_overall", "report", "overall") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "report_overall", "report", "overall")!} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
           {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
@@ -285,7 +285,15 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
         return (
           <Card key={`${item.filename}-${itemIndex}`} ref={(node) => { reportRefs.current[itemIndex] = node; }} className="report-enter scroll-mt-20 overflow-visible">
             <CardHeader className="pb-0">
-              <CardTitle className="min-w-0 truncate text-base">{item.filename}</CardTitle>
+              <CardTitle className="min-w-0 truncate text-lg">
+                {report.base_analysis.profile.candidate_name?.value?.trim() || item.filename}
+              </CardTitle>
+              <CardDescription className="min-w-0">
+                <span className="block truncate text-sm text-foreground/75">
+                  {[report.base_analysis.profile.headline?.value, report.base_analysis.profile.declared_location?.value].filter(Boolean).join(" · ") || item.filename}
+                </span>
+                {report.base_analysis.profile.candidate_name?.value ? <span className="mt-0.5 block truncate text-xs">{item.filename}</span> : null}
+              </CardDescription>
               {!readOnly ? <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction> : null}
             </CardHeader>
             <CardContent className="space-y-3">
