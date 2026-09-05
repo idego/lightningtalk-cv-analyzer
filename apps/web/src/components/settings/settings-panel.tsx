@@ -13,6 +13,7 @@ type RefreshFeedback = "idle" | "refreshing" | "updated";
 const capabilityLabels: Record<string, CopyKey> = {
   database: "database", geonames: "geoNamesResolver", postal_reference_data: "postalReferenceData", base_analysis: "baseAnalysis",
   company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch",
+  feedback: "feedbackCollection", feedback_inbox: "feedbackInbox",
 };
 
 export function SettingsPanel() {
@@ -32,6 +33,7 @@ export function SettingsPanel() {
     setLoading(true);
     try {
       const response = await fetch("/api/health", { cache: "no-store" });
+      if (!response.ok) throw new Error("health_unavailable");
       setHealth(await response.json());
     } catch {
       setHealth({ status: "unavailable", ready: false, capabilities: {} });
@@ -72,13 +74,18 @@ export function SettingsPanel() {
     }
     setRetentionLoading(true);
     setRetentionMessage(null);
-    const response = await fetch("/api/settings/retention", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ days }),
-    });
-    setRetentionLoading(false);
-    setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    try {
+      const response = await fetch("/api/settings/retention", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    } catch {
+      setRetentionMessage(t("retentionCouldNotSave"));
+    } finally {
+      setRetentionLoading(false);
+    }
   }
 
   async function deleteAllAnalyses() {
@@ -145,7 +152,7 @@ export function SettingsPanel() {
         <Button variant="outline" onClick={() => void saveRetention()} disabled={retentionLoading}>{t("save")}</Button>
       </div>
       <div className="mt-5 border-t pt-5"><Button variant="outline" className="text-destructive hover:text-destructive" disabled={deletingAll} onClick={() => setDeleteAllOpen(true)}><Trash2 />{t("deleteAll")}</Button></div>
-      {retentionMessage ? <p className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
+      {retentionMessage ? <p role="status" className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
       <Dialog open={deleteAllOpen} onOpenChange={(open) => { if (!deletingAll) setDeleteAllOpen(open); }}>
         <DialogContent>
           <DialogHeader>
@@ -161,11 +168,14 @@ export function SettingsPanel() {
     </section>
     <section className="rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between gap-4"><h3 className="font-medium">{t("health")}</h3><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>
-      <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{health?.ready ? t("ready") : t("degraded")}</div>
-      <div className="divide-y">
-        {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ? t(capabilityLabels[name]) : name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
-        {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-4 text-sm text-destructive">{t("apiHealthUnavailable")}</p> : null}
-      </div>
+      <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${loading ? "bg-muted text-muted-foreground" : health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{loading ? <RefreshCw className="size-4 animate-spin" /> : health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{loading ? t("checkingSystem") : health?.ready ? t("ready") : t("degraded")}</div>
+      {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-2 text-sm text-destructive">{t("apiHealthUnavailable")}</p> : null}
+      {Object.keys(health?.capabilities ?? {}).length ? <details open={health ? !health.ready : false} className="group rounded-lg border bg-muted/10">
+        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring">{t("technicalDetails")}</summary>
+        <div className="divide-y border-t px-3">
+          {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ? t(capabilityLabels[name]) : name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
+        </div>
+      </details> : null}
     </section>
   </div>;
 }

@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { type AppLanguage, useCopy } from "@/lib/app-settings";
 import type { DeploymentUsageSummary } from "@/lib/usage-types";
 
@@ -44,6 +45,7 @@ const labels: Record<AppLanguage, {
   tableCost: string;
   noUsage: string;
   loadError: string;
+  retry: string;
   accountingNote: string;
 }> = {
   en: {
@@ -56,22 +58,23 @@ const labels: Record<AppLanguage, {
     average: "Average",
     cost: "Estimated cost",
     totalTokens: "Total tokens",
-    input: "Prompt",
-    cached: "Cached",
-    output: "Completion",
+    input: "Input",
+    cached: "Cached input",
+    output: "Output",
     usd: "Estimated cost (USD)",
     pln: "Estimated cost (PLN)",
     avgTokens: "Avg. tokens / report",
     avgCost: "Avg. cost / report",
     perCompletedReport: "Per processed report",
     breakdownTitle: "Usage by operation",
-    breakdownDescription: "Detailed consumption grouped by pipeline step across all processed reports.",
+    breakdownDescription: "AI usage grouped by analysis and research task across processed reports.",
     tableOp: "Operation",
     tableCalls: "Calls",
     tableTokens: "Tokens",
     tableCost: "Est. Cost (USD)",
     noUsage: "No AI operations have been ledgered yet.",
     loadError: "Failed to load usage metrics.",
+    retry: "Retry",
     accountingNote: "Counts and estimates reflect immutable accounting facts ledgered upon successful provider completion. Retained deployment totals survive report deletion and omit personal data. PLN estimates use the configured deployment rate (1 USD = {rate} PLN).",
   },
   pl: {
@@ -84,8 +87,8 @@ const labels: Record<AppLanguage, {
     average: "Średnio",
     cost: "Szacowany koszt",
     totalTokens: "Łącznie tokenów",
-    input: "Prompt",
-    cached: "Cache",
+    input: "Wejście",
+    cached: "Wejście z cache",
     output: "Odpowiedź",
     usd: "Szacowany koszt (USD)",
     pln: "Szacowany koszt (PLN)",
@@ -93,16 +96,32 @@ const labels: Record<AppLanguage, {
     avgCost: "Śr. koszt / raport",
     perCompletedReport: "Na przetworzony raport",
     breakdownTitle: "Zużycie według operacji",
-    breakdownDescription: "Szczegółowe zużycie z podziałem na etapy analizy dla wszystkich przetworzonych raportów.",
+    breakdownDescription: "Zużycie AI według analizy i zadań researchowych dla przetworzonych raportów.",
     tableOp: "Operacja",
     tableCalls: "Wywołania",
     tableTokens: "Tokeny",
     tableCost: "Szac. koszt (USD)",
     noUsage: "Nie zarejestrowano jeszcze żadnych operacji AI.",
     loadError: "Nie udało się pobrać statystyk zużycia.",
+    retry: "Spróbuj ponownie",
     accountingNote: "Statystyki odzwierciedlają niezmienne fakty księgowe rejestrowane po udanej odpowiedzi dostawcy. Zachowane sumy przetrwają usunięcie raportów i nie zawierają danych osobowych. Wartości w PLN bazują na kursie wdrożenia (1 USD = {rate} PLN).",
   },
 };
+
+
+function operationLabel(key: string, language: AppLanguage): string {
+  const labels: Record<string, [string, string]> = {
+    base_analysis: ["CV analysis", "Analiza CV"],
+    profile_analysis: ["Candidate profile", "Profil kandydata"],
+    employment_analysis: ["Employment history", "Historia zatrudnienia"],
+    education_analysis: ["Education analysis", "Analiza edukacji"],
+    company_research: ["Company research", "Research firm"],
+    education_research: ["Education research", "Research edukacji"],
+    linkedin_discovery_research: ["LinkedIn profile search", "Wyszukiwanie profilu LinkedIn"],
+  };
+  const value = labels[key];
+  return value ? value[language === "pl" ? 1 : 0] : key.replaceAll("_", " ");
+}
 
 function formatNumber(value: number, locale: string, fractionDigits = 0): string {
   return new Intl.NumberFormat(locale, {
@@ -197,6 +216,7 @@ export function DashboardPanel() {
   const [error, setError] = useState(false);
   const [tokenMode, setTokenMode] = useState<"total" | "average">("total");
   const [currency, setCurrency] = useState<"USD" | "PLN">("USD");
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     try {
@@ -215,6 +235,7 @@ export function DashboardPanel() {
 
   useEffect(() => {
     const controller = new AbortController();
+    setError(false);
     fetch("/api/dashboard/summary", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("fetch failed");
@@ -225,7 +246,7 @@ export function DashboardPanel() {
         if (err.name !== "AbortError") setError(true);
       });
     return () => controller.abort();
-  }, []);
+  }, [loadAttempt]);
 
   const exchangeRate = useMemo(() => summary?.fx_rate ?? "3.75", [summary?.fx_rate]);
 
@@ -240,7 +261,7 @@ export function DashboardPanel() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
-      {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{copy.loadError}</div> : null}
+      {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><span>{copy.loadError}</span><Button variant="outline" size="sm" onClick={() => { setSummary(null); setLoadAttempt((attempt) => attempt + 1); }}>{copy.retry}</Button></div> : null}
 
       <section className="space-y-4" aria-label={copy.title}>
         <div className="flex w-fit items-center gap-3 py-1">
@@ -290,7 +311,7 @@ export function DashboardPanel() {
                 <tbody className="divide-y divide-border/60">
                   {summary.operations.map((operation) => (
                     <tr key={operation.key} className="hover:bg-muted/30">
-                      <td className="py-3 pr-4 font-mono text-xs">{operation.key}</td>
+                      <td className="py-3 pr-4 text-sm font-medium">{operationLabel(operation.key, settings.uiLanguage)}</td>
                       <td className="py-3 px-4 text-right tabular-nums">{formatNumber(operation.attempts, locale)}</td>
                       <td className="py-3 px-4 text-right tabular-nums">{formatNumber(operation.total_tokens, locale)}</td>
                       <td className="py-3 pl-4 text-right tabular-nums">{formatCurrency(operation.estimated_cost_usd, "USD", locale)}</td>
