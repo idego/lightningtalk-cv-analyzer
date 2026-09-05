@@ -49,7 +49,7 @@ from cv_validator.operations import (
     safe_log,
     utc_now,
 )
-from cv_validator.pipeline import analyze_cv_bytes_result
+from cv_validator.pipeline import analyze_cv_bytes
 from cv_validator.research.cache import (
     company_subject_descriptors,
     education_subject_descriptors,
@@ -91,7 +91,6 @@ from cv_validator.research.openai_client import (
     OpenAIResponsesEducationResearcher,
     OpenAIResponsesLinkedInResearcher,
 )
-from cv_validator.serialization import serialize_analysis_payload
 from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/cv_analyzer.db")
@@ -571,7 +570,7 @@ def create_app(
                 headers={"X-Analysis-ID": analysis_id},
             )
         try:
-            result = analyze_cv_bytes_result(
+            report = analyze_cv_bytes(
                 content,
                 filename=filename,
                 strategy=strategy,
@@ -580,7 +579,7 @@ def create_app(
                 correlation_id=correlation_id,
                 recorder=recorder,
             )
-            base_status = result.report["base_analysis"]["status"]
+            base_status = report["base_analysis"]["status"]
             if base_status in {"failed", "unavailable"}:
                 recorder.emit(
                     "analysis_failed",
@@ -607,14 +606,14 @@ def create_app(
                     detail="analysis_cancelled",
                     headers={"X-Analysis-ID": analysis_id},
                 )
-            response_payload = serialize_analysis_payload(
-                result,
-                analysis_id=analysis_id,
-                access_token=access_token,
-            )
+            response_payload = {
+                **report,
+                "analysis_id": analysis_id,
+                "analysis_access_token": access_token,
+            }
             attach_capabilities(response_payload)
             store.persist_report(
-                result.input_hash,
+                report["source"]["sha256"],
                 response_payload,
                 analysis_id=analysis_id,
                 access_token=access_token,
@@ -654,12 +653,12 @@ def create_app(
                 accepted_count=sum(
                     item.get("status") == "accepted"
                     for key in ("employment", "education")
-                    for item in result.report["base_analysis"][key]
+                    for item in report["base_analysis"][key]
                 ),
                 ambiguous_count=sum(
                     item.get("status") == "ambiguous"
                     for key in ("employment", "education")
-                    for item in result.report["base_analysis"][key]
+                    for item in report["base_analysis"][key]
                 ),
             )
             return response_payload

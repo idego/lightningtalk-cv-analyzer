@@ -15,7 +15,6 @@ from uuid import uuid4
 from cv_validator.analysis import validate_analysis_report
 from cv_validator.api.feedback import init_feedback_schema
 from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
-from cv_validator.serialization import deserialize_analysis_payload
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
@@ -515,7 +514,7 @@ class PersistenceStore:
                 "SELECT output_json FROM audit_log WHERE analysis_id = ?",
                 (analysis_id,),
             ).fetchone()
-        return None if row is None else deserialize_analysis_payload(
+        return None if row is None else validate_analysis_report(
             json.loads(row["output_json"])
         )
 
@@ -615,7 +614,7 @@ class PersistenceStore:
         return {
             "filename": row["source_filename"] or "CV",
             "has_document": bool(row["has_document"]),
-            "report": deserialize_analysis_payload(json.loads(row["output_json"])),
+            "report": validate_analysis_report(json.loads(row["output_json"])),
         }
 
     def delete_analysis(self, analysis_id: str, access_token: str | None) -> bool:
