@@ -11,7 +11,7 @@ import zipfile
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import Iterator
 
 from cv_validator.location.index import SourceSpec, build_location_index
 from cv_validator.location.postal import SQLitePostalCodeResolver, build_postal_index

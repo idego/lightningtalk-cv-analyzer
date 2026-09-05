@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import valid_report
 from cv_validator.api.app import create_app
 from cv_validator.errors import PersistenceError
+from cv_validator.research.domain import (
+    CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout,
+    EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout,
+)
 from cv_validator.openai_config import OpenAISettings
 
 
@@ -274,3 +279,32 @@ def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
     usage = response.json()["company_research"]["usage"]
     assert usage["input_tokens"] == 10
     assert usage["output_tokens"] == 20
+
+
+@pytest.mark.parametrize(("category", "error_type", "status", "reason"), [
+    ("company", CompanyResearchTimeout, 504, "timeout"),
+    ("company", CompanyResearchInvalidResponse, 502, "invalid_response"),
+    ("company", CompanyResearchClientError, 502, "client_error"),
+    ("education", EducationResearchTimeout, 504, "timeout"),
+    ("education", EducationResearchInvalidResponse, 502, "invalid_response"),
+    ("education", EducationResearchClientError, 502, "client_error"),
+])
+def test_research_provider_failures_keep_category_specific_api_errors(
+    tmp_path, category, error_type, status, reason,
+) -> None:
+    class FailingResearcher:
+        def research(self, request):
+            raise error_type("synthetic provider failure")
+
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        **{f"{category}_researcher": FailingResearcher()},
+    )
+    seed_two_reports(app)
+    response = client_for(app).post(f"/analyses/analysis-1/research/{category}")
+
+    assert response.status_code == status
+    assert response.json()["detail"] == f"{category}_research_{reason}"
+    assert app.state.store.get_cache_audit("analysis-1") == []
+    assert app.state.store.get_analysis_payload("analysis-1")["base_analysis"] == valid_report()["base_analysis"]

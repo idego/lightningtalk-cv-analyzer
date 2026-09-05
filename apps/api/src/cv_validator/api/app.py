@@ -3,13 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 import json
-import hmac
 import os
 import secrets
 import threading
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from urllib.parse import quote
@@ -51,6 +50,7 @@ from cv_validator.operations import (
 )
 from cv_validator.pipeline import analyze_cv_bytes
 from cv_validator.research.cache import (
+    CacheCategory,
     company_subject_descriptors,
     education_subject_descriptors,
     merge_subject_results,
@@ -66,11 +66,9 @@ from cv_validator.research.domain import (
     CompanyResearchClientError,
     CompanyResearchInvalidResponse,
     CompanyResearchTimeout,
-    CompanyResearchRequest,
     EducationResearchClientError,
     EducationResearchInvalidResponse,
     EducationResearchTimeout,
-    EducationResearchRequest,
     LinkedInResearchClientError,
     LinkedInResearchInvalidResponse,
     LinkedInResearchTimeout,
@@ -930,33 +928,43 @@ def create_app(
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"deleted": True})
 
-    @app.post("/analyses/{analysis_id}/research/company")
-    def research_company(
+    def research_subjects(
+        category: CacheCategory,
         analysis_id: str,
-        x_analysis_access_token: str | None = Header(default=None),
-        x_ai_enabled: bool = Header(default=True),
-        x_research_refresh: bool = Header(default=False),
+        x_analysis_access_token: str | None,
+        x_ai_enabled: bool,
+        x_research_refresh: bool,
     ) -> JSONResponse:
         require_research_enabled(x_ai_enabled)
-        if selected_company_researcher is None:
-            raise HTTPException(status_code=503, detail="company_research_disabled")
+        researcher = selected_company_researcher if category == "company" else selected_education_researcher
+        if researcher is None:
+            raise HTTPException(status_code=503, detail=f"{category}_research_disabled")
         stored = _owned_payload(store, analysis_id, x_analysis_access_token)
         research_started_at = utc_now()
         research_started = perf_counter()
         recorder = analysis_recorder(analysis_id)
-        recorder.emit("research_started", operation="company_research", category="research", outcome="started")
+        recorder.emit("research_started", operation=f"{category}_research", category="research", outcome="started")
         try:
-            request = build_company_research_request(stored)
+            request = (
+                build_company_research_request(stored)
+                if category == "company" else build_education_research_request(stored)
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        descriptors = company_subject_descriptors(request)
+        descriptors = (
+            company_subject_descriptors(request)
+            if category == "company" else education_subject_descriptors(request)
+        )
         lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
         paid_request_recorded = False
-        with research_locks.acquire(f"cache:company:{lock_key}"):
+        with research_locks.acquire(f"cache:{category}:{lock_key}"):
             if x_research_refresh:
                 for descriptor in descriptors:
                     store.invalidate_reusable_research(descriptor.cache_key)
-            row = None if x_research_refresh else store.get_company_research(analysis_id)
+            row = None if x_research_refresh else (
+                store.get_company_research(analysis_id)
+                if category == "company" else store.get_education_research(analysis_id)
+            )
             if row is not None:
                 result = json.loads(row["result_json"])
             else:
@@ -967,22 +975,26 @@ def create_app(
                     if cached is None:
                         missing.append(index)
                     else:
-                        subject_results[index] = materialize_cache_hit(
-                            "company", cached, descriptor=descriptor
+                        cached_result = materialize_cache_hit(category, cached, descriptor=descriptor)
+                        subject_results[index] = (
+                            normalize_public_education_result(cached_result)
+                            if category == "education" else cached_result
                         )
                 if missing:
                     try:
-                        fresh = CompanyResearchService(
-                            selected_company_researcher
-                        ).run(
+                        service = (
+                            CompanyResearchService(researcher)
+                            if category == "company" else EducationResearchService(researcher)
+                        )
+                        fresh = service.run(
                             stored,
-                            request=CompanyResearchRequest(tuple(
+                            request=replace(request, input_facts=tuple(
                                 request.input_facts[index] for index in missing
                             )),
                         )
                         record_research_result(
                             recorder,
-                            "company",
+                            category,
                             fresh,
                             research_started_at,
                             research_started,
@@ -993,40 +1005,40 @@ def create_app(
                         paid_request_recorded = True
                     except ValueError as exc:
                         raise HTTPException(status_code=409, detail=str(exc)) from exc
-                    except CompanyResearchTimeout as exc:
+                    except (CompanyResearchTimeout, EducationResearchTimeout) as exc:
                         _research_failure(
                             telemetry,
                             analysis_id,
-                            "company",
+                            category,
                             "timeout",
                             504,
-                            "company_research_timeout",
+                            f"{category}_research_timeout",
                             exc,
                             recorder,
                             research_started_at,
                             research_started,
                         )
-                    except CompanyResearchInvalidResponse as exc:
+                    except (CompanyResearchInvalidResponse, EducationResearchInvalidResponse) as exc:
                         _research_failure(
                             telemetry,
                             analysis_id,
-                            "company",
+                            category,
                             "invalid_response",
                             502,
-                            "company_research_invalid_response",
+                            f"{category}_research_invalid_response",
                             exc,
                             recorder,
                             research_started_at,
                             research_started,
                         )
-                    except CompanyResearchClientError as exc:
+                    except (CompanyResearchClientError, EducationResearchClientError) as exc:
                         _research_failure(
                             telemetry,
                             analysis_id,
-                            "company",
+                            category,
                             "client_error",
                             502,
-                            "company_research_client_error",
+                            f"{category}_research_client_error",
                             exc,
                             recorder,
                             research_started_at,
@@ -1034,43 +1046,62 @@ def create_app(
                         )
                     for fresh_index, request_index in enumerate(missing):
                         descriptor = descriptors[request_index]
-                        subject = single_subject_result("company", fresh, fresh_index)
+                        subject = single_subject_result(category, fresh, fresh_index)
                         subject["cache"] = {
                             "status": "miss",
                             "format_version": descriptor.cache_format_version,
                         }
                         store.persist_reusable_research(
-                            descriptor, reusable_payload("company", subject)
+                            descriptor, reusable_payload(category, subject)
                         )
                         subject_results[request_index] = subject
                 complete_results = [item for item in subject_results if item is not None]
-                result = merge_subject_results("company", complete_results, descriptors)
+                result = merge_subject_results(category, complete_results, descriptors)
+                if category == "education":
+                    result = apply_owner_scoped_education_context(
+                        result, stored, location_resolver=resolver,
+                    )
                 try:
                     for descriptor, subject in zip(descriptors, complete_results, strict=True):
                         store.record_cache_use(
-                            analysis_id, "company", descriptor.cache_key,
+                            analysis_id, category, descriptor.cache_key,
                             subject["cache"]["status"],
                         )
-                    store.persist_company_research(analysis_id, result)
+                    if category == "company":
+                        store.persist_company_research(analysis_id, result)
+                    else:
+                        store.persist_education_research(analysis_id, result)
                 except PersistenceError as exc:
                     _raise_research_persistence_error(exc)
                 telemetry.increment(
                     "research_cache_total",
-                    category="company",
+                    category=category,
                     outcome=result["cache"]["status"],
                 )
         response = deepcopy(stored)
-        response["company_research"] = result
+        response[f"{category}_research"] = result
         if not paid_request_recorded:
             cache = result.get("cache", {})
             recorder.emit(
                 "research_completed",
-                operation="company_research",
+                operation=f"{category}_research",
                 category="research",
                 outcome="completed",
                 cache_outcome=cache.get("status") if isinstance(cache, dict) else None,
             )
         return JSONResponse(response)
+
+
+    @app.post("/analyses/{analysis_id}/research/company")
+    def research_company(
+        analysis_id: str,
+        x_analysis_access_token: str | None = Header(default=None),
+        x_ai_enabled: bool = Header(default=True),
+        x_research_refresh: bool = Header(default=False),
+    ) -> JSONResponse:
+        return research_subjects(
+            "company", analysis_id, x_analysis_access_token, x_ai_enabled, x_research_refresh,
+        )
 
     @app.post("/analyses/{analysis_id}/research/education")
     def research_education(
@@ -1079,145 +1110,9 @@ def create_app(
         x_ai_enabled: bool = Header(default=True),
         x_research_refresh: bool = Header(default=False),
     ) -> JSONResponse:
-        require_research_enabled(x_ai_enabled)
-        if selected_education_researcher is None:
-            raise HTTPException(status_code=503, detail="education_research_disabled")
-        stored = _owned_payload(store, analysis_id, x_analysis_access_token)
-        research_started_at = utc_now()
-        research_started = perf_counter()
-        recorder = analysis_recorder(analysis_id)
-        recorder.emit("research_started", operation="education_research", category="research", outcome="started")
-        try:
-            request = build_education_research_request(stored)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        descriptors = education_subject_descriptors(request)
-        lock_key = ":".join(descriptor.cache_key for descriptor in descriptors)
-        paid_request_recorded = False
-        with research_locks.acquire(f"cache:education:{lock_key}"):
-            if x_research_refresh:
-                for descriptor in descriptors:
-                    store.invalidate_reusable_research(descriptor.cache_key)
-            row = None if x_research_refresh else store.get_education_research(analysis_id)
-            if row is not None:
-                result = json.loads(row["result_json"])
-            else:
-                subject_results: list[dict[str, Any] | None] = [None] * len(descriptors)
-                missing: list[int] = []
-                for index, descriptor in enumerate(descriptors):
-                    cached = store.get_reusable_research(descriptor)
-                    if cached is None:
-                        missing.append(index)
-                    else:
-                        subject_results[index] = normalize_public_education_result(
-                            materialize_cache_hit("education", cached, descriptor=descriptor)
-                        )
-                if missing:
-                    try:
-                        fresh = EducationResearchService(
-                            selected_education_researcher
-                        ).run(
-                            stored,
-                            request=EducationResearchRequest(tuple(
-                                request.input_facts[index] for index in missing
-                            )),
-                        )
-                        record_research_result(
-                            recorder,
-                            "education",
-                            fresh,
-                            research_started_at,
-                            research_started,
-                            cache_outcome=(
-                                "miss" if len(missing) == len(descriptors) else "partial_hit"
-                            ),
-                        )
-                        paid_request_recorded = True
-                    except ValueError as exc:
-                        raise HTTPException(status_code=409, detail=str(exc)) from exc
-                    except EducationResearchTimeout as exc:
-                        _research_failure(
-                            telemetry,
-                            analysis_id,
-                            "education",
-                            "timeout",
-                            504,
-                            "education_research_timeout",
-                            exc,
-                            recorder,
-                            research_started_at,
-                            research_started,
-                        )
-                    except EducationResearchInvalidResponse as exc:
-                        _research_failure(
-                            telemetry,
-                            analysis_id,
-                            "education",
-                            "invalid_response",
-                            502,
-                            "education_research_invalid_response",
-                            exc,
-                            recorder,
-                            research_started_at,
-                            research_started,
-                        )
-                    except EducationResearchClientError as exc:
-                        _research_failure(
-                            telemetry,
-                            analysis_id,
-                            "education",
-                            "client_error",
-                            502,
-                            "education_research_client_error",
-                            exc,
-                            recorder,
-                            research_started_at,
-                            research_started,
-                        )
-                    for fresh_index, request_index in enumerate(missing):
-                        descriptor = descriptors[request_index]
-                        subject = single_subject_result("education", fresh, fresh_index)
-                        subject["cache"] = {
-                            "status": "miss",
-                            "format_version": descriptor.cache_format_version,
-                        }
-                        store.persist_reusable_research(
-                            descriptor, reusable_payload("education", subject)
-                        )
-                        subject_results[request_index] = subject
-                complete_results = [item for item in subject_results if item is not None]
-                public_result = merge_subject_results("education", complete_results, descriptors)
-                result = apply_owner_scoped_education_context(
-                    public_result,
-                    stored,
-                    location_resolver=resolver,
-                )
-                try:
-                    for descriptor, subject in zip(descriptors, complete_results, strict=True):
-                        store.record_cache_use(
-                            analysis_id, "education", descriptor.cache_key,
-                            subject["cache"]["status"],
-                        )
-                    store.persist_education_research(analysis_id, result)
-                except PersistenceError as exc:
-                    _raise_research_persistence_error(exc)
-                telemetry.increment(
-                    "research_cache_total",
-                    category="education",
-                    outcome=result["cache"]["status"],
-                )
-        response = deepcopy(stored)
-        response["education_research"] = result
-        if not paid_request_recorded:
-            cache = result.get("cache", {})
-            recorder.emit(
-                "research_completed",
-                operation="education_research",
-                category="research",
-                outcome="completed",
-                cache_outcome=cache.get("status") if isinstance(cache, dict) else None,
-            )
-        return JSONResponse(response)
+        return research_subjects(
+            "education", analysis_id, x_analysis_access_token, x_ai_enabled, x_research_refresh,
+        )
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
     def discover_linkedin(
