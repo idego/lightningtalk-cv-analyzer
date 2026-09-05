@@ -10,14 +10,6 @@ export type BatchProgress = {
   phase: "running" | "complete";
 };
 
-export function currentBatchIndex(batch: Pick<BatchProgress, "results">) {
-  return batch.results.length;
-}
-
-export function hasPendingBatchFiles(batch: Pick<BatchProgress, "filenames" | "results" | "phase">) {
-  return batch.phase === "running" && batch.results.length < batch.filenames.length;
-}
-
 export function deriveBatchStatuses(batch: Pick<BatchProgress, "filenames" | "results" | "phase">): BatchFileStatus[] {
   return batch.filenames.map((_, index) => {
     const result = batch.results[index];

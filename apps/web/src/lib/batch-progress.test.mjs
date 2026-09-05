@@ -3,9 +3,7 @@ import test from "node:test";
 
 import {
   completedBatchIds,
-  currentBatchIndex,
   deriveBatchStatuses,
-  hasPendingBatchFiles,
   isSupportedCvFilename,
   resolveDocumentSource,
 } from "./batch-progress.ts";
@@ -19,14 +17,6 @@ test("statuses follow the sequential position of the batch", () => {
   assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a")], phase: "running" }), ["completed", "analyzing", "waiting"]);
   assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed], phase: "running" }), ["completed", "failed", "analyzing"]);
   assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed, ok("c")], phase: "complete" }), ["completed", "failed", "completed"]);
-});
-
-test("current index and pending flag track finished results", () => {
-  const filenames = ["a.pdf", "b.pdf"];
-  assert.equal(currentBatchIndex({ results: [ok("a")] }), 1);
-  assert.equal(hasPendingBatchFiles({ filenames, results: [ok("a")], phase: "running" }), true);
-  assert.equal(hasPendingBatchFiles({ filenames, results: [ok("a"), failed], phase: "running" }), false);
-  assert.equal(hasPendingBatchFiles({ filenames, results: [ok("a"), failed], phase: "complete" }), false);
 });
 
 test("completed ids skip failed files", () => {

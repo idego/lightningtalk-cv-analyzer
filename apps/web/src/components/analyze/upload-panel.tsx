@@ -10,7 +10,7 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
-import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
+import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ACCEPT = ".pdf,.docx";
@@ -35,7 +35,7 @@ function reportResult(filename: string, report: AnalysisReport): AnalyzeItemResu
 function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchProgress; elapsedSeconds: number; onCancel: () => void }) {
   const { t } = useCopy();
   const complete = batch.phase === "complete";
-  const currentIndex = currentBatchIndex(batch);
+  const currentIndex = batch.results.length;
   const statuses = deriveBatchStatuses(batch);
   const total = batch.filenames.length;
   const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;

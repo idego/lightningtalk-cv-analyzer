@@ -16,20 +16,9 @@ const localDevUser: WebUser = {
 };
 
 export async function requireWebUser(): Promise<WebUser> {
-  if (isLocalDevAuthBypassEnabled()) return localDevUser;
-
-  const h = await headers();
-  const session = await auth.api.getSession({ headers: h });
-
-  if (!session?.user?.id || !session.user.email) {
-    redirect("/sign-in");
-  }
-
-  return {
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name,
-  };
+  const user = await getWebUser();
+  if (!user) redirect("/sign-in");
+  return user;
 }
 
 export async function getWebUser(): Promise<WebUser | null> {

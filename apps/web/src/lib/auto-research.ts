@@ -55,16 +55,6 @@ export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResea
   ].filter(Boolean) as AutoResearchKind[]);
 }
 
-export function announcedAutoResearchKinds(
-  reports: AnalysisReport[],
-  settings: AppSettings,
-): AutoResearchKind[] {
-  const enabled = new Set(effectiveAutoResearchKinds(settings));
-  const eligible = new Set(reports.flatMap((report) => [...eligibleAutoResearchKinds(report)]));
-  return (["company", "education", "linkedin"] as AutoResearchKind[])
-    .filter((kind) => enabled.has(kind) && eligible.has(kind));
-}
-
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
