@@ -499,14 +499,6 @@ def _enrich_mechanical(
     return mechanical
 
 
-def _record_signature(record: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        (name, " ".join(field["value"].casefold().split()))
-        for name, field in sorted(record.items())
-        if isinstance(field, dict) and isinstance(field.get("value"), str)
-    )
-
-
 def _declared_location_parts(value: str) -> tuple[str, str | None]:
     parts = [part.strip() for part in value.split(",") if part.strip()]
     if len(parts) < 2:

@@ -34,11 +34,6 @@ class CacheDescriptor:
     cache_format_version: str = CACHE_FORMAT_VERSION
 
 
-def company_cache_descriptor(request: CompanyResearchRequest) -> CacheDescriptor:
-    subjects = tuple(sorted(_normalize(fact["organization"]) for fact in request.input_facts))
-    return _descriptor("company", subjects, COMPANY_RESEARCH_VERSION, COMPANY_PROMPT_VERSION, COMPANY_SCHEMA_VERSION)
-
-
 def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheDescriptor, ...]:
     return tuple(
         _descriptor(
@@ -50,14 +45,6 @@ def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheD
         )
         for fact in request.input_facts
     )
-
-
-def education_cache_descriptor(request: EducationResearchRequest) -> CacheDescriptor:
-    subjects = tuple(sorted(
-        "|".join(_normalize(str(fact.get(field) or "")) for field in ("institution", "program"))
-        for fact in request.input_facts
-    ))
-    return _descriptor("education", subjects, EDUCATION_RESEARCH_VERSION, EDUCATION_PROMPT_VERSION, EDUCATION_SCHEMA_VERSION)
 
 
 def education_subject_descriptors(request: EducationResearchRequest) -> tuple[CacheDescriptor, ...]:

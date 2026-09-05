@@ -12,3 +12,4 @@ openspec
 .codex
 .env
 .env.*
+.venv
