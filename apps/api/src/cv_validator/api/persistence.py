@@ -29,16 +29,9 @@ class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
         self._event_write_lock = threading.Lock()
-        self._purge_listener: Callable[[tuple[str, ...]], None] | None = None
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.config.retention_days = self.get_retention_days()
-
-    def set_purge_listener(
-        self,
-        listener: Callable[[tuple[str, ...]], None] | None,
-    ) -> None:
-        self._purge_listener = listener
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.config.db_path)
@@ -117,6 +110,7 @@ class PersistenceStore:
                     usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
                     PRIMARY KEY (analysis_id, research_version), FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                -- Retain legacy tables so report deletion and retention clean older rows.
                 CREATE TABLE IF NOT EXISTS linkedin_confirmation (
                     analysis_id TEXT PRIMARY KEY, profile_url TEXT NOT NULL, discovery_version TEXT NOT NULL,
                     confirmed_at TEXT NOT NULL, audit_json TEXT NOT NULL,
@@ -831,111 +825,30 @@ class PersistenceStore:
 
     def get_linkedin_discovery(self, analysis_id: str) -> dict[str, Any] | None:
         from cv_validator.research.linkedin import DISCOVERY_VERSION
-        return self._get_research_row("linkedin_discovery", analysis_id, DISCOVERY_VERSION)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM linkedin_discovery WHERE analysis_id = ? AND research_version = ?",
+                (analysis_id, DISCOVERY_VERSION),
+            ).fetchone()
+        return None if row is None else dict(row)
 
     def persist_linkedin_discovery(self, analysis_id: str, result: dict[str, Any]) -> None:
-        self._persist_linkedin_result("linkedin_discovery", analysis_id, result)
-
-    def confirm_linkedin_profile(self, analysis_id: str, profile_url: str, discovery_version: str) -> dict[str, Any]:
-        confirmed_at = _utc_now()
-        audit = {"action": "recruiter_confirmed_possible_profile", "analysis_id": analysis_id,
-                 "profile_url": profile_url, "discovery_version": discovery_version, "confirmed_at": confirmed_at,
-                 "caveat": "Confirmation authorizes comparison only; it does not establish identity."}
+        versions, model = result["versions"], result["model"]
         try:
             with self._connect() as conn:
                 self._require_report_parent(conn, analysis_id)
-                cursor = conn.execute(
-                    """INSERT INTO linkedin_confirmation
-                    (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(analysis_id) DO UPDATE SET
-                        profile_url = excluded.profile_url,
-                        discovery_version = excluded.discovery_version,
-                        confirmed_at = excluded.confirmed_at,
-                        audit_json = excluded.audit_json
-                    WHERE linkedin_confirmation.discovery_version <> excluded.discovery_version""",
-                    (analysis_id, profile_url, discovery_version, confirmed_at, json.dumps(audit)),
+                conn.execute(
+                    """INSERT INTO linkedin_discovery (
+                        analysis_id, research_version, status, prompt_version, schema_version,
+                        configured_model, response_model, accessed_at, usage_json, result_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(analysis_id, research_version) DO NOTHING""",
+                    (analysis_id, versions["research"], result["status"], versions["prompt"],
+                     versions["schema"], model["configured"], model["response"], result["accessed_at"],
+                     json.dumps(result["usage"]), json.dumps(result), _utc_now()),
                 )
-                if cursor.rowcount:
-                    conn.execute(
-                        "DELETE FROM linkedin_comparison WHERE analysis_id = ?",
-                        (analysis_id,),
-                    )
-                row = conn.execute(
-                    "SELECT profile_url, audit_json FROM linkedin_confirmation WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-                if row is None or row["profile_url"] != profile_url:
-                    raise ValueError("different_profile_already_confirmed")
-                audit = json.loads(row["audit_json"])
-        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin confirmation persistence failed") from exc
-        return audit
-
-    def get_linkedin_confirmation(self, analysis_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM linkedin_confirmation WHERE analysis_id = ?", (analysis_id,)).fetchone()
-        return None if row is None else dict(row)
-
-    def get_linkedin_comparison(self, analysis_id: str) -> dict[str, Any] | None:
-        from cv_validator.research.linkedin import COMPARISON_VERSION
-        return self._get_research_row("linkedin_comparison", analysis_id, COMPARISON_VERSION)
-
-    def persist_linkedin_comparison(self, analysis_id: str, profile_url: str, result: dict[str, Any]) -> None:
-        self._persist_linkedin_result("linkedin_comparison", analysis_id, result, profile_url=profile_url)
-
-    def _get_research_row(self, table: str, analysis_id: str, version: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(f"SELECT * FROM {table} WHERE analysis_id = ? AND research_version = ?", (analysis_id, version)).fetchone()
-        return None if row is None else dict(row)
-
-    def _persist_linkedin_result(self, table: str, analysis_id: str, result: dict[str, Any], *, profile_url: str | None = None) -> None:
-        versions, model, now = result["versions"], result["model"], _utc_now()
-        columns = "analysis_id, research_version, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
-        values: tuple[Any, ...] = (analysis_id, versions["research"], result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
-        if profile_url is not None:
-            columns = "analysis_id, research_version, profile_url, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
-            values = (analysis_id, versions["research"], profile_url, result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
-        placeholders = ", ".join("?" for _ in values)
-        try:
-            with self._connect() as conn:
-                self._require_report_parent(conn, analysis_id)
-                conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON CONFLICT(analysis_id, research_version) DO NOTHING", values)
-        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin research persistence failed") from exc
-
-    def persist_analysis_payload_for_test(self, payload: dict[str, Any]) -> None:
-        """Seed an anonymous stored payload without constructing an uploaded CV."""
-        now = _utc_now()
-        analysis_id = payload["analysis_id"]
-        validated = validate_analysis_report(payload)
-        strategy = validated["strategy"]
-        with self._connect() as conn:
-            conn.execute(
-                """INSERT INTO reports (
-                    input_hash, contract_version, strategy_name,
-                    strategy_version, status, created_at, analysis_id,
-                    access_token_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    validated["source"]["sha256"],
-                    validated["contract_version"],
-                    strategy["name"],
-                    strategy["version"],
-                    validated["base_analysis"]["status"],
-                    now,
-                    analysis_id,
-                    _token_hash("test-access-token"),
-                ),
-            )
-            conn.execute(
-                "INSERT INTO audit_log (input_hash, contract_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
-                (
-                    validated["source"]["sha256"],
-                    validated["contract_version"],
-                    json.dumps(validated),
-                    now,
-                    analysis_id,
-                ),
-            )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("linkedin research persistence failed") from exc
 
     def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
@@ -974,8 +887,6 @@ class PersistenceStore:
                 deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
             deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
-            if expired_ids and self._purge_listener is not None:
-                self._purge_listener(tuple(expired_ids))
         return deleted
 
 

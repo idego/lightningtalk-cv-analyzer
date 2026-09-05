@@ -102,11 +102,20 @@ def education_result() -> dict:
     }
 
 
+def seed_report(app, report: dict) -> None:
+    app.state.store.persist_report(
+        report["source"]["sha256"],
+        report,
+        analysis_id=report["analysis_id"],
+        access_token="test-access-token",
+    )
+
+
 def seed_two_reports(app) -> None:
     for index in (1, 2):
         report = valid_report(sha256=str(index) * 64)
         report["analysis_id"] = f"analysis-{index}"
-        app.state.store.persist_analysis_payload_for_test(report)
+        seed_report(app, report)
 
 
 def client_for(app) -> TestClient:
@@ -178,8 +187,8 @@ def test_company_research_combines_subject_hit_with_miss(tmp_path) -> None:
     extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
     second["base_analysis"]["employment"].append(extra)
     second["base_analysis"]["review"]["accepted_ids"].append("employment-2")
-    app.state.store.persist_analysis_payload_for_test(first)
-    app.state.store.persist_analysis_payload_for_test(second)
+    seed_report(app, first)
+    seed_report(app, second)
     client = client_for(app)
 
     assert client.post("/analyses/analysis-1/research/company").status_code == 200
@@ -202,7 +211,7 @@ def test_company_refresh_bypasses_and_replaces_cached_result(tmp_path) -> None:
     )
     report = valid_report()
     report["analysis_id"] = "analysis-refresh"
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
     client = client_for(app)
 
     assert client.post("/analyses/analysis-refresh/research/company").status_code == 200
@@ -226,7 +235,7 @@ def test_paid_research_is_ledgered_before_mutable_result_persistence(tmp_path) -
     )
     report = valid_report()
     report["analysis_id"] = "analysis-persistence-failure"
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
 
     def fail_persist(*_args, **_kwargs):
         raise PersistenceError("forced persistence failure")
@@ -257,7 +266,7 @@ def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
     extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
     report["base_analysis"]["employment"].append(extra)
     report["base_analysis"]["review"]["accepted_ids"].append("employment-2")
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
 
     response = client_for(app).post("/analyses/analysis-multiple/research/company")
 
