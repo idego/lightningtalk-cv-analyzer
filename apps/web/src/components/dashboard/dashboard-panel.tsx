@@ -235,7 +235,6 @@ export function DashboardPanel() {
 
   useEffect(() => {
     const controller = new AbortController();
-    setError(false);
     fetch("/api/dashboard/summary", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("fetch failed");
@@ -261,7 +260,7 @@ export function DashboardPanel() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
-      {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><span>{copy.loadError}</span><Button variant="outline" size="sm" onClick={() => { setSummary(null); setLoadAttempt((attempt) => attempt + 1); }}>{copy.retry}</Button></div> : null}
+      {error ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><span>{copy.loadError}</span><Button variant="outline" size="sm" onClick={() => { setSummary(null); setError(false); setLoadAttempt((attempt) => attempt + 1); }}>{copy.retry}</Button></div> : null}
 
       <section className="space-y-4" aria-label={copy.title}>
         <div className="flex w-fit items-center gap-3 py-1">

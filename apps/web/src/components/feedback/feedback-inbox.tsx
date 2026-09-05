@@ -52,8 +52,6 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
 
   useEffect(() => {
     let active = true;
-    setData(null);
-    setLoadError("");
     fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("feedback_inbox_unavailable");
@@ -63,6 +61,13 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
       .catch(() => { if (active) setLoadError(t("feedbackLoadFailed")); });
     return () => { active = false; };
   }, [status, t]);
+
+  function selectStatus(nextStatus: string) {
+    if (nextStatus === status) return;
+    setData(null);
+    setLoadError("");
+    setStatus(nextStatus);
+  }
 
   useEffect(() => {
     if (!hasUnsavedNotes) return;
@@ -130,7 +135,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
           </summary>
           <div className="absolute left-0 top-full z-30 mt-2 flex w-[min(32rem,calc(100vw-2rem))] flex-wrap gap-2 rounded-xl border bg-popover p-3 text-popover-foreground shadow-md" aria-label={t("feedbackStatusFilters")}>
             {["", ...statuses].map((value) => (
-              <Button key={value} variant={status === value ? "secondary" : "outline"} size="sm" className="rounded-full" onClick={() => setStatus(value)} aria-pressed={status === value}>
+              <Button key={value} variant={status === value ? "secondary" : "outline"} size="sm" className="rounded-full" onClick={() => selectStatus(value)} aria-pressed={status === value}>
                 {value ? t(statusLabelKeys[value]) : t("all")}<span className="tabular-nums text-muted-foreground">{value ? data?.counts[value] ?? 0 : Object.values(data?.counts ?? {}).reduce((sum, count) => sum + count, 0)}</span>
               </Button>
             ))}
