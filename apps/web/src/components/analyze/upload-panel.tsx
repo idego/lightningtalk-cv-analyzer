@@ -55,6 +55,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const { settings, t } = useCopy();
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const [historyQuery, setHistoryQuery] = useState("");
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
   const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
@@ -251,6 +252,6 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
         {error ? <p role="alert" className="whitespace-pre-line text-sm text-destructive">{error}</p> : null}
       </CardContent>
     </Card>}
-    <RecentAnalyses onOpen={openHistorical} refreshKey={historyVersion} highlightIds={sessionIds} />
+    <RecentAnalyses query={historyQuery} onQueryChange={setHistoryQuery} onOpen={openHistorical} refreshKey={historyVersion} highlightIds={sessionIds} />
   </div>;
 }

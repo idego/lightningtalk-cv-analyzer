@@ -165,3 +165,14 @@ The analyze UI SHALL omit a Google Search action when its required public subjec
 #### Scenario: Work entry is not an organization
 - **WHEN** a company value is recognized as self-employment or freelance work
 - **THEN** no Google Search action is rendered for that value
+
+### Requirement: Search all saved analysis history
+Recent analyses SHALL provide a localized, keyboard-accessible candidate-name and filename search over every returned owner-scoped history entry, including entries beyond the collapsed list. Matching SHALL ignore case and diacritics, preserve newest-first ordering, and support multiple words across both fields. It SHALL distinguish no matches, no saved analyses, and loading failures. Clear/Escape SHALL reset search; opening a report and returning SHALL preserve the query. Show more SHALL expose all matching entries instead of a fixed fifteen-item cutoff.
+
+#### Scenario: Find an older candidate
+- **WHEN** an analysis outside the first fifteen entries matches a typed name or filename
+- **THEN** it appears in filtered history and opens the same owner-scoped report
+
+#### Scenario: Return to filtered history
+- **WHEN** the recruiter opens a matching result and uses Back
+- **THEN** the query remains and the filtered results are restored

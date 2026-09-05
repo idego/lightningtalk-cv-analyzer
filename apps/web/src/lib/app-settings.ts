@@ -123,12 +123,14 @@ export function useAppSettings() {
 
 const copy = {
   en: {
+
     analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings",
     uploadTitle: "Upload CV files",
     drop: "Drag and drop files here, or click to select", accepted: "Accepted: PDF, DOCX",
     queued: "Selected files", valid: "valid", analyzeFiles: "Analyze files", reset: "Reset", cancel: "Cancel", removeFile: "Remove {name}", analysisCancelled: "Analysis cancelled.",
     results: "Analysis results", back: "Back",
     showCv: "Show CV", hideCv: "Hide CV", copyAnalysisLink: "Copy link", copyingAnalysisLink: "Copying...", analysisLinkCopied: "Link copied", analysisLinkCopyFailed: "Copy failed", loadingAnalysis: "Loading analysis...", unsupportedFiles: "Unsupported files: {names}. Use PDF or DOCX.",
+    searchAnalyses: "Search candidates or filenames", clearSearch: "Clear search", analysisMatchCount: "{count} of {total} analyses", noAnalysisMatches: "No matching analyses. Try another name or filename.",
     recentAnalyses: "Recent analyses", noHistory: "No analyses yet.", noHistoryDescription: "Completed CV analyses will appear here.", loadingHistory: "Loading recent analyses…", partialAnalysis: "Partial", showMoreAnalyses: "Show more ({count})", showFewerAnalyses: "Show fewer",
     originalNotRetained: "The original CV was not retained.", documentFetchFailed: "The stored CV could not be loaded.", deleteAnalysis: "Delete analysis",
     dataRetention: "Data retention", keepFor: "Keep completed analyses for", days: "days", save: "Save",
@@ -165,12 +167,14 @@ const copy = {
     welcomeBack: "Welcome back", signInDescription: "Sign in to CV Analyzer with your Idego Google account.", signIn: "Sign in", continueWithGoogle: "Continue with Google", signInWithGoogle: "Sign in with Google", signingIn: "Signing in...", googleSsoOnly: "Google SSO only", googleOAuthNotConfigured: "Google OAuth is not configured.", unableToSignIn: "Unable to sign in.",
   },
   pl: {
+
     analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia",
     uploadTitle: "Dodaj pliki CV",
     drop: "Przeciągnij pliki tutaj lub kliknij, aby je wybrać", accepted: "Obsługiwane: PDF, DOCX",
     queued: "Wybrane pliki", valid: "poprawnych", analyzeFiles: "Analizuj pliki", reset: "Wyczyść", cancel: "Anuluj", removeFile: "Usuń {name}", analysisCancelled: "Analiza anulowana.",
     results: "Wyniki analizy", back: "Wróć",
     showCv: "Pokaż CV", hideCv: "Ukryj CV", copyAnalysisLink: "Kopiuj link", copyingAnalysisLink: "Kopiowanie...", analysisLinkCopied: "Skopiowano link", analysisLinkCopyFailed: "Nie udało się skopiować", loadingAnalysis: "Ładowanie analizy...", unsupportedFiles: "Nieobsługiwane pliki: {names}. Użyj PDF lub DOCX.",
+    searchAnalyses: "Szukaj kandydata lub pliku", clearSearch: "Wyczyść wyszukiwanie", analysisMatchCount: "{count} z {total} analiz", noAnalysisMatches: "Brak pasujących analiz. Wpisz inne nazwisko lub nazwę pliku.",
     recentAnalyses: "Ostatnie analizy", noHistory: "Brak analiz.", noHistoryDescription: "Ukończone analizy CV pojawią się tutaj.", loadingHistory: "Ładowanie ostatnich analiz…", partialAnalysis: "Częściowa", showMoreAnalyses: "Pokaż więcej ({count})", showFewerAnalyses: "Pokaż mniej",
     originalNotRetained: "Oryginalny plik CV nie został zachowany.", documentFetchFailed: "Nie udało się wczytać zapisanego CV.", deleteAnalysis: "Usuń analizę",
     dataRetention: "Retencja danych", keepFor: "Przechowuj ukończone analizy przez", days: "dni", save: "Zapisz",

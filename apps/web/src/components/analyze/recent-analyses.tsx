@@ -1,30 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Collapsible } from "@base-ui/react/collapsible";
-import { ChevronDown, ChevronUp, History, LoaderCircle, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, History, LoaderCircle, Search, Trash2, X } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
+import { searchAnalysisHistory } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
 
 type Props = {
   onOpen: (item: AnalysisHistoryItem, report: AnalysisReport) => void;
-  /** Change this value to reload the list, e.g. after a batch file finishes. */
+  query: string;
+  onQueryChange: (query: string) => void;
   refreshKey?: number;
-  /** Analysis ids finished in this session, marked as new in the list. */
   highlightIds?: ReadonlySet<string>;
 };
 
-export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) {
+export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, highlightIds }: Props) {
   const { t } = useCopy();
   const [items, setItems] = useState<AnalysisHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const primaryItems = items.slice(0, 5);
-  const additionalItems = items.slice(5, 15);
-  const canExpand = items.length > 5;
+  const searchRef = useRef<HTMLInputElement>(null);
+  const opening = useRef(false);
+  const matches = searchAnalysisHistory(items, query);
+  const searching = Boolean(query.trim());
+  const visibleItems = searching || expanded ? matches : matches.slice(0, 5);
+  function changeQuery(value: string) { onQueryChange(value); setExpanded(false); }
+  function clearSearch() { changeQuery(""); searchRef.current?.focus(); }
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -47,6 +51,8 @@ export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) 
   }, [refresh, refreshKey]);
 
   async function open(item: AnalysisHistoryItem) {
+    if (opening.current) return;
+    opening.current = true;
     setOpeningId(item.analysis_id);
     setError(null);
     try {
@@ -55,8 +61,8 @@ export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) 
       onOpen(item, await response.json() as AnalysisReport);
     } catch {
       setError(t("analysisUnavailable"));
-      void refresh();
     } finally {
+      opening.current = false;
       setOpeningId(null);
     }
   }
@@ -71,33 +77,27 @@ export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) 
     }
   }
 
-  return <section className="rounded-xl border bg-card">
-    <div className="flex items-center gap-2 border-b px-5 py-4"><History className="size-4" /><h2 className="font-medium">{t("recentAnalyses")}</h2></div>
-    {loading && !items.length ? <div className="flex items-center justify-center gap-2 px-5 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingHistory")}</div> : null}
-    {!loading && !items.length ? <div className="px-5 py-6"><p className="text-sm font-medium text-foreground">{t("noHistory")}</p><p className="mt-1 text-xs text-muted-foreground">{t("noHistoryDescription")}</p></div> : null}
-    {items.length ? <div className={expanded ? "max-h-[32rem] overflow-y-auto" : undefined}><ul className="divide-y">{primaryItems.map((item) => {
-      return <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onRemove={remove} />;
-    })}</ul>
-    <Collapsible.Root open={expanded}>
-      <Collapsible.Panel className="h-[var(--collapsible-panel-height)] overflow-hidden opacity-100 transition-[height,opacity] duration-[180ms] ease-[var(--motion-ease-out)] data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0 motion-reduce:transition-none">
-        <ul className="divide-y border-t">{additionalItems.map((item) => (
-          <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onRemove={remove} />
-        ))}</ul>
-      </Collapsible.Panel>
-    </Collapsible.Root></div> : null}
-    {canExpand ? <div className="flex justify-center border-t px-5 py-3">
-      <Button
-        variant="ghost"
-        size="sm"
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        {expanded ? t("showFewerAnalyses") : t("showMoreAnalyses", { count: Math.min(items.length, 15) - 5 })}
-        {expanded ? <ChevronUp data-icon="inline-end" /> : <ChevronDown data-icon="inline-end" />}
-      </Button>
-    </div> : null}
-    {error ? <p className="border-t px-5 py-3 text-sm text-destructive">{error}</p> : null}
+  return <section className="rounded-xl border bg-card" aria-labelledby="recent-analyses-heading">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
+      <h2 id="recent-analyses-heading" className="flex items-center gap-2 font-medium"><History className="size-4" aria-hidden />{t("recentAnalyses")}</h2>
+      <div className="relative w-full sm:w-72">
+        <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" aria-hidden />
+        <input ref={searchRef} type="search" value={query} aria-label={t("searchAnalyses")} placeholder={t("searchAnalyses")} autoComplete="off" maxLength={200} onChange={(event) => changeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
+        {query ? <button type="button" aria-label={t("clearSearch")} className="absolute right-0 top-0 flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={clearSearch}><X className="size-4" aria-hidden /></button> : null}
+      </div>
+    </div>
+    {loading && !items.length ? <div role="status" className="flex items-center justify-center gap-2 px-5 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingHistory")}</div> : null}
+    {!loading && !error && !items.length && !searching ? <div className="px-5 py-6"><p className="text-sm font-medium">{t("noHistory")}</p><p className="mt-1 text-xs text-muted-foreground">{t("noHistoryDescription")}</p></div> : null}
+    {searching && !loading && !error ? <p role="status" className="px-5 pt-3 text-xs text-muted-foreground">{t("analysisMatchCount", { count: matches.length, total: items.length })}</p> : null}
+    {searching && !matches.length && !loading && !error ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
+    {visibleItems.length ? <ul className={`divide-y ${expanded || searching ? "max-h-[32rem] overflow-y-auto" : ""}`}>{visibleItems.map((item) => (
+      <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onRemove={remove} />
+    ))}</ul> : null}
+    {!searching && items.length > 5 ? <div className="flex justify-center border-t px-5 py-3"><Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+      {expanded ? t("showFewerAnalyses") : t("showMoreAnalyses", { count: items.length - 5 })}
+      {expanded ? <ChevronUp data-icon="inline-end" /> : <ChevronDown data-icon="inline-end" />}
+    </Button></div> : null}
+    {error ? <div role="alert" className="flex items-center justify-between gap-3 border-t px-5 py-3 text-sm text-destructive"><span>{error}</span><Button variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
   </section>;
 }
 
@@ -131,7 +131,7 @@ function AnalysisHistoryRow({
     }
   }
   return <li className="flex min-w-0 items-center gap-2 px-3 py-2">
-    <button type="button" disabled={openingId === item.analysis_id} onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70">
+    <button type="button" disabled={openingId !== null || removing} onClick={() => void onOpen(item)} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70">
       <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
@@ -140,7 +140,7 @@ function AnalysisHistoryRow({
         variant={confirmRemove ? "destructive" : "ghost"}
         size="icon"
         className={`size-8 shrink-0 ${confirmRemove ? "" : "text-destructive hover:bg-destructive/10 hover:text-destructive"}`}
-        disabled={openingId === item.analysis_id || removing}
+        disabled={openingId !== null || removing}
         onBlur={() => { if (!removing) setConfirmRemove(false); }}
         onKeyDown={(event) => { if (event.key === "Escape") setConfirmRemove(false); }}
         onClick={() => void requestRemove()}
