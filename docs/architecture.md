@@ -71,3 +71,34 @@ The authoritative executable contracts are:
 - `apps/api/src/cv_validator/analysis/contracts/base-analysis.schema.json`;
 - `apps/api/src/cv_validator/analysis/validation.py`;
 - `apps/api/src/cv_validator/analysis/document_analysis.py`.
+
+
+## Profile Builder
+
+The CVtoBlind-replacement workflow is restored from `origin/feature/profile-builder`
+(`5f4b934`) without merging its obsolete analyzer implementation. The analyzer's
+`base-analysis-v2` contract, prompts, reviewer policy, research, and history are
+unchanged. Profile conversion is a separate editable-document workflow:
+
+`PDF/DOCX -> current text-only Docling converter -> bounded structured extraction -> CandidateProfile -> editing + visibility/template snapshot -> native DOCX -> LibreOffice PDF`.
+
+- `profile_builder.py` owns the canonical profile, templates, preferences, output
+  visibility projection, and DOCX/PDF renderers.
+- `profile_builder_ai.py` owns only profile extraction, Summary, AI Actions and
+  Translation. The existing fast bounded requests, selected-section proposals,
+  stable cache prefix, and `store=false` are preserved.
+- `profile_builder_privacy.py` retains the builder's supported national-ID masking
+  invariant. It does not introduce a masking pass into CV Analyzer.
+- `api/profile_builder_routes.py` and `api/profile_builder_store.py` own the
+  separate API and owner-scoped profile tables in the existing database. Existing
+  profile/template/preferences rows from the old branch remain readable.
+- The authenticated Next.js catch-all proxy derives the owner capability server
+  side, bounds multipart/JSON bytes before parsing, and marks responses private
+  and non-cacheable. Keep the FastAPI service private behind this proxy.
+- Saved profiles include the exact template and visibility snapshot. Private
+  templates remain owner scoped; explicitly shared templates and custom-field
+  definitions retain the existing internal-organization scope.
+
+Profile Builder availability is independent of the per-browser switch for optional
+public-company/education/LinkedIn research. Missing PDF conversion does not make
+CV Analyzer unready; saved-profile editing and DOCX export still work.

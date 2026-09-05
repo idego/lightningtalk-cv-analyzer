@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["personal", "headline", "summary", "skills", "technologies", "experience", "education", "languages", "certifications", "additional_sections"],
+  "properties": {
+    "personal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["first_name", "last_name", "email", "phone", "location", "links"],
+      "properties": {
+        "first_name": {"type": ["string", "null"]},
+        "last_name": {"type": ["string", "null"]},
+        "email": {"type": ["string", "null"]},
+        "phone": {"type": ["string", "null"]},
+        "location": {"type": ["string", "null"]},
+        "links": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["linkedin", "github", "portfolio", "other"],
+          "properties": {
+            "linkedin": {"type": ["string", "null"]},
+            "github": {"type": ["string", "null"]},
+            "portfolio": {"type": ["string", "null"]},
+            "other": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["label", "url"],
+                "properties": {
+                  "label": {"type": "string", "minLength": 1},
+                  "url": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "headline": {"type": ["string", "null"]},
+    "summary": {"type": ["string", "null"]},
+    "skills": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1}},
+    "technologies": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1}},
+    "experience": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["company", "company_category", "role", "project", "location", "start_date", "end_date", "current", "responsibilities", "achievements", "technologies"],
+        "properties": {
+          "company": {"type": ["string", "null"]},
+          "company_category": {"type": ["string", "null"]},
+          "role": {"type": ["string", "null"]},
+          "project": {"type": ["string", "null"]},
+          "location": {"type": ["string", "null"]},
+          "start_date": {"type": ["string", "null"]},
+          "end_date": {"type": ["string", "null"]},
+          "current": {"type": "boolean"},
+          "responsibilities": {"type": "array", "maxItems": 40, "items": {"type": "string", "minLength": 1}},
+          "achievements": {"type": "array", "maxItems": 40, "items": {"type": "string", "minLength": 1}},
+          "technologies": {"type": "array", "maxItems": 60, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "education": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["institution", "degree", "field", "start_date", "end_date", "location", "description"],
+        "properties": {
+          "institution": {"type": ["string", "null"]},
+          "degree": {"type": ["string", "null"]},
+          "field": {"type": ["string", "null"]},
+          "start_date": {"type": ["string", "null"]},
+          "end_date": {"type": ["string", "null"]},
+          "location": {"type": ["string", "null"]},
+          "description": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["language", "level"],
+        "properties": {
+          "language": {"type": "string", "minLength": 1},
+          "level": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "certifications": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "issuer", "date", "url"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "issuer": {"type": ["string", "null"]},
+          "date": {"type": ["string", "null"]},
+          "url": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "additional_sections": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "items"],
+        "properties": {
+          "title": {"type": "string", "minLength": 1},
+          "items": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    }
+  }
+}

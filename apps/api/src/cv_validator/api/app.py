@@ -5,6 +5,7 @@ from typing import Any
 import json
 import os
 import secrets
+import shutil
 import threading
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -27,6 +28,7 @@ from cv_validator.analysis import (
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import load_location_resolver, load_postal_code_resolver
 from cv_validator.errors import (
@@ -229,6 +231,10 @@ def create_app(
     linkedin_max_profiles: int | None = None,
     research_cache_ttl_days: int | None = None,
     require_location_resolver: bool = False,
+    profile_extractor=None,
+    profile_summarizer=None,
+    profile_transformer=None,
+    profile_builder_max_bytes: int | None = None,
 ) -> FastAPI:
     configure_structured_logging()
     settings = openai_settings or load_openai_settings()
@@ -368,6 +374,8 @@ def create_app(
                     else None
                 ),
             },
+            "profile_builder": {"ready": settings.enabled},
+            "profile_pdf_export": {"ready": shutil.which("soffice") is not None or shutil.which("libreoffice") is not None},
             "database": {"ready": True},
             "feedback": {"ready": True, "enabled": True},
             "feedback_inbox": {"ready": True, "enabled": True},
@@ -1216,6 +1224,9 @@ def create_app(
     app.state.research_cache_ttl_days = store.config.research_cache_ttl_days
     app.state.research_locks = research_locks
     app.state.telemetry = telemetry
+    app.include_router(create_profile_builder_router(
+        store, settings, profile_extractor, profile_summarizer, profile_transformer, profile_builder_max_bytes,
+    ))
     return app
 
 
