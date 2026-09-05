@@ -16,7 +16,7 @@ type Props = {
 };
 
 export function RecentAnalyses({ onOpen, refreshKey = 0, highlightIds }: Props) {
-  const { settings, t } = useCopy();
+  const { t } = useCopy();
   const [items, setItems] = useState<AnalysisHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);

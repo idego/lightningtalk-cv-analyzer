@@ -15,7 +15,7 @@ The root-level `make dev` command runs the complete Docker stack on
 
 ```bash
 pnpm typecheck
-pnpm test        # node --test on .mjs files importing .ts; needs Node 22
+pnpm test        # discovers all .test.mjs files; needs Node 22
 pnpm lint
 pnpm build
 ```
