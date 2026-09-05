@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
 import { updateAppSettings, useCopy, type AppLanguage, type CopyKey } from "@/lib/app-settings";
 
 type Capability = { ready: boolean; version?: string | null; recovery?: string | null };
@@ -13,6 +14,7 @@ type RefreshFeedback = "idle" | "refreshing" | "updated";
 const capabilityLabels: Record<string, CopyKey> = {
   database: "database", geonames: "geoNamesResolver", postal_reference_data: "postalReferenceData", base_analysis: "baseAnalysis",
   company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch",
+  profile_builder: "profileBuilder", profile_pdf_export: "profilePdfExport",
   feedback: "feedbackCollection", feedback_inbox: "feedbackInbox",
 };
 
@@ -143,6 +145,7 @@ export function SettingsPanel() {
       </div>
       {settings.aiEnabled && anyResearchAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
     </section>
+    <ProfileBuilderSettings />
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">

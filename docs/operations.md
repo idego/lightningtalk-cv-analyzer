@@ -147,3 +147,28 @@ fall back to a different strategy or the removed deterministic pipeline.
 For application rollback, deploy the previously recorded reviewed SHA. Named
 volumes remain intact. The API uses `cv_analyzer.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.
+
+
+## Profile Builder runtime
+
+Rebuild the API image when enabling the restored Profile Builder; it installs
+`libreoffice-writer` and `fonts-liberation`. Non-container installs need a `soffice`
+or `libreoffice` executable on PATH for PDF output. Conversion uses a fresh
+LibreOffice user directory per request and a 30-second timeout. No external
+conversion service is used.
+
+`GET /health` exposes independent `profile_builder` and `profile_pdf_export`
+capabilities. AI conversion/edits need the existing configured provider key; PDF
+export needs LibreOffice. DOCX download and saved-profile editing remain available
+without AI. The API remains internal: browsers use `/api/profile-builder/*`.
+
+The web build uses Node 22.13 or newer and prepares a same-origin PDF.js worker and
+WASM assets from the pinned package via `scripts/prepare-pdf-worker.mjs`. They are
+copied into `public/pdfjs` during `pnpm dev` / `pnpm build`; generated vendor files
+are not committed. Include `public` when distributing standalone builds, as the
+existing Docker build already does. No CDN receives profile data.
+
+Profile retention follows the existing configured retention period, using the
+profile's last-updated timestamp. Deleting an analysis does not delete a separately
+saved editable profile. Back up the existing API database to include profiles,
+templates, custom fields, and preferences. No new database service is required.

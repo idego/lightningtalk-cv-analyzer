@@ -4,8 +4,27 @@ CV Analyzer analyzes CVs with Docling document conversion and pinned OpenAI
 model passes, producing reports in the `base-analysis-v2` contract.
 
 The previous deterministic Document Understanding, Structural Audit, ESCO,
-national-ID redaction, score/band, file metadata, and live-link checker have
+analyzer national-ID redaction, score/band, file metadata, and live-link checker have
 been removed. They are not compatibility surfaces.
+
+## Profile Builder
+
+The separate **Profile Builder** workflow turns PDF/DOCX CVs into editable,
+client-ready profiles: convert up to 10 CVs, edit the structured content, choose
+which identifying fields appear in the output, select or create a template, and
+export native DOCX or PDF. **Profiles** contains searchable saved profiles.
+
+Templates support block ordering, visibility, left/full/right placement, styles,
+and a positioned company logo. AI Actions and Translation offer a before/after
+review with selective acceptance; they never silently replace the saved profile.
+The main document preview renders the actual exported A4 PDF. The template
+canvas is a layout guide using synthetic sample content.
+
+This workflow preserves the CV Analyzer pipeline. Profile output anonymization
+and identifier masking are feature-specific; free-text descriptions and custom
+fields still need review before sharing. PDF export requires LibreOffice, which
+is included in the API Docker image. Frontend builds require Node 22.13+ and
+prepare self-hosted PDF.js assets. See `docs/operations.md` for runtime details.
 
 ## Architecture
 

@@ -123,6 +123,7 @@ export function useAppSettings() {
 
 const copy = {
   en: {
+    profileBuilder: "Profile Builder", profilePdfExport: "Profile PDF export",
 
     analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings",
     uploadTitle: "Upload CV files",
@@ -167,6 +168,7 @@ const copy = {
     welcomeBack: "Welcome back", signInDescription: "Sign in to CV Analyzer with your Idego Google account.", signIn: "Sign in", continueWithGoogle: "Continue with Google", signInWithGoogle: "Sign in with Google", signingIn: "Signing in...", googleSsoOnly: "Google SSO only", googleOAuthNotConfigured: "Google OAuth is not configured.", unableToSignIn: "Unable to sign in.",
   },
   pl: {
+    profileBuilder: "Kreator profili", profilePdfExport: "Eksport profilu do PDF",
 
     analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia",
     uploadTitle: "Dodaj pliki CV",

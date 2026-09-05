@@ -325,3 +325,27 @@
     transition-timing-function: ease !important;
   }
 }
+
+/* Profile editing responds to available workspace width, not the window alone. */
+.profile-builder-shell { container: profile-workspace / inline-size; }
+.profile-builder-columns { display: grid; gap: 1rem; align-items: start; }
+.profile-builder-preview { display: none; }
+[data-workspace-view="preview"] .profile-builder-editor { display: none; }
+[data-workspace-view="preview"] .profile-builder-preview { display: block; }
+@container profile-workspace (min-width: 940px) {
+  .profile-builder-columns { grid-template-columns: minmax(0, 1fr) minmax(360px, 0.95fr); }
+  .profile-builder-editor, [data-workspace-view="preview"] .profile-builder-editor { display: block; }
+  .profile-builder-preview { display: block; position: sticky; top: 10.5rem; }
+  .profile-workspace-switch { display: none; }
+}
+
+.profile-creator-shell { container: profile-creator / inline-size; }
+.profile-creator-blocks, .profile-creator-properties, .profile-creator-preview { display: none; }
+[data-creator-pane="blocks"] .profile-creator-blocks, [data-creator-pane="properties"] .profile-creator-properties { display: flex; }
+[data-creator-pane="preview"] .profile-creator-preview { display: block; }
+@container profile-creator (min-width: 860px) {
+  .profile-creator-columns { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .profile-creator-blocks, .profile-creator-properties { display: flex; }
+  .profile-creator-preview { display: block; }
+  .profile-creator-switch { display: none; }
+}

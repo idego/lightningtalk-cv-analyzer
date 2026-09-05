@@ -15,7 +15,7 @@ RUN apk add --no-cache python3 make g++ \
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN ./node_modules/.bin/next build
+RUN pnpm build
 
 FROM deps AS feedback-init
 COPY scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs

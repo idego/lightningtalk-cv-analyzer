@@ -13,3 +13,6 @@ build/
 .codex/config.toml
 data/
 *.db
+
+# Generated from the pinned PDF.js package during web dev/build.
+/apps/web/public/pdfjs/
