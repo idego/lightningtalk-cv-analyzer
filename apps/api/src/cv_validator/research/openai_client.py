@@ -131,26 +131,20 @@ class OpenAIResponsesLinkedInResearcher:
         self._max_profiles = max_profiles
 
     def discover(self, request: LinkedInDiscoveryRequest):
-        return self._call(
-            "linkedin-discovery.schema.json",
-            "linkedin_discovery",
-            {
-                "candidate_name": request.candidate["name"],
-                "search_hints": request.candidate.get("search_hints", []),
-                "max_profiles": self._max_profiles,
-            },
-        )
-
-    def _call(self, schema_file: str, schema_name: str, input_payload: dict[str, Any]):
+        input_payload = {
+            "candidate_name": request.candidate["name"],
+            "search_hints": request.candidate.get("search_hints", []),
+            "max_profiles": self._max_profiles,
+        }
         prompt = files("cv_validator.research.contracts").joinpath("linkedin-prompt.md").read_text()
-        schema = json.loads(files("cv_validator.research.contracts").joinpath(schema_file).read_text())
+        schema = json.loads(files("cv_validator.research.contracts").joinpath("linkedin-discovery.schema.json").read_text())
         try:
             response = self._client.responses.create(
                 model="gpt-5.6-luna", reasoning={"effort": "medium"}, instructions=prompt,
                 input=json.dumps(input_payload, ensure_ascii=False),
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
-                text={"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}},
+                text={"format": {"type": "json_schema", "name": "linkedin_discovery", "strict": True, "schema": schema}},
                 store=False, max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
             )
         except openai.APITimeoutError as exc:
@@ -172,11 +166,10 @@ class OpenAIResponsesLinkedInResearcher:
             raise LinkedInResearchInvalidResponse("search_count")
         payload["searches_performed"] = searches
         sources = _source_urls(response)
-        if schema_name == "linkedin_discovery":
-            _retain_sourced_linkedin_profiles(
-                payload, sources, connection_threshold=self._connection_threshold
-            )
-            _normalize_linkedin_confidence(payload, input_payload)
+        _retain_sourced_linkedin_profiles(
+            payload, sources, connection_threshold=self._connection_threshold
+        )
+        _normalize_linkedin_confidence(payload, input_payload)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
 

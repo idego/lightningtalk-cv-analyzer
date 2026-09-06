@@ -1,6 +1,6 @@
 # Architecture
 
-CV Analyzer runs one `document-analysis` document-analysis strategy and validates
+CV Analyzer runs the `document-analysis` strategy and validates
 its output against the `base-analysis-v2` contract.
 
 ```text
