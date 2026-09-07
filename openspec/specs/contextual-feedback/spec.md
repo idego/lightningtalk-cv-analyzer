@@ -62,7 +62,7 @@ Feedback roles SHALL live in the web auth database table `feedback_access_by_ema
 - **THEN** the change is refused with `last_owner_protected`
 
 ### Requirement: Access bootstrap
-The one-shot `feedback-init` Compose service SHALL create the access tables and seed the owners listed in `config/feedback-access.json` only when the access table is empty. It MUST NOT restore access later changed in the UI. When `LOCAL_DEV_AUTH_BYPASS=true`, it SHALL also upsert `local-dev@localhost` as an active owner on every run. `web` starts only after `feedback-init` completes successfully.
+The one-shot `feedback-init` Compose service SHALL create the access tables and seed the owners listed in `apps/web/config/feedback-access.json`, embedded in its image at build time, only when the access table is empty. It MUST NOT depend on a runtime bind mount of the source repository. It MUST NOT restore access later changed in the UI. When `LOCAL_DEV_AUTH_BYPASS=true`, it SHALL also upsert `local-dev@localhost` as an active owner on every run. `web` starts only after `feedback-init` completes successfully.
 
 #### Scenario: Config has no valid owner
 - **WHEN** the config lists no owner email

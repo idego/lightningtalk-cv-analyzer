@@ -19,6 +19,7 @@ RUN ./node_modules/.bin/next build
 
 FROM deps AS feedback-init
 COPY scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+COPY config/feedback-access.json /config/feedback-access.json
 CMD ["node", "scripts/init-feedback-access.mjs"]
 
 FROM base AS runtime
