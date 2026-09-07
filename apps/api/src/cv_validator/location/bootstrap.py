@@ -69,6 +69,7 @@ def bootstrap_reference_data(
         _remove_stale_staging(target)
         release = releases / snapshot_version
         if _valid_release(release, snapshot_version, source_urls):
+            _make_release_readable(release)
             _promote(target, release)
             return release
         if release.exists():
@@ -110,6 +111,7 @@ def bootstrap_reference_data(
                 + "\n",
                 encoding="utf-8",
             )
+            _make_release_readable(output)
             if not _valid_release(output, snapshot_version, source_urls):
                 raise ReferenceDataBootstrapError("built GeoNames release is invalid")
             os.replace(output, release)
@@ -196,6 +198,11 @@ def _promote(target: Path, release: Path) -> None:
     link.unlink(missing_ok=True)
     link.symlink_to(Path("releases") / release.name)
     os.replace(link, target / "current")
+
+
+def _make_release_readable(release: Path) -> None:
+    for name in _RELEASE_FILES:
+        (release / name).chmod(0o644)
 
 
 def _current_release(target: Path) -> Path | None:
