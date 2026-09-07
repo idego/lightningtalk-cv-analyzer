@@ -37,6 +37,9 @@ PDF or DOCX upload
 - Company, education, and LinkedIn research receives only accepted subjects.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.
+- The overview EU row classifies only the declared location. A phone prefix alone
+  leaves location unknown; a phone/location country difference is worth knowing,
+  not an attention finding.
 - The system does not perform identity, honesty, residence, nationality, work
   eligibility, or automatic hiring verification.
 

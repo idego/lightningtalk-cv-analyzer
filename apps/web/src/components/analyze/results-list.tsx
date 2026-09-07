@@ -169,7 +169,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                 {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} detail={postalDetail} tone={locationTone} /> : null}
                 {!overview.postalCode && postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={postalCountry} detail={postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null} tone={locationTone} /> : null}
                 {!overview.postalCode && !postalCountry && postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={postalConsistency} tone={locationTone} /> : null}
-                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
+                {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={overview.euStatus === "unknown" ? (settings.uiLanguage === "pl" ? "Lokalizacja nieustalona" : "Location unknown") : t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
               </div>
             </section> : null}
           </div> : null}

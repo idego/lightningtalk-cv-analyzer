@@ -33,7 +33,7 @@ export type ReportOverview = {
   postalCode: string | null;
   postalCountry: string | null;
   postalConsistency: "consistent" | "mismatch" | null;
-  euStatus: "inside" | "outside" | null;
+  euStatus: "inside" | "outside" | "unknown";
   education: OverviewRecord[];
   certifications: OverviewRecord[];
   employment: OverviewRecord[];
@@ -258,6 +258,10 @@ function overview(report: AnalysisReport): ReportOverview {
       .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
       .map((item) => item.record_id),
   );
+  const declaredSource = Array.isArray(eu?.sources)
+    ? eu.sources.map(record).find((item) => item?.kind === "declared_location")
+    : null;
+  const declaredCountry = text(declaredSource?.country_code) ?? text(resolution?.country_code);
   const outsideEu = Array.isArray(eu?.outside_eu) ? eu.outside_eu : [];
   const insideEu = Array.isArray(eu?.inside_eu) ? eu.inside_eu : [];
   return {
@@ -273,7 +277,7 @@ function overview(report: AnalysisReport): ReportOverview {
       : postalValidation?.status === "mismatch"
         ? "mismatch"
         : null,
-    euStatus: outsideEu.length ? "outside" : insideEu.length ? "inside" : null,
+    euStatus: declaredCountry && outsideEu.includes(declaredCountry) ? "outside" : declaredCountry && insideEu.includes(declaredCountry) ? "inside" : "unknown",
     education: report.base_analysis.education
       .filter((item) => !suspectedIds.has(item.id) && value(item.institution))
       .map(educationRecord),
@@ -398,15 +402,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
     ...companyFindings,
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-    ...comparisons
-      .filter((item) => item.relationship === "different")
-      .map((_item, index) => findingFromEvidence(
-        `comparison-different-${index}`,
-        copy.mismatch,
-        copy.mismatchWhy,
-        copy.mismatchCheck,
-        comparisonEvidence,
-      )),
     ...emailFindings
       .map((item, index) => finding(`email-${index}`, { ...item, summary: [
         copy.emailTypo,
@@ -417,6 +412,15 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
   ];
 
   const worthKnowing: ReportFinding[] = [
+    ...comparisons
+      .filter((item) => item.relationship === "different")
+      .map((_item, index) => findingFromEvidence(
+        `comparison-different-${index}`,
+        copy.mismatch,
+        copy.mismatchWhy,
+        copy.mismatchCheck,
+        comparisonEvidence,
+      )),
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },
