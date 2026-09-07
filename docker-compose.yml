@@ -9,7 +9,6 @@ services:
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
     volumes:
       - web_auth_data:/app/data
-      - ./config/feedback-access.json:/config/feedback-access.json:ro
     restart: "no"
 
   geonames-init:

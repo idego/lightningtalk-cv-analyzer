@@ -11,6 +11,7 @@ The root compose configuration SHALL run the long-lived `web` and `api` services
 - **WHEN** `make dev` or `make deploy` runs the stack
 - **THEN** `geonames-init` and `feedback-init` complete successfully before `api` and `web` are considered started
 - **AND** only `web` publishes a host port from `docker-compose.yml`
+- **AND** `feedback-init` reads its owner configuration from its image without mounting the source repository at runtime
 
 #### Scenario: API remains internal in production
 - **WHEN** compose services are running from `docker-compose.yml` alone
