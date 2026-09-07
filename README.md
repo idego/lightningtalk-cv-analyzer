@@ -1,149 +1,118 @@
 # CV Analyzer
 
-CV Analyzer analyzes CVs with Docling document conversion and pinned OpenAI
-model passes, producing reports in the `base-analysis-v2` contract.
+Review CVs, explore relevant public sources, and turn candidate experience into editable profiles for clients.
 
-The previous deterministic Document Understanding, Structural Audit, ESCO,
-analyzer national-ID redaction, score/band, file metadata, and live-link checker have
-been removed. They are not compatibility surfaces.
+![CV Analyzer — upload CV files and find recent analyses](docs/images/cv-analyzer.png)
+
+[Quick start](#quick-start) · [Profile Builder](#profile-builder) · [Development](#development) · [Operations](docs/operations.md)
+
+## What you can do
+
+| Workspace | What it helps you do |
+| --- | --- |
+| **Analyze** | Upload PDF or DOCX CVs, review structured candidate information and findings, and search saved analyses. |
+| **Profile Builder** | Edit candidate profiles, choose a template, hide selected personal details, and export DOCX or PDF. |
+| **Dashboard** | See processing activity and estimated AI usage costs. |
+| **Feedback** | Report issues in context and review them with your team. |
+| **Settings** | Adjust public research, report display, retention, and shared profile fields. |
+
+The app supports recruiter review. It does not make hiring decisions or verify a candidate's identity, location, or work eligibility.
+
+## Analyze a CV
+
+Upload one or more CVs with selectable text. The app extracts profile, employment, and education information, checks it against the document, and presents a report you can review alongside the original.
+
+Optional public research looks for company, education, and possible LinkedIn matches. It uses accepted information from the CV, shows sources, and lets you retry failed requests. Certificates are excluded from automated education research. Public matches are leads for manual review.
+
+Completed analyses stay in your history until you delete them or retention removes them. You can reopen the original document, search candidates or filenames, and leave feedback on report sections.
 
 ## Profile Builder
 
-The separate **Profile Builder** workflow turns PDF/DOCX CVs into editable,
-client-ready profiles: convert up to 10 CVs, edit the structured content, choose
-which identifying fields appear in the output, select or create a template, and
-export native DOCX or PDF. **Profiles** contains searchable saved profiles.
+Turn up to 10 CVs at a time into editable profiles:
 
-Templates support block ordering, visibility, left/full/right placement, styles,
-and a positioned company logo. AI Actions and Translation offer a before/after
-review with selective acceptance; they never silently replace the saved profile.
-The main document preview renders the actual exported A4 PDF. The template
-canvas is a layout guide using synthetic sample content.
+1. **Convert** PDF or DOCX files into structured content.
+2. **Edit** experience, education, skills, and other profile fields.
+3. **Choose a template** or create one with your own layout, styles, and logo.
+4. **Choose what to share** by hiding selected personal details from the output.
+5. **Export** an editable DOCX or a PDF, then return to saved profiles when needed.
 
-This workflow preserves the CV Analyzer pipeline. Profile output anonymization
-and identifier masking are feature-specific; free-text descriptions and custom
-fields still need review before sharing. PDF export requires LibreOffice, which
-is included in the API Docker image. Frontend builds require Node 22.13+ and
-prepare self-hosted PDF.js assets. See `docs/operations.md` for runtime details.
+AI summary, editing, and translation tools show proposed changes for review before you apply them. **My preferences** holds your defaults for new profiles, including the template, date format, anonymization, and file names.
 
-## Architecture
+The document preview uses the exported PDF. Templates can be private or shared with the team. Hiding structured fields does not remove identifying details from free text, so review descriptions and custom fields before sharing.
 
-```text
-PDF or DOCX upload
-    -> Docling 2.124.0 native-text conversion (OCR disabled)
-    -> thin SourceDocument evidence projection
-    -> concurrent profile, employment, and education model specialists
-    -> field and relation validation plus mechanical candidates
-    -> sequential model reviewer with validated ID-based operations
-    -> base-analysis-v2 validation
-    -> persistence and UI
-    -> automatic company, education, and LinkedIn research
+## Quick start
+
+You need Docker with Compose, Make, an OpenAI API key, and at least **3 GiB of free disk space** for geographic reference data, in addition to the container images.
+
+**1. Create your local configuration.**
+
+```bash
+cp .env.example .env.local
 ```
 
-Every semantic value needs literal source evidence. A reviewer may add a missing candidate
-only when the same evidence and relation validation accepts it.
+Set `OPENAI_API_KEY` and replace `BETTER_AUTH_SECRET` with a random secret of at least 32 characters in `.env.local`. Keep this file private.
 
-The specialists use pinned `gpt-5.6-luna` with reasoning effort `none`; the
-reviewer uses `low`; public research calls use `medium`. Responses API storage is disabled and base analysis uses
-no tools. Without AI credentials the strategy still converts documents and
-returns an explicit unavailable/partial result instead of another parser.
-
-Mechanical code is limited to phones, e-mails, literal URLs, postal-pattern
-candidates, e-mail provider typos, geographic resolution, and informational EU
-status. A postal-looking token is not accepted as the candidate's address
-without supported context.
-
-See the current [architecture](docs/architecture.md) for durable boundaries and
-the authoritative executable contracts.
-
-## Development
+**2. Start the app.**
 
 ```bash
 make dev
-make dev-down
-cd apps/api && PYTHONPATH=src .venv/bin/pytest -q
-cd apps/web && pnpm test        # requires Node 22 (type stripping)
-cd apps/web && pnpm typecheck
-cd apps/web && pnpm build
 ```
 
-`make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
-through `docker-compose.dev.yml`; `make deploy` never does.
+Open [localhost:3001/analyze](http://localhost:3001/analyze). Local development bypasses sign-in and binds the app to loopback. The first start downloads and builds the GeoNames indexes; this can take several minutes. Later starts reuse them.
 
-The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
-project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
-database `/app/data/auth.db`. A stack created under the former project name
-`cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
-data, start with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
-`CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to the old `docling_luna*.db`
-paths in the env file, or copy the volumes once while the stack is stopped.
+**3. Stop when you are done.**
 
-On the first `make dev` or `make deploy`, the one-shot `geonames-init` service
-downloads the configured official GeoNames sources and builds both locality and
-postal indexes in the project-scoped `geonames_data` volume. The API waits for
-that job and mounts its completed `current` release read-only. Later starts
-validate and reuse the volume without downloading. The checked-in `config/geonames.lock` pins the accepted `GEONAMES_SNAPSHOT_VERSION`; refresh the lock and version together when intentionally updating upstream data; allow at least 3 GiB of free space
-for archives, staging files, and indexes.
+```bash
+make dev-down
+```
 
-For a host with no outbound access, prepare an approved directory containing
-both index/manifest pairs and run `REFERENCE_DATA_MODE=operator make deploy` with
-`CV_VALIDATOR_REFERENCE_DATA_DIR` set in `.env`. See
-[`docs/reference-data/geonames.md`](docs/reference-data/geonames.md) for recovery,
-refresh, and rollback details.
+This stops the stack and keeps its data volumes.
 
-`GET /health` reports `ready: false` when the analysis model client is not
-configured; uploads then fail with `analysis_strategy_unavailable` and are not
-persisted as successful reports. Each attempted analysis has owner-scoped,
-PII-safe diagnostics and an immutable AI token/cost ledger at
-`GET /analyses/{analysis_id}/diagnostics`. Rates are versioned in code and can
-be overridden with `CV_VALIDATOR_PRICING_PATH`; unknown model pricing leaves
-the cost null without discarding token usage. Reusable research cache hits
-record zero current-call tokens and separate saved usage/cost provenance.
+> Upgrading an existing installation? Read the [upgrade instructions](docs/operations.md#consolidated-branch-upgrade) first. Back up both application and authentication volumes, and preserve the existing auth secret during migration.
 
-## Deployment
+## How it works
 
-Production is Compose-based. Copy and fill `.env`, keep `WEB_HOST=127.0.0.1`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the loopback-bound web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](docs/operations.md).
+The web app runs on **Next.js**. A private **FastAPI** service converts documents with **Docling**, runs the analysis, and stores reports and profiles in **SQLite**.
 
-## Privacy and persistence
+For CV analysis, separate model passes extract profile, employment, and education information. Validation checks literal evidence and whether record fields belong together. A reviewer pass then proposes changes under the same validation rules. Optional public research runs on accepted subjects.
 
-- OpenAI requests use `store=false`.
-- Never log raw CV text or raw model output.
-- The API stores the validated report and, after report commit, the original PDF/DOCX only for owner-scoped preview within the same retention window.
-- Analysis ownership uses the authenticated Better Auth user id server-side; no owner capability token is returned to the browser or written into report/audit JSON.
-- Private CV fixtures and evaluation outputs belong under ignored `data/`.
-- Old pilot reports are not migrated. The new default database is
-  `data/cv_analyzer.db`; existing databases are never deleted implicitly.
+Profile Builder is a separate workflow with its own editable profile and template snapshots. It generates DOCX files and uses **LibreOffice** for PDF export. The Docker image includes LibreOffice; PDF previews use self-hosted assets.
 
-Contextual feedback is enabled by default. It stores the signed-in author's
-email, target identity, classification, short sanitized comment, the displayed
-CV/report fragment being reviewed, and safe technical diagnostics. It never
-stores the uploaded original, raw model output, or raw logs. Analysis data is
-transient and recruiter-owned, while feedback is long-lived platform/review
-data that survives analysis deletion and retention purge, like the AI usage
-ledger. Setup and access management are documented in
-[`docs/operations.md`](docs/operations.md).
+See the [technical guide](docs/technical-guide.md) for model configuration, pipeline details, diagnostics, caching, and runtime behavior, or the [architecture](docs/architecture.md) for system boundaries and contracts.
 
-## Public research
+## Data and limitations
 
-Company, education, and LinkedIn research remains optional. Subjects come only
-from accepted, evidence-supported base-analysis records. Reusable cache entries
-are keyed per public subject, support partial hits, and carry hit/miss
-provenance, original research timestamps, refresh, and cache audit entries.
+- **Text-bearing PDF and DOCX only.** Scans and image-only documents are unsupported; OCR is disabled.
+- **AI credentials are required for analysis.** Missing credentials produce an unavailable state. Saved-profile editing and DOCX export remain available without AI.
+- **OpenAI response storage is disabled** with `store=false`. CV text and raw model output must not enter logs.
+- **Original uploads follow analysis retention.** They are available to the owner for preview and are removed with the analysis.
+- **Feedback and AI accounting have separate lifecycles.** Feedback includes the author's email and the report context under review; it survives analysis deletion. The usage ledger keeps token counts and estimated costs without CV content.
+- **Costs are estimates.** The ledger includes analysis, research, and Profile Builder calls, with versioned pricing and cache accounting.
 
-Research confidence is intentionally conservative: high confidence requires
-multiple consistent public signals, and LinkedIn discovery requires both name
-support and compatible experience or education context. Results remain possible
-matches, never identity verification. The LinkedIn Profiles header also provides
-one user-initiated people-search shortcut; it does not replace or trigger LinkedIn
-Research and no per-profile search shortcuts are shown. Each company and
-education entry in the CV overview, and each completed company or education
-research result, carries a compact Google Search shortcut built only from the
-visible public subject; self-employment entries get none.
+## Development
 
-## Supported documents and limitations
+The containers provide the full runtime. For frontend work outside Docker, use **Node 22.13+** and **pnpm**. The API uses Python; dependency details are in [pyproject.toml](apps/api/pyproject.toml).
 
-Only text-bearing PDF and DOCX files are supported. Image-only or scan-only
-documents fail with `document_text_layer_unavailable`; OCR is never attempted.
-The minimal Docling runtime installs only PDF/DOCX conversion extras and sets
-offline flags, so it has no model assets to download at runtime. Results are
-recruiter decision support and never verify a candidate or their location.
+| Task | Command |
+| --- | --- |
+| Start the stack | `make dev` |
+| Stop the stack | `make dev-down` |
+| Backend tests | `cd apps/api && PYTHONPATH=src .venv/bin/pytest -q` |
+| Web tests | `cd apps/web && pnpm test` |
+| Web typecheck | `cd apps/web && pnpm typecheck` |
+| Web build | `cd apps/web && pnpm build` |
+
+Local API documentation is available at [127.0.0.1:8001/docs](http://127.0.0.1:8001/docs). Production keeps the API private; browser requests go through the web app.
+
+## Deploy and maintain
+
+Production uses Docker Compose. Configure `.env`, keep `WEB_HOST=127.0.0.1`, and put a TLS reverse proxy in front of the web app. Then run `make deploy-check` and `make deploy`.
+
+| Guide | Covers |
+| --- | --- |
+| [Operations](docs/operations.md) | Environment setup, deployment, backups, upgrades, rollback, retention, and feedback access. |
+| [Technical guide](docs/technical-guide.md) | Detailed analysis behavior, model passes, diagnostics, caching, privacy, and runtime configuration. |
+| [Architecture](docs/architecture.md) | Analysis pipeline, evidence rules, storage, and Profile Builder boundaries. |
+| [GeoNames reference data](docs/reference-data/geonames.md) | Offline setup, index refresh, recovery, and snapshot versions. |
+| [Web development](apps/web/README.md) | Frontend setup and conventions. |
+| [Feature specifications](openspec/specs/) | Current behavior contracts. |
