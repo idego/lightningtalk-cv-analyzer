@@ -5,10 +5,11 @@ services:
       target: runtime
     user: "0:0"
     entrypoint: ["/bin/sh", "-c"]
-    command: ["chown -R app:app /api-data && chown -R 1000:1000 /web-data"]
+    command: ["chown -R app:app /api-data && chown -R 1000:1000 /web-data && chmod -R a+rX /reference-data"]
     volumes:
       - cv_validator_data:/api-data
       - web_auth_data:/web-data
+      - geonames_data:/reference-data
     healthcheck:
       disable: true
     cpus: 0.50

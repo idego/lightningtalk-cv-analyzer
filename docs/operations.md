@@ -204,7 +204,10 @@ The `volume-init` one-shot container fixes ownership of the two existing named
 application volumes before API and feedback initialization start. It runs as root
 only for this operation; API runs as UID/GID 10001 and the web/feedback initializer
 as UID/GID 1000. This covers existing root-owned SQLite databases, not just fresh
-empty volumes. Do not replace it with world-writable permissions or expose the API.
+empty volumes. It also marks existing GeoNames release files readable (`a+rX`):
+earlier bootstraps published them `0600 root`, which the non-root API cannot open,
+so `/health` reported `geonames_unavailable` and the container stayed unhealthy.
+Do not replace it with world-writable permissions or expose the API.
 Custom database paths must stay within their respective `/app/data` mounts.
 
 The GeoNames version must match `config/geonames.lock` (`2026-08-21` for this

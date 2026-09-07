@@ -5,7 +5,8 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(os.environ.get("CV_VALIDATOR_REPO_ROOT", Path(__file__).resolve().parents[3]))
+_REPO_ROOT_ENV = os.environ.get("CV_VALIDATOR_REPO_ROOT")
+ROOT = Path(_REPO_ROOT_ENV) if _REPO_ROOT_ENV else Path(__file__).resolve().parents[3]
 
 
 def test_nonroot_upgrade_prepares_existing_volumes_before_database_users_start():
@@ -16,6 +17,8 @@ def test_nonroot_upgrade_prepares_existing_volumes_before_database_users_start()
     assert "web_auth_data:/web-data" in initializer["volumes"]
     assert "chown -R app:app /api-data" in initializer["command"][0]
     assert "chown -R 1000:1000 /web-data" in initializer["command"][0]
+    assert "geonames_data:/reference-data" in initializer["volumes"]
+    assert "chmod -R a+rX /reference-data" in initializer["command"][0]
     for name in ("api", "feedback-init"):
         assert services[name]["depends_on"]["volume-init"]["condition"] == "service_completed_successfully"
     assert "USER app" in (ROOT / "apps/api/Dockerfile").read_text()

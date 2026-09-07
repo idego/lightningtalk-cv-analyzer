@@ -67,7 +67,8 @@ Long-lived `web` and `api` runtime containers and the feedback initializer SHALL
 
 ### Requirement: Existing-volume non-root upgrade
 A bounded, one-shot permissions initializer SHALL prepare the existing API and
-web-auth named volumes before API or feedback initialization starts. Only this
+web-auth named volumes before API or feedback initialization starts, and SHALL
+make existing GeoNames release artifacts readable by the non-root API user. Only this
 initializer may run as root for application-volume ownership changes; long-lived
 services remain non-root. An upgrade MUST NOT require deleting existing volumes
 or making SQLite data world-writable.

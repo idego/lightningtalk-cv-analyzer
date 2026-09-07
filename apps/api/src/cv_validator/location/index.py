@@ -113,6 +113,10 @@ def build_location_index(
     )
     os.close(manifest_fd)
     temporary_manifest = Path(manifest_name)
+    # mkstemp creates 0600 files; the bootstrap runs as a different user than
+    # the API, which only needs read access to the published artifacts.
+    os.chmod(temporary_index, 0o644)
+    os.chmod(temporary_manifest, 0o644)
     try:
         build_stats = _write_streaming_database(
             temporary_index,
