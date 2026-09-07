@@ -209,7 +209,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     analysis_id = _analyze(client, owner_headers, filename="candidate.pdf")
     completed_company_research = {
         "versions": {
-            "research": "company-research-v4",
+            "research": "company-research-v5",
             "prompt": "test-prompt",
             "schema": "test-schema",
         },

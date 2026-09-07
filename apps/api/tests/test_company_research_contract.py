@@ -51,35 +51,41 @@ def test_company_research_accepts_separate_offices_and_optional_comments() -> No
     )
 
 
-@pytest.mark.parametrize(
-    ("period", "reason"),
-    [
-        ({"from": None, "to": None, "ongoing": False, "comment": "No dates."}, "empty_operating_period"),
-        ({"from": "2013", "to": "2020", "ongoing": True, "comment": None}, "contradictory_operating_period"),
-    ],
-)
-def test_company_research_rejects_invalid_operating_periods(period: dict, reason: str) -> None:
+@pytest.mark.parametrize("period", [
+    {"from": None, "to": None, "ongoing": False, "comment": "No dates."},
+    {"from": "2013", "to": "2020", "ongoing": True, "comment": None},
+])
+def test_optional_invalid_period_does_not_discard_sourced_company(period: dict) -> None:
     payload = company_payload()
-    payload["organizations"][0]["operating_periods"] = [period]
+    company = payload["organizations"][0]
+    valid_period = company["operating_periods"][0].copy()
+    company["operating_periods"].append(period)
+    validate_company_research(payload, request=CompanyResearchRequest(({"organization": "Example Systems"},)))
+    assert company["operating_periods"] == [valid_period]
+    assert company["existence"] == "supported"
+    assert company["official_website"] == "https://example.com/"
+    assert company["findings"]
 
-    with pytest.raises(CompanyResearchInvalidResponse) as info:
-        validate_company_research(
-            payload,
-            request=CompanyResearchRequest(({"organization": "Example Systems"},)),
-        )
 
-    assert info.value.reason == reason
-
-
-def test_company_high_confidence_requires_high_confidence_findings() -> None:
+@pytest.mark.parametrize("finding_level", ["medium", "low"])
+def test_overall_confidence_is_lowered_instead_of_discarding_research(finding_level) -> None:
     payload = company_payload()
-    payload["organizations"][0]["confidence"] = "high"
-    payload["organizations"][0]["findings"][0]["confidence"] = "medium"
+    company = payload["organizations"][0]
+    company["confidence"] = "high"
+    company["findings"][0]["confidence"] = finding_level
+    validate_company_research(payload, request=CompanyResearchRequest(({"organization": "Example Systems"},)))
+    assert company["confidence"] == finding_level
+    assert company["existence"] == "supported"
+    assert company["findings"][0]["source_urls"] == ["https://example.com/"]
 
-    with pytest.raises(CompanyResearchInvalidResponse) as info:
-        validate_company_research(
-            payload,
-            request=CompanyResearchRequest(({"organization": "Example Systems"},)),
-        )
 
-    assert info.value.reason == "unsupported_high_confidence"
+def test_missing_evidence_is_still_rejected() -> None:
+    payload = company_payload()
+    payload["organizations"][0]["findings"] = []
+    with pytest.raises(CompanyResearchInvalidResponse, match="claims_without_findings"):
+        validate_company_research(payload, request=CompanyResearchRequest(({"organization": "Example Systems"},)))
+
+
+def test_wrong_subject_is_still_rejected() -> None:
+    with pytest.raises(CompanyResearchInvalidResponse, match="subject_mismatch"):
+        validate_company_research(company_payload(), request=CompanyResearchRequest(({"organization": "Different Company"},)))

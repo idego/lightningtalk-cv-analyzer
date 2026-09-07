@@ -85,6 +85,7 @@ def build_company_research_request(stored_report: dict[str, Any]) -> CompanyRese
 
 
 def validate_company_research(payload: Any, *, request: CompanyResearchRequest) -> None:
+    """Validate evidence/subjects; conservatively normalize optional details in place."""
     schema = json.loads(files("cv_validator.research.contracts").joinpath("company-research.schema.json").read_text())
     errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload))
     if errors:
@@ -94,6 +95,7 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
     if returned != expected or len(returned) != len(payload["organizations"]):
         raise CompanyResearchInvalidResponse("subject_mismatch")
     for organization in payload["organizations"]:
+        _normalize_optional_details(organization, payload["search_limitations"])
         events = organization["lifecycle_events"]
         if len({event["kind"] for event in events}) != len(events):
             raise CompanyResearchInvalidResponse("duplicate_lifecycle_event")
@@ -135,6 +137,34 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
             ):
                 raise CompanyResearchInvalidResponse("limited_presence_contradiction")
 
+
+
+def _normalize_optional_details(organization: dict[str, Any], limitations: list[str]) -> None:
+    """Drop unusable date details and lower confidence without inventing evidence."""
+    levels = {"low": 0, "medium": 1, "high": 2}
+    ceiling = min(
+        (levels[item["confidence"]] for item in organization["findings"]),
+        default=0,
+    )
+    if organization["existence"] == "insufficient_evidence":
+        ceiling = 0
+    if levels[organization["confidence"]] > ceiling:
+        organization["confidence"] = ("low", "medium", "high")[ceiling]
+        note = "Overall confidence was lowered to the level supported by the retained findings."
+        if note not in limitations:
+            limitations.append(note)
+
+    periods = organization["operating_periods"]
+    retained = [
+        period for period in periods
+        if (period["from"] is not None or period["to"] is not None)
+        and not (period["ongoing"] and period["to"] is not None)
+    ]
+    if len(retained) != len(periods):
+        organization["operating_periods"] = retained
+        note = "Empty or contradictory operating periods were omitted; other sourced findings were retained."
+        if note not in limitations:
+            limitations.append(note)
 
 
 def _is_self_employment_label(value: str) -> bool:

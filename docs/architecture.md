@@ -30,6 +30,9 @@ PDF or DOCX upload
   and insufficient evidence. Only a sourced institution conflict creates an attention
   finding; missing research evidence remains a panel status. Older results without
   this assessment remain readable and need fresh research for a new verdict.
+- Company research lowers overstated aggregate confidence and drops empty or
+  contradictory optional operating periods without losing other sourced findings.
+  Subject, schema and evidence validation remain required.
 - Company lifecycle events carry exact public source URLs. Owner-scoped code
   compares high-confidence, unambiguous business bounds with accepted employment
   start dates using date intervals. Unclear continuity, missing evidence and
