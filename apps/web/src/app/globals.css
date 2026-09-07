@@ -327,15 +327,20 @@
 }
 
 /* Profile editing responds to available workspace width, not the window alone. */
-.profile-builder-shell { container: profile-workspace / inline-size; }
-.profile-builder-columns { display: grid; gap: 1rem; align-items: start; }
-.profile-builder-preview { display: none; }
+.profile-builder-shell { container: profile-workspace / inline-size; display: flex; height: 100%; min-height: 0; flex-direction: column; gap: 1rem; }
+#content:has(.profile-builder-shell) { overflow: hidden; }
+#content > main:has(.profile-builder-shell) { min-height: 0; overflow: hidden; padding-block: 1rem; }
+#content:has(.profile-builder-shell) > footer { display: none; }
+.profile-builder-shell > :not(.profile-builder-columns) { flex-shrink: 0; }
+.profile-builder-columns { display: grid; flex: 1; min-height: 0; gap: 1rem; overflow: hidden; }
+.profile-builder-editor { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px 4px 2px 2px; }
+.profile-builder-preview { display: none; min-height: 0; overflow: hidden; }
 [data-workspace-view="preview"] .profile-builder-editor { display: none; }
 [data-workspace-view="preview"] .profile-builder-preview { display: block; }
 @container profile-workspace (min-width: 940px) {
   .profile-builder-columns { grid-template-columns: minmax(0, 1fr) minmax(360px, 0.95fr); }
   .profile-builder-editor, [data-workspace-view="preview"] .profile-builder-editor { display: block; }
-  .profile-builder-preview { display: block; position: sticky; top: 10.5rem; }
+  .profile-builder-preview { display: block; }
   .profile-workspace-switch { display: none; }
 }
 

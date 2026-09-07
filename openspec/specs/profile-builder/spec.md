@@ -232,7 +232,7 @@ Anonymization SHALL be the first editor section. Each section header, including 
 
 The visibility presets SHALL be labeled Hide all and Show all within Anonymization, preserving their selected-identifying-field scope and the free-text review explanation. Employer names SHALL offer Show or Hide only; legacy company-category policies SHALL migrate to Hide without removing canonical employer data. Company category SHALL not be an editor field. Current employment SHALL be edited through the End field using Present, with preview and exports preserving that state.
 
-Back SHALL use the same toolbar position and control as Analyze, flush pending saves, and return to the upload workflow. Download SHALL offer PDF and DOCX in a menu, disabling only unavailable formats. Custom fields SHALL state that they are configurable in Settings.
+Back SHALL appear beside the current profile name, flush pending saves, and return to the upload workflow. Download SHALL offer PDF and DOCX in a menu, disabling only unavailable formats. Custom fields SHALL state that they are configurable in Settings.
 
 ### Requirement: Stable PDF and template panels
 PDF page rendering SHALL reserve stable layout space and scrollbar width while loading or resizing, so completing a render cannot trigger an endless resize/render cycle. Changing the profile or output visibility SHALL still hide the stale PDF immediately.
@@ -256,3 +256,13 @@ Template Creator SHALL omit redundant preview captions, layout-guide footnotes, 
 Profile Builder SHALL use the shared application confirmation dialog for discarding template changes and destructive editor actions. Confirmed template navigation SHALL clear the unsaved-change guard before routing; cancellation SHALL preserve edits and remain on the current screen. Browser-native unload protection MAY remain for closing or reloading the tab.
 
 The upload screen SHALL place a short three-point explanation with icons beside the upload card on desktop and below it on smaller screens, replacing the standalone introductory paragraph.
+
+
+### Requirement: Understandable personal preferences
+Personal conversion preferences SHALL be accessed through My preferences in Profile Builder, separately from team-wide custom fields in Settings. Scope SHALL be stated concisely. Personal controls SHALL include template selection with an optional sample preview, date examples, optional summary, collapsible anonymization, and filename presets with an example using the same formatter and visibility rules as downloads. Advanced filename rules and technology aggregation SHALL remain available under More options. Existing custom patterns SHALL be preserved unless changed. Saving preferences SHALL update subsequent conversions without reloading; dismissing unsaved edits SHALL require confirmation.
+
+
+### Requirement: Fixed profile editing workspace
+An open profile SHALL fill the available viewport below the application header without scrolling the outer page. The profile toolbar SHALL remain visible. Editor sections and document preview SHALL scroll independently within the remaining height. Narrow layouts SHALL retain the Edit profile and Document preview switch with scrolling inside the selected panel.
+
+The document preview SHALL combine its title, page navigation, and zoom controls in one toolbar without a PDF/A4 caption. Initial zoom and Fit page SHALL fit the complete page within both available width and height; users MAY zoom in and scroll.

@@ -48,14 +48,13 @@ export function ProfileExportPreview({ snapshot, pdfAvailable }: { snapshot: Pro
     };
   }, [serialized, requestKey, pdfAvailable, visible, result]);
 
-  if (!pdfAvailable) return <ProfileDocumentPreview profile={derivedPresentation(snapshot.profile, snapshot.anonymization)} template={snapshot.template} label="Layout preview · PDF preview unavailable" />;
+  if (!pdfAvailable) return <div className="h-full min-h-0 overflow-auto overscroll-contain"><ProfileDocumentPreview profile={derivedPresentation(snapshot.profile, snapshot.anonymization)} template={snapshot.template} label="Layout preview · PDF preview unavailable" /></div>;
 
-  return <section ref={hostRef} className="flex h-[calc(100svh-13rem)] min-h-96 min-w-0 flex-col overflow-hidden rounded-xl border bg-card" aria-label="Document preview">
-    <header className="flex min-h-11 shrink-0 items-center gap-2 border-b px-3 py-2">
+  return <section ref={hostRef} className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-card" aria-label="Document preview">
+    {!current?.url ? <header className="flex min-h-11 shrink-0 items-center gap-2 border-b px-3 py-2">
       <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <h2 className="text-sm font-medium">Document preview</h2>
-      <span className="ml-auto text-xs text-muted-foreground">PDF · A4</span>
-    </header>
+    </header> : null}
     <div className="relative min-h-0 flex-1 bg-muted/25">
       {current?.url ? <ProfilePdfPage key={current.url} url={current.url} /> : current?.failed ? <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 px-5 text-center text-sm">
         <p>Preview could not be generated. Your edits are still here; retry or download DOCX.</p>

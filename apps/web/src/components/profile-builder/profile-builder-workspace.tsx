@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
+  ArrowLeft,
   ChevronDown,
   Check,
   ChevronUp,
@@ -23,7 +24,8 @@ import {
   Building2, CalendarDays, GraduationCap, Award, FileText, ListChecks,
   Code2, FolderOpen, Shield, Settings2, type LucideIcon,
 } from "lucide-react";
-import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
+import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
+import { profileFilename } from "@/components/profile-builder/profile-filename";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { useConfirmation } from "@/components/ui/use-confirmation";
@@ -265,6 +267,8 @@ function TemplateManagerDialog({
 export function ProfileBuilderWorkspace() {
   const { confirm, confirmationDialog } = useConfirmation();
   const settings = useAppSettings();
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
   const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
   const [pdfAvailable, setPdfAvailable] = useState(false);
@@ -891,20 +895,7 @@ export function ProfileBuilderWorkspace() {
     const exported = derivedPresentation(snapshot.profile, snapshot.anonymization);
     const first = exported.personal.first_name?.trim() ?? "";
     const last = exported.personal.last_name?.trim() ?? "";
-    const name = [first, last].filter(Boolean).join(" ") || "candidate";
-    const today = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    const rendered = profileBuilderPreferences.filename_pattern
-      .replaceAll("{name}", name)
-      .replaceAll("{first_name}", first)
-      .replaceAll("{last_name}", last)
-      .replaceAll("{template}", snapshot.template.name)
-      .replaceAll("{date}", today)
-      .replace(/[^\p{L}\p{N}._ -]+/gu, "-")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^[._-]+|[._-]+$/g, "")
-      .toLowerCase();
-    return `${rendered || "candidate-profile"}.${extension}`;
+    return profileFilename(profileBuilderPreferences.filename_pattern, first, last, snapshot.template.name, extension);
   }
 
   async function exportProfile(format: "docx" | "pdf") {
@@ -978,10 +969,28 @@ export function ProfileBuilderWorkspace() {
     return (
       <div className="mx-auto max-w-5xl space-y-6">
         {confirmationDialog}
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
+        <Dialog open={preferencesOpen} onOpenChange={(open) => {
+          if (open) { setPreferencesOpen(true); return; }
+          void (async () => {
+            if (preferencesDirty && !await confirm("Your preferences have not been saved.", { title: "Discard changes?", action: "Discard changes" })) return;
+            setPreferencesDirty(false);
+            setPreferencesOpen(false);
+          })();
+        }}>
+          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader><DialogTitle>My preferences</DialogTitle><DialogDescription className="sr-only">Personal settings for new profiles</DialogDescription></DialogHeader>
+            {preferencesOpen ? <ProfileBuilderSettings scope="personal" onDirtyChange={setPreferencesDirty} onSaved={(saved) => {
+              setProfileBuilderPreferences(saved);
+              templateSelectionLockedRef.current = false;
+              void refreshTemplates(saved.default_template_id);
+            }} /> : null}
+          </DialogContent>
+        </Dialog>
+        <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
         <Card>
           <CardHeader>
             <CardTitle>Upload candidate CV</CardTitle>
+            <CardAction><Button variant="outline" size="sm" onClick={() => setPreferencesOpen(true)}><Settings2 />My preferences</Button></CardAction>
           </CardHeader>
           <CardContent>
             <CvUploadDropzone
@@ -1024,11 +1033,11 @@ export function ProfileBuilderWorkspace() {
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Prepare CVs for clients</CardTitle></CardHeader>
+          <CardHeader><CardTitle>What this is for</CardTitle></CardHeader>
           <CardContent>
             <ul className="space-y-4 text-sm">
               <li className="flex items-start gap-3"><Pencil className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Turn a CV into an editable profile.</span></li>
-              <li className="flex items-start gap-3"><Shield className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Hide selected personal details.</span></li>
+              <li className="flex items-start gap-3"><Shield className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Anonymize CVs by hiding selected personal details.</span></li>
               <li className="flex items-start gap-3"><Download className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Export in your template as DOCX or PDF.</span></li>
             </ul>
           </CardContent>
@@ -1100,11 +1109,11 @@ export function ProfileBuilderWorkspace() {
   const candidateName = [profile.personal.first_name, profile.personal.last_name].filter(Boolean).join(" ");
 
   return (
-    <div className="profile-builder-shell mx-auto w-full max-w-[1800px] space-y-4" data-workspace-view={workspaceView}>
+    <div className="profile-builder-shell mx-auto w-full max-w-[1800px]" data-workspace-view={workspaceView}>
       {confirmationDialog}
-      <PageBackToolbar onBack={() => void reset()} />
-      <div className="sticky top-14 z-20 flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-3 shadow-sm">
-        <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-3 shadow-sm">
+        <Button variant="outline" className="shrink-0 border-foreground/25" onClick={() => void reset()}><ArrowLeft />Back</Button>
+        <div className="min-w-0 flex-1">
           <h1 className="text-base font-semibold">{candidateName || "Candidate profile"}</h1>
           <p className="max-w-64 truncate text-xs text-muted-foreground" title={sourceFilename ?? undefined}>{sourceFilename}</p>
           <p className="text-xs text-muted-foreground">
