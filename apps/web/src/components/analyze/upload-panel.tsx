@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, CircleAlert, Clock3, LoaderCircle, X, UploadCloud } from "lucide-react";
+import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
+import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
@@ -13,7 +14,6 @@ import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
-const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
 const COMPLETE_CARD_MS = 1200;
 const CANCELLED_STATUS = 409;
@@ -138,7 +138,6 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
 
   const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
   const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
-  function onFilesSelected(list: FileList | null) { if (list) store.enqueue(Array.from(list)); }
 
   function analysisErrorMessage(detail: unknown) {
     if (detail === "document_text_layer_unavailable") return t("cvNeedsTextLayer");
@@ -228,15 +227,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     {batch ? <AnalysisProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancel} /> : <Card>
       <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <label
-          className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/15 p-5 text-center outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}
-        >
-          <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
-          <UploadCloud className="mb-2 size-5 text-muted-foreground" aria-hidden />
-          <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
-        </label>
+        <CvUploadDropzone label={t("drop")} hint={t("accepted")} onFilesSelected={(files) => store.enqueue(files)} />
         {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
         {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset} disabled={!files.length}>{t("reset")}</Button></div>

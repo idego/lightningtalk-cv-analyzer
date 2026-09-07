@@ -87,3 +87,7 @@ Profile Builder accounting SHALL use independent random accounting identifiers w
 
 ### Requirement: Prompt-cache write accounting
 Usage normalization SHALL distinguish cached reads and provider-reported cache-write input tokens, bounded by total input without double counting. The shared pricing catalog SHALL support a cache-write input rate, falling back to the ordinary input rate when absent. The immutable ledger and deployment/per-operation summaries SHALL retain cache-write counts; historical rows SHALL default to zero and SHALL not be repriced. Analyzer passes, research categories, and Profile Builder operations SHALL provide stable prompt-cache keys without placing candidate content or access tokens in those keys.
+
+
+### Requirement: Consistent two-click deletion
+Analysis history, recent profiles, the profiles catalog, and feedback items SHALL use a shared delete button. Its default icon SHALL use foreground color, becoming destructive on hover or confirmation. The first activation SHALL show a localized second-click hint and briefly shake the icon; reduced-motion preference SHALL disable that animation. The second activation SHALL delete, with duplicate clicks disabled while pending. Blur or Escape SHALL cancel confirmation.

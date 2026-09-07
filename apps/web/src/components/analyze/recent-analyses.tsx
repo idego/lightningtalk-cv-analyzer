@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, History, LoaderCircle, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import { searchAnalysisHistory } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
@@ -115,14 +116,8 @@ function AnalysisHistoryRow({
   onRemove: (item: AnalysisHistoryItem) => Promise<void>;
 }) {
   const { settings, t } = useCopy();
-  const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   async function requestRemove() {
-    if (!confirmRemove) {
-      setConfirmRemove(true);
-      return;
-    }
-    setConfirmRemove(false);
     setRemoving(true);
     try {
       await onRemove(item);
@@ -135,20 +130,6 @@ function AnalysisHistoryRow({
       <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
-    <div className="relative">
-      <Button
-        variant={confirmRemove ? "destructive" : "ghost"}
-        size="icon"
-        className={`size-8 shrink-0 ${confirmRemove ? "" : "text-destructive hover:bg-destructive/10 hover:text-destructive"}`}
-        disabled={openingId !== null || removing}
-        onBlur={() => { if (!removing) setConfirmRemove(false); }}
-        onKeyDown={(event) => { if (event.key === "Escape") setConfirmRemove(false); }}
-        onClick={() => void requestRemove()}
-        aria-label={t(confirmRemove ? "clickAgainToConfirm" : "deleteAnalysis")}
-      >
-        {removing ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-      </Button>
-      {confirmRemove ? <span role="status" className="absolute right-0 top-full z-20 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md">{t("clickAgainToConfirm")}</span> : null}
-    </div>
+    <DeleteButton label={t("deleteAnalysis")} disabled={openingId !== null || removing} onDelete={requestRemove} />
   </li>;
 }

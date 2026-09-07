@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { LoaderCircle, Search, Trash2, UserRoundPen, X } from "lucide-react";
+import { LoaderCircle, Search, UserRoundPen, X } from "lucide-react";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,6 @@ export function ProfilesCatalog() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -46,7 +46,6 @@ export function ProfilesCatalog() {
 
   async function deleteProfile(profile: RecentProfileItem) {
     if (deletingId) return;
-    if (confirmDelete !== profile.profile_id) { setConfirmDelete(profile.profile_id); return; }
     setDeletingId(profile.profile_id);
     setError(null);
     try {
@@ -54,7 +53,7 @@ export function ProfilesCatalog() {
       setProfiles((current) => current.filter((item) => item.profile_id !== profile.profile_id));
     } catch {
       setError("Profile could not be deleted.");
-    } finally { setDeletingId(null); setConfirmDelete(null); }
+    } finally { setDeletingId(null); }
   }
 
   return (
@@ -81,9 +80,7 @@ export function ProfilesCatalog() {
               <span className="self-center truncate text-xs text-muted-foreground">{profile.template_name}</span>
               <time dateTime={profile.updated_at} className="self-center text-xs text-muted-foreground">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(profile.updated_at))}</time>
             </Link>
-            <Button variant={confirmDelete === profile.profile_id ? "destructive" : "ghost"} size="sm" disabled={deletingId !== null} aria-label={`Delete ${profile.candidate_name ?? profile.source_filename}`} onBlur={() => setConfirmDelete(null)} onKeyDown={(event) => { if (event.key === "Escape") setConfirmDelete(null); }} onClick={() => void deleteProfile(profile)}>
-              {deletingId === profile.profile_id ? <LoaderCircle className="animate-spin" /> : <Trash2 />}{confirmDelete === profile.profile_id ? "Confirm" : null}
-            </Button>
+            <DeleteButton label={`Delete ${profile.candidate_name ?? profile.source_filename}`} disabled={deletingId !== null} onDelete={() => deleteProfile(profile)} />
           </li>
         ))}</ul> : null}
       </div>

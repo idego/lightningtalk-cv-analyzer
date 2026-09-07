@@ -19,13 +19,15 @@ import {
   Languages,
   WandSparkles,
   Trash2,
-  Upload,
   UserRound, Mail, Phone, MapPin, Link as LinkIcon, BriefcaseBusiness,
   Building2, CalendarDays, GraduationCap, Award, FileText, ListChecks,
   Code2, FolderOpen, Shield, Settings2, type LucideIcon,
 } from "lucide-react";
 import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
+import { useConfirmation } from "@/components/ui/use-confirmation";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -87,7 +89,6 @@ import {
   updateProfile as apiUpdateProfile,
 } from "@/components/profile-builder/profile-builder-client";
 
-const ACCEPT = ".pdf,.docx";
 const PROFILE_BUILDER_MAX_BYTES = 10 * 1024 * 1024;
 
 type EditorSectionId = "personal" | "profile" | "anonymization" | "experience" | "education"
@@ -114,13 +115,13 @@ function LabelIcon({ label }: { label: string }) {
 function EditorSectionHeader({ label, description, open, onToggle, action }: {
   label: string; description?: string; open: boolean; onToggle: () => void; action?: ReactNode;
 }) {
-  return <CardHeader className="relative">
-    <CardTitle><button type="button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${label}`} onClick={onToggle}
-      className="flex items-center gap-2 text-left outline-none after:absolute after:inset-0 after:rounded-lg hover:text-primary focus-visible:after:ring-2 focus-visible:after:ring-ring">
+  return <CardHeader className="relative items-center">
+    <CardTitle className="flex min-h-8 items-center"><button type="button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${label}`} onClick={onToggle}
+      className="flex cursor-pointer items-center gap-2 text-left outline-none after:absolute after:inset-x-0 after:-inset-y-4 after:cursor-pointer after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-ring">
       <LabelIcon label={label} />{label}
     </button></CardTitle>
     {description ? <CardDescription className="pointer-events-none">{description}</CardDescription> : null}
-    <CardAction><div className="flex items-center gap-2"><div className="relative z-10">{action}</div>
+    <CardAction className={description ? "self-center" : "row-span-1 self-center"}><div className="flex items-center gap-2"><div className="relative z-10">{action}</div>
       {open ? <ChevronUp className="pointer-events-none size-4" aria-hidden /> : <ChevronDown className="pointer-events-none size-4" aria-hidden />}
     </div></CardAction>
   </CardHeader>;
@@ -238,7 +239,7 @@ function TemplateManagerDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Templates</DialogTitle>
-          <DialogDescription>Choose the layout used for preview and export, or open the Template Creator.</DialogDescription>
+          <DialogDescription>Choose or edit a template.</DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
           {items.map((item) => {
@@ -262,15 +263,18 @@ function TemplateManagerDialog({
 }
 
 export function ProfileBuilderWorkspace() {
+  const { confirm, confirmationDialog } = useConfirmation();
   const settings = useAppSettings();
   const [aiAvailable, setAiAvailable] = useState(false);
+  const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
   const [pdfAvailable, setPdfAvailable] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/health", { signal: controller.signal, cache: "no-store" })
       .then(async (response) => { if (!response.ok) throw new Error("health unavailable"); return response.json(); })
       .then((health) => { setAiAvailable(health.capabilities?.profile_builder?.ready === true); setPdfAvailable(health.capabilities?.profile_pdf_export?.ready === true); })
-      .catch(() => { /* Editing and DOCX export remain usable without AI. */ });
+      .catch(() => { /* Editing and DOCX export remain usable without AI. */ })
+      .finally(() => { if (!controller.signal.aborted) setAvailabilityLoaded(true); });
     return () => controller.abort();
   }, []);
   const router = useRouter();
@@ -704,7 +708,6 @@ export function ProfileBuilderWorkspace() {
 
 
   async function deleteRecentProfile(item: RecentProfileItem) {
-    if (!window.confirm(`Delete ${item.candidate_name ?? item.source_filename}?`)) return;
     try {
       await apiDeleteProfile(item.profile_id);
       setRecentProfiles((current) => current.filter((profileItem) => profileItem.profile_id !== item.profile_id));
@@ -743,7 +746,7 @@ export function ProfileBuilderWorkspace() {
         : item.template.visibility === "shared"
           ? `Delete shared template ${item.template.name} for the entire internal team?`
           : `Delete private template ${item.template.name}?`;
-    if (!window.confirm(action)) return;
+    if (!await confirm(action)) return;
     try {
       await apiDeleteTemplate(item.template.id);
     } catch {
@@ -974,60 +977,27 @@ export function ProfileBuilderWorkspace() {
   if (!profile || !presentation) {
     return (
       <div className="mx-auto max-w-5xl space-y-6">
-        <div className="space-y-2">
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Turn CVs into editable, client-ready profiles. Review details, choose what to hide, then download DOCX or PDF.
-          </p>
-        </div>
+        {confirmationDialog}
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
         <Card>
           <CardHeader>
             <CardTitle>Upload candidate CV</CardTitle>
-            <CardDescription>PDF or DOCX · up to 10 files · 10 MB each.</CardDescription>
           </CardHeader>
           <CardContent>
-            <label
-              role="button"
-              tabIndex={extracting || batchRunning || !aiAvailable || !profileBuilderReady ? -1 : 0}
-              aria-label="Upload and convert CVs"
-              aria-disabled={extracting || batchRunning || !aiAvailable || !profileBuilderReady}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                if (!extracting && !batchRunning && aiAvailable && profileBuilderReady) event.currentTarget.querySelector<HTMLInputElement>("input[type=file]")?.click();
-              }}
-              className="flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 outline-none focus-visible:ring-2 focus-visible:ring-ring bg-muted/20 p-8 text-center transition-colors hover:bg-muted/35"
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (extracting || batchRunning || !profileBuilderReady) return;
-                queueFiles(Array.from(event.dataTransfer.files));
-              }}
+            <CvUploadDropzone
+              label={extracting ? "Extracting candidate profile…" : batchRunning ? "Batch conversion in progress…" : "Drag and drop files here, or click to select"}
+              hint="PDF or DOCX · up to 10 files · 10 MB each"
+              disabled={extracting || batchRunning || !aiAvailable || !profileBuilderReady}
+              busy={extracting || batchRunning}
+              keyboardActivation
+              onFilesSelected={queueFiles}
             >
-              <input
-                type="file"
-                accept={ACCEPT}
-                multiple
-                className="hidden"
-                disabled={extracting || batchRunning || !aiAvailable || !profileBuilderReady}
-                onChange={(event) => {
-                  const files = Array.from(event.target.files ?? []);
-                  if (files.length) queueFiles(files);
-                  event.target.value = "";
-                }}
-              />
-              {extracting ? (
-                <LoaderCircle className="mb-4 size-9 animate-spin text-primary" />
-              ) : (
-                <Upload className="mb-4 size-9 text-primary" />
-              )}
-              <p className="font-medium">{!profileBuilderReady ? "Loading conversion defaults…" : extracting ? "Extracting candidate profile…" : batchRunning ? "Batch conversion in progress…" : "Drop CVs here or click to select"}</p>
-              <p className="mt-1 text-xs text-muted-foreground">Accepted: PDF, DOCX · maximum 10 files · 10 MB each</p>
-              {!aiAvailable ? (
+              {availabilityLoaded && !aiAvailable ? (
                 <p className="mt-3 text-xs font-medium text-amber-700 dark:text-amber-400">
                   CV conversion is unavailable. Saved profiles can still be edited and exported.
                 </p>
               ) : null}
-            </label>
+            </CvUploadDropzone>
             {batchItems.length ? <div className="mt-4 overflow-hidden rounded-xl border">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
                 <div><p className="text-sm font-medium">Batch conversion · {batchItems.length} CVs</p><p className="text-xs text-muted-foreground">Each successful CV becomes its own saved profile.</p></div>
@@ -1053,6 +1023,17 @@ export function ProfileBuilderWorkspace() {
             ) : null}
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader><CardTitle>Prepare CVs for clients</CardTitle></CardHeader>
+          <CardContent>
+            <ul className="space-y-4 text-sm">
+              <li className="flex items-start gap-3"><Pencil className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Turn a CV into an editable profile.</span></li>
+              <li className="flex items-start gap-3"><Shield className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Hide selected personal details.</span></li>
+              <li className="flex items-start gap-3"><Download className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden /><span>Export in your template as DOCX or PDF.</span></li>
+            </ul>
+          </CardContent>
+        </Card>
+        </div>
 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
           <section className="overflow-hidden rounded-xl border bg-card">
@@ -1060,7 +1041,6 @@ export function ProfileBuilderWorkspace() {
               <History className="size-4" />
               <div className="min-w-0 flex-1">
                 <h2 className="font-medium">Recent profiles</h2>
-                <p className="text-xs text-muted-foreground">Continue editing a saved profile.</p>
               </div>
               <Button variant="outline" className="border-foreground/25" size="sm" nativeButton={false} render={<Link href="/profiles" />}>View all</Button>
             </div>
@@ -1080,7 +1060,7 @@ export function ProfileBuilderWorkspace() {
                   </span>
                 </button>
                 {openingProfileId === item.profile_id ? <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
-                <Button variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`Delete ${item.candidate_name ?? item.source_filename}`} onClick={() => void deleteRecentProfile(item)}><Trash2 className="size-4" /></Button>
+                <DeleteButton label={`Delete ${item.candidate_name ?? item.source_filename}`} disabled={openingProfileId !== null} onDelete={() => deleteRecentProfile(item)} />
               </li>
             ))}</ul> : null}
           </section>
@@ -1088,7 +1068,7 @@ export function ProfileBuilderWorkspace() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><LayoutTemplate className="size-4" />Current template</CardTitle>
-              <CardDescription>Used for the next CV and carried with every saved profile.</CardDescription>
+              <CardDescription>Used for new CVs and saved with each profile.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-xl border bg-muted/20 p-4">
@@ -1121,6 +1101,7 @@ export function ProfileBuilderWorkspace() {
 
   return (
     <div className="profile-builder-shell mx-auto w-full max-w-[1800px] space-y-4" data-workspace-view={workspaceView}>
+      {confirmationDialog}
       <PageBackToolbar onBack={() => void reset()} />
       <div className="sticky top-14 z-20 flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-3 shadow-sm">
         <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
@@ -1238,12 +1219,12 @@ export function ProfileBuilderWorkspace() {
       <div className="profile-builder-columns">
         <div className="profile-builder-editor min-w-0 space-y-3">
           <Card>
-            <EditorSectionHeader label="Anonymization" open={sectionIsOpen("anonymization")} onToggle={() => toggleSection("anonymization")} description="Choose which identifying fields appear in the document. Your original details stay saved." />
+            <EditorSectionHeader label="Anonymization" open={sectionIsOpen("anonymization")} onToggle={() => toggleSection("anonymization")} description="Hide details in the document. Originals stay saved." />
             {sectionIsOpen("anonymization") ? <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/45 px-3 py-2">
                 <div>
                   <p className="text-sm font-medium">Visibility preset</p>
-                  <p className="text-xs text-muted-foreground">Review descriptions and custom fields too: these controls hide selected fields, not every mention of a name.</p>
+                  <p className="text-xs text-muted-foreground">Also check descriptions and custom fields for names.</p>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button variant="outline" size="sm" onClick={() => setAnonymization(DEFAULT_ANONYMIZATION)}>
@@ -1289,7 +1270,7 @@ export function ProfileBuilderWorkspace() {
           </Card>
 
           <Card>
-            <EditorSectionHeader label="Personal information" open={sectionIsOpen("personal")} onToggle={() => toggleSection("personal")} description="Original contact details. Use Anonymization to choose what appears in the document." />
+            <EditorSectionHeader label="Personal information" open={sectionIsOpen("personal")} onToggle={() => toggleSection("personal")} />
             {sectionIsOpen("personal") ? <CardContent className="grid gap-3 sm:grid-cols-2">
               <Field label="First name" value={profile.personal.first_name} onChange={(value) => mutate((draft) => { draft.personal.first_name = value; })} />
               <Field label="Last name" value={profile.personal.last_name} onChange={(value) => mutate((draft) => { draft.personal.last_name = value; })} />
@@ -1327,7 +1308,7 @@ export function ProfileBuilderWorkspace() {
                 <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4" />AI Summary</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">Write a short summary from the professional experience in this profile.</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Based on this profile’s experience.</p>
                   </div>
                   <Button
                     variant={profile.summary ? "outline" : "default"}
@@ -1369,7 +1350,7 @@ export function ProfileBuilderWorkspace() {
                 <div key={entry.id} className="space-y-3 rounded-xl border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="truncate text-sm font-medium">{entry.role || entry.company || `Experience ${index + 1}`}</p>
-                    <Button variant="ghost" size="icon-sm" aria-label="Remove experience" onClick={() => { if (window.confirm("Remove this experience entry from the saved profile?")) mutate((draft) => { draft.experience.splice(index, 1); }); }}><Trash2 /></Button>
+                    <Button variant="ghost" size="icon-sm" aria-label="Remove experience" onClick={async () => { if (await confirm("Remove this experience entry from the saved profile?")) mutate((draft) => { draft.experience.splice(index, 1); }); }}><Trash2 /></Button>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Role" value={entry.role} onChange={(value) => mutate((draft) => { draft.experience[index].role = value; })} />
@@ -1387,7 +1368,7 @@ export function ProfileBuilderWorkspace() {
                   <TextareaField label="Achievements" value={entry.achievements.join("\n")} rows={3} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.experience[index].achievements = nonEmptyLines(value); })} />
                   <TextareaField label="Technologies" value={entry.technologies.join("\n")} rows={3} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.experience[index].technologies = nonEmptyLines(value); })} />
                 </div>
-              )) : <p className="text-sm text-muted-foreground">No experience entries extracted.</p>}
+              )) : <p className="text-sm text-muted-foreground">No experience added.</p>}
             </CardContent> : null}
           </Card>
 
@@ -1398,7 +1379,7 @@ export function ProfileBuilderWorkspace() {
                 <div key={entry.id} className="space-y-3 rounded-xl border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="truncate text-sm font-medium">{entry.institution || entry.degree || `Education ${index + 1}`}</p>
-                    <Button variant="ghost" size="icon-sm" aria-label="Remove education" onClick={() => { if (window.confirm("Remove this education entry from the saved profile?")) mutate((draft) => { draft.education.splice(index, 1); }); }}><Trash2 /></Button>
+                    <Button variant="ghost" size="icon-sm" aria-label="Remove education" onClick={async () => { if (await confirm("Remove this education entry from the saved profile?")) mutate((draft) => { draft.education.splice(index, 1); }); }}><Trash2 /></Button>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Institution" value={entry.institution} onChange={(value) => mutate((draft) => { draft.education[index].institution = value; })} />
@@ -1410,7 +1391,7 @@ export function ProfileBuilderWorkspace() {
                   </div>
                   <TextareaField label="Description" value={entry.description ?? ""} rows={3} onChange={(value) => mutate((draft) => { draft.education[index].description = value || null; })} />
                 </div>
-              )) : <p className="text-sm text-muted-foreground">No education entries extracted.</p>}
+              )) : <p className="text-sm text-muted-foreground">No education added.</p>}
             </CardContent> : null}
           </Card>
 
@@ -1422,7 +1403,7 @@ export function ProfileBuilderWorkspace() {
                   <div key={entry.id} className="grid grid-cols-[1fr_0.7fr_auto] gap-2">
                     <Input aria-label={`Language ${index + 1}`} value={entry.language} placeholder="Language" onChange={(event) => mutate((draft) => { draft.languages[index].language = event.target.value; })} />
                     <Input aria-label={`Language ${index + 1} level`} value={entry.level ?? ""} placeholder="Level" onChange={(event) => mutate((draft) => { draft.languages[index].level = event.target.value || null; })} />
-                    <Button variant="ghost" size="icon" aria-label="Remove language" onClick={() => { if (window.confirm("Remove this language from the saved profile?")) mutate((draft) => { draft.languages.splice(index, 1); }); }}><Trash2 /></Button>
+                    <Button variant="ghost" size="icon" aria-label="Remove language" onClick={async () => { if (await confirm("Remove this language from the saved profile?")) mutate((draft) => { draft.languages.splice(index, 1); }); }}><Trash2 /></Button>
                   </div>
                 ))}
               </CardContent> : null}
@@ -1433,7 +1414,7 @@ export function ProfileBuilderWorkspace() {
               {sectionIsOpen("certifications") ? <CardContent className="space-y-3">
                 {profile.certifications.map((entry, index) => (
                   <div key={entry.id} className="space-y-2 rounded-lg border p-3">
-                    <div className="grid grid-cols-[1fr_auto] gap-2"><Input aria-label={`Certification ${index + 1} name`} value={entry.name} placeholder="Certification" onChange={(event) => mutate((draft) => { draft.certifications[index].name = event.target.value; })} /><Button variant="ghost" size="icon" aria-label="Remove certification" onClick={() => { if (window.confirm("Remove this certification from the saved profile?")) mutate((draft) => { draft.certifications.splice(index, 1); }); }}><Trash2 /></Button></div>
+                    <div className="grid grid-cols-[1fr_auto] gap-2"><Input aria-label={`Certification ${index + 1} name`} value={entry.name} placeholder="Certification" onChange={(event) => mutate((draft) => { draft.certifications[index].name = event.target.value; })} /><Button variant="ghost" size="icon" aria-label="Remove certification" onClick={async () => { if (await confirm("Remove this certification from the saved profile?")) mutate((draft) => { draft.certifications.splice(index, 1); }); }}><Trash2 /></Button></div>
                     <div className="grid grid-cols-2 gap-2"><Input aria-label={`Certification ${index + 1} issuer`} value={entry.issuer ?? ""} placeholder="Issuer" onChange={(event) => mutate((draft) => { draft.certifications[index].issuer = event.target.value || null; })} /><Input aria-label={`Certification ${index + 1} date`} value={entry.date ?? ""} placeholder="Date" onChange={(event) => mutate((draft) => { draft.certifications[index].date = event.target.value || null; })} /></div>
                     <Input aria-label={`Certification ${index + 1} URL`} value={entry.url ?? ""} placeholder="URL" onChange={(event) => mutate((draft) => { draft.certifications[index].url = event.target.value || null; })} />
                   </div>
@@ -1447,7 +1428,7 @@ export function ProfileBuilderWorkspace() {
             {sectionIsOpen("additional") ? <CardContent className="space-y-3">
               {profile.additional_sections.map((section, index) => (
                 <div key={section.id} className="space-y-2 rounded-lg border p-3">
-                  <div className="grid grid-cols-[1fr_auto] gap-2"><Input aria-label={`Additional section ${index + 1} title`} value={section.title} onChange={(event) => mutate((draft) => { draft.additional_sections[index].title = event.target.value; })} /><Button variant="ghost" size="icon" aria-label="Remove section" onClick={() => { if (window.confirm("Remove this additional section from the saved profile?")) mutate((draft) => { draft.additional_sections.splice(index, 1); }); }}><Trash2 /></Button></div>
+                  <div className="grid grid-cols-[1fr_auto] gap-2"><Input aria-label={`Additional section ${index + 1} title`} value={section.title} onChange={(event) => mutate((draft) => { draft.additional_sections[index].title = event.target.value; })} /><Button variant="ghost" size="icon" aria-label="Remove section" onClick={async () => { if (await confirm("Remove this additional section from the saved profile?")) mutate((draft) => { draft.additional_sections.splice(index, 1); }); }}><Trash2 /></Button></div>
                   <TextareaField label="Items" value={section.items.join("\n")} rows={4} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.additional_sections[index].items = nonEmptyLines(value); })} />
                 </div>
               ))}
@@ -1477,7 +1458,7 @@ export function ProfileBuilderWorkspace() {
                     })}
                   />}
                 </div>
-              )) : <p className="text-sm text-muted-foreground sm:col-span-2">No organization custom fields are configured.</p>}
+              )) : <p className="text-sm text-muted-foreground sm:col-span-2">No custom fields. Add them in Settings.</p>}
             </CardContent> : null}
           </Card>
         </div>

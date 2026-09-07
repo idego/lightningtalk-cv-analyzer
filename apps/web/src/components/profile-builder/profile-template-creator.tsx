@@ -13,6 +13,7 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
+import { useConfirmation } from "@/components/ui/use-confirmation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -193,6 +194,8 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("template");
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const { confirm, confirmationDialog } = useConfirmation();
+  const exitApproved = useRef(false);
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,6 +227,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
   useEffect(() => {
     if (!dirty) return;
     const preventUnload = (event: BeforeUnloadEvent) => {
+      if (exitApproved.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -231,12 +235,23 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
       const link = (event.target as Element).closest("a[href]");
       if (!link || link.getAttribute("target") === "_blank") return;
-      if (!window.confirm("Discard unsaved template changes?")) { event.preventDefault(); event.stopPropagation(); }
+      if (exitApproved.current || link.hasAttribute("download")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const href = (link as HTMLAnchorElement).href;
+      void confirm("Your template changes will be lost.", { title: "Discard changes?", action: "Discard and leave" }).then((approved) => {
+        if (!approved) return;
+        exitApproved.current = true;
+        setDirty(false);
+        const destination = new URL(href);
+        if (destination.origin === window.location.origin) router.push(destination.pathname + destination.search + destination.hash);
+        else window.location.assign(href);
+      });
     };
     window.addEventListener("beforeunload", preventUnload);
     document.addEventListener("click", guardLink, true);
     return () => { window.removeEventListener("beforeunload", preventUnload); document.removeEventListener("click", guardLink, true); };
-  }, [dirty]);
+  }, [dirty, confirm, router]);
 
   const selectedIndex = template.sections.findIndex((section) => section.id === selectedSectionId);
   const selectedSection = selectedIndex >= 0 ? template.sections[selectedIndex] : null;
@@ -304,8 +319,10 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
     setInspectorTab("block");
   }
 
-  function leaveCreator() {
-    if (dirty && !window.confirm("Discard unsaved template changes?")) return;
+  async function leaveCreator() {
+    if (dirty && !await confirm("Your template changes will be lost.", { title: "Discard changes?", action: "Discard and leave" })) return;
+    exitApproved.current = true;
+    setDirty(false);
     router.push(returnProfileId ? `/profile-builder?profile=${encodeURIComponent(returnProfileId)}` : "/profile-builder");
   }
 
@@ -395,6 +412,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         }
       }
 
+      exitApproved.current = true;
       setDirty(false);
       router.push(returnProfileId ? `/profile-builder?profile=${encodeURIComponent(returnProfileId)}` : "/profile-builder");
     } catch {
@@ -411,13 +429,14 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
 
   return (
     <div className="profile-creator-shell flex h-full min-h-0 w-full flex-col gap-3 overflow-hidden" data-creator-pane={workspacePane}>
+      {confirmationDialog}
       <div className="flex min-h-16 shrink-0 items-center gap-2 rounded-xl border bg-card px-3 py-2">
         <Button variant="ghost" size="sm" onClick={leaveCreator}><ArrowLeft />Back</Button>
         <div className="min-w-0 flex-1">
           <h1 className="sr-only">Template Creator</h1>
           <Label htmlFor="template-name" className="sr-only">Template name</Label>
           <Input id="template-name" aria-label="Template name" maxLength={120} value={template.name} onChange={(event) => mutate((draft) => { draft.name = event.target.value; })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveTemplate(); } }} className="h-8 max-w-sm text-sm font-medium" />
-          <p className="truncate text-[11px] text-muted-foreground">{dirty ? "Unsaved changes" : "Arrange sections on the sample profile below."}</p>
+          {dirty ? <p className="truncate text-[11px] text-muted-foreground">Unsaved changes</p> : null}
         </div>
 
         <Button size="sm" onClick={() => void saveTemplate()} disabled={saving}>
@@ -431,12 +450,12 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         {(["blocks", "preview", "properties"] as const).map((pane) => <Button key={pane} variant={workspacePane === pane ? "secondary" : "ghost"} className="flex-1 capitalize" aria-pressed={workspacePane === pane} onClick={() => setWorkspacePane(pane)}>{pane}</Button>)}
       </div>
       <div className="profile-creator-columns grid min-h-0 flex-1 gap-3">
-        <Card className="profile-creator-blocks min-h-0 overflow-hidden border ring-0">
-          <CardHeader className="shrink-0 py-3">
+        <Card className="profile-creator-blocks min-h-0 overflow-hidden border py-3 ring-0">
+          <CardHeader className="shrink-0">
             <CardTitle className="flex items-center gap-2 text-sm"><LayoutTemplate className="size-4" />Blocks</CardTitle>
-            <CardDescription className="text-[11px]">Drag here or directly on the A4 canvas. Eye toggles visibility.</CardDescription>
+            <CardDescription className="text-[11px]">Drag to reorder. Use the eye to hide.</CardDescription>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-1.5 pb-3">
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-1.5">
             <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
               {template.sections.map((section, index) => {
                 const selected = section.id === selectedSectionId;
@@ -469,7 +488,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <span className="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-medium">{index + 1}</span>
-                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{section.title}</span><span className="block text-[9px] uppercase tracking-wide text-muted-foreground">{section.placement}</span></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{section.title}</span></span>
                     </button>
                     <Button
                       type="button"
@@ -485,8 +504,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
                 );
               })}
             </div>
-            <div className="shrink-0 border-t pt-2">
-              {missingKinds.length ? <>
+            {missingKinds.length ? <div className="shrink-0 border-t pt-2">
               <select
                 aria-label="Add block"
                 value=""
@@ -498,8 +516,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
                 <option value="">Add block…</option>
                 {missingKinds.map((kind) => <option key={kind} value={kind}>{SECTION_DEFAULTS[kind].title}</option>)}
               </select>
-              </> : <p className="text-xs text-muted-foreground">All section types are already in the template.</p>}
-            </div>
+              </div> : null}
           </CardContent>
         </Card>
 
@@ -519,7 +536,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         </div>
 
         <Card className="profile-creator-properties min-h-0 overflow-hidden border ring-0">
-          <CardHeader className="shrink-0 py-3">
+          <CardHeader className="shrink-0">
             <CardTitle className="text-sm">Properties</CardTitle>
             <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted p-1">
               {(["template", "header", "block", "logo"] as const).map((tab) => (
@@ -556,22 +573,22 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
 
             {inspectorTab === "block" ? (
               selectedSection ? <div className="space-y-3">
-                <div><p className="text-xs font-medium">{selectedSection.kind.replaceAll("_", " ")}</p><p className="text-[11px] text-muted-foreground">Visibility is controlled by the eye in the Blocks panel.</p></div>
+                
                 <div className="space-y-1"><Label htmlFor="section-title" className="text-xs">Heading</Label><Input id="section-title" maxLength={80} value={selectedSection.title} onChange={(event) => updateSelectedSection((section) => { section.title = event.target.value; })} /></div>
-                <div className="space-y-1"><Label htmlFor="section-placement" className="text-xs">Section placement</Label><select id="section-placement" value={selectedSection.placement} onChange={(event) => updateSelectedSection((section) => { section.placement = event.target.value as ProfileTemplateSection["placement"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"><option value="full">Full width</option><option value="left">Left column</option><option value="right">Right column</option></select><p className="text-[10px] text-muted-foreground">You can also drag the block directly on the A4 page.</p></div>
+                <div className="space-y-1"><Label htmlFor="section-placement" className="text-xs">Section placement</Label><select id="section-placement" value={selectedSection.placement} onChange={(event) => updateSelectedSection((section) => { section.placement = event.target.value as ProfileTemplateSection["placement"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"><option value="full">Full width</option><option value="left">Left column</option><option value="right">Right column</option></select></div>
                 {SIMPLE_LIST_KINDS.has(selectedSection.kind) ? <div className="space-y-1"><Label htmlFor="section-layout" className="text-xs">List layout</Label><select id="section-layout" value={selectedSection.layout} onChange={(event) => updateSelectedSection((section) => { section.layout = event.target.value as ProfileTemplateSection["layout"]; })} className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"><option value="inline">Inline</option><option value="bullets">Bullets</option></select></div> : null}
                 <div className="flex gap-2"><Button variant="outline" size="sm" className="flex-1" disabled={selectedIndex <= 0} onClick={() => reorderSection(selectedSection.id, template.sections[selectedIndex - 1].id)}>Move up</Button><Button variant="outline" size="sm" className="flex-1" disabled={selectedIndex >= template.sections.length - 1} onClick={() => reorderSection(selectedSection.id, template.sections[selectedIndex + 1].id)}>Move down</Button></div>
                 <Button variant="destructive" size="sm" className="w-full" disabled={template.sections.length <= 1} onClick={removeSection}><Trash2 />Remove block</Button>
-              </div> : <p className="text-xs text-muted-foreground">Select a block on the left.</p>
+              </div> : <p className="text-xs text-muted-foreground">Select a block.</p>
             ) : null}
 
             {inspectorTab === "logo" ? (
               <div className="space-y-3">
                 <input ref={logoInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseLogo(file); }} />
-                <div><p className="text-xs font-medium">Logo</p><p className="text-[11px] text-muted-foreground">PNG, JPG, WebP, or SVG. Drag the logo on the page to position it.</p></div>
+                <div><p className="text-xs font-medium">Logo</p><p className="text-[11px] text-muted-foreground">PNG, JPG, WebP or SVG. Drag to position.</p></div>
                 <Button variant="outline" size="sm" className="w-full" onClick={() => logoInputRef.current?.click()}><ImagePlus />{template.logo ? "Replace logo" : "Upload logo"}</Button>
                 {template.logo ? <>
-                  <div className="rounded-lg border bg-muted/20 p-2"><p className="truncate text-xs font-medium">{template.logo.original_name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">Drag the logo anywhere on the A4 preview.</p></div>
+                  <div className="rounded-lg border bg-muted/20 p-2"><p className="truncate text-xs font-medium">{template.logo.original_name}</p></div>
                   <div className="space-y-1"><div className="flex justify-between text-[11px]"><Label htmlFor="logo-width" className="text-xs">Width</Label><span className="text-muted-foreground">{Math.round(template.logo.width_pct)}%</span></div><input id="logo-width" type="range" min={2} max={60} step={1} value={template.logo.width_pct} onChange={(event) => resizeLogo(Number(event.target.value))} className="w-full accent-[var(--primary)]" /></div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground"><span>X {template.logo.x_pct.toFixed(1)}%</span><span>Y {template.logo.y_pct.toFixed(1)}%</span></div>
                   <Button variant="destructive" size="sm" className="w-full" onClick={() => mutate((draft) => { draft.logo = null; })}><Trash2 />Remove logo</Button>

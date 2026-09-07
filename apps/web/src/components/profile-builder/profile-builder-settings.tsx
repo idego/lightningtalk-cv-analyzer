@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { LoaderCircle, Plus, Save, Trash2 } from "lucide-react";
+import { useConfirmation } from "@/components/ui/use-confirmation";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_PROFILE_BUILDER_PREFERENCES,
@@ -20,6 +21,7 @@ import {
 } from "@/components/profile-builder/profile-builder-client";
 
 export function ProfileBuilderSettings() {
+  const { confirm, confirmationDialog } = useConfirmation();
   const [profileBuilderPreferences, setProfileBuilderPreferences] = useState<ProfileBuilderPreferences>(DEFAULT_PROFILE_BUILDER_PREFERENCES);
   const [profileBuilderMessage, setProfileBuilderMessage] = useState<string | null>(null);
   const [profileBuilderSaving, setProfileBuilderSaving] = useState(false);
@@ -90,7 +92,7 @@ export function ProfileBuilderSettings() {
 
   async function deleteCustomField(index: number) {
     const field = customFields[index];
-    if (fieldBusy || !window.confirm(`Remove ${field.label} for future profiles? Saved profiles keep their existing value.`)) return;
+    if (fieldBusy || !await confirm(`Remove ${field.label} for future profiles? Saved profiles keep their existing value.`)) return;
     setFieldBusy(field.id);
     try {
       await apiDeleteCustomField(field.id);
@@ -113,7 +115,7 @@ export function ProfileBuilderSettings() {
   if (loading) return <div role="status" className="flex items-center gap-2 rounded-xl border bg-card p-5 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading Profile Builder settings…</div>;
   if (loadError) return <div role="alert" className="space-y-3 rounded-xl border bg-card p-5 text-sm"><p>Profile Builder settings could not be loaded. No defaults have been changed.</p><Button variant="outline" onClick={() => { setLoadError(false); setLoading(true); setAttempt((value) => value + 1); }}>Retry settings</Button></div>;
 
-  return <div className="space-y-6" id="profile-builder-settings">
+  return <div className="space-y-6" id="profile-builder-settings">{confirmationDialog}
     <section className="rounded-xl border bg-card p-5">
       <div className="flex items-start justify-between gap-4"><div><h3 className="font-medium">Profile Builder conversion settings</h3><p className="mt-1 text-sm text-muted-foreground">Defaults for newly converted profiles. Existing saved profiles stay unchanged.</p></div><Button variant="outline" size="sm" disabled={profileBuilderSaving || JSON.stringify(profileBuilderPreferences) === lastSaved} onClick={() => void saveProfileBuilderPreferences()}>{profileBuilderSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{profileBuilderSaving ? "Saving…" : "Save"}</Button></div>
       <div className="mt-3 divide-y">

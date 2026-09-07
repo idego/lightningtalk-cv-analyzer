@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, FileText, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   type CandidateProfile,
@@ -354,10 +354,8 @@ export function ProfileDocumentPreview({
 
   return (
     <div className={fillHeight ? "flex h-full min-h-0 min-w-0 flex-col" : "min-w-0"}>
-      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <ShieldCheck className="size-4" />{label} · {template.name}
-        </div>
+      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <span className="sr-only">{label} · {template.name}</span>
         <div className="flex items-center gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Preview page navigation">
           <Button variant="ghost" size="icon-sm" aria-label="Previous preview page" disabled={previewPage <= 1} onClick={() => setPreviewPage((current) => Math.max(1, current - 1))}><ChevronLeft /></Button>
           <span className="min-w-16 text-center text-xs font-medium tabular-nums">{previewPage} / {previewPageCount}</span>
@@ -451,9 +449,7 @@ export function ProfileDocumentPreview({
       </div>
       </div>
       </div>
-      <p className={fillHeight ? "mt-1 shrink-0 text-center text-[10px] leading-tight text-muted-foreground" : "mx-auto mt-2 max-w-[760px] text-[11px] leading-relaxed text-muted-foreground"}>
-        Layout guide. After saving, Document preview shows the exact exported PDF.
-      </p>
+
     </div>
   );
 }

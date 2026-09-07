@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, LoaderCircle, MessageSquareText, SlidersHorizontal, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ChevronDown, FileText, LoaderCircle, MessageSquareText, SlidersHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { feedbackContext } from "@/lib/feedback-context";
@@ -23,7 +24,6 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
   const { settings, t } = useCopy();
   const [data, setData] = useState<InboxData | null>(null);
   const [status, setStatus] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -112,11 +112,10 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
 
   async function remove(item: InboxItem) {
     const key = itemKey(item);
-    if (confirmDelete !== key) { setConfirmDelete(key); return; }
     setBusy(key);
     try {
       const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, { method: "DELETE" });
-      if (response.ok) { setConfirmDelete(null); await load(); }
+      if (response.ok) { await load(); }
       else setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
     } catch {
       setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
@@ -152,7 +151,6 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
           const moduleReport = isAnalysisReport(item.context_report) ? item.context_report : null;
           const moduleCategory = isReportModuleCategory(item.source_category) ? item.source_category : null;
           const key = itemKey(item);
-          const awaitingConfirmation = confirmDelete === key;
           const isBusy = busy === key;
           const date = item.updated_at ? new Date(item.updated_at).toLocaleString(settings.uiLanguage === "pl" ? "pl-PL" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) : null;
           return (
@@ -176,21 +174,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <div className="relative">
-                    <Button
-                      variant={awaitingConfirmation ? "destructive" : "outline"}
-                      size="icon-sm"
-                      className={awaitingConfirmation ? "" : "text-destructive hover:bg-destructive/10 hover:text-destructive"}
-                      disabled={isBusy}
-                      aria-label={t(awaitingConfirmation ? "confirmDeleteFeedback" : "deleteFeedback")}
-                      onBlur={() => { if (!isBusy) setConfirmDelete(null); }}
-                      onKeyDown={(event) => { if (event.key === "Escape") setConfirmDelete(null); }}
-                      onClick={() => void remove(item)}
-                    >
-                      {isBusy ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
-                    </Button>
-                    {awaitingConfirmation ? <span role="status" className="absolute right-0 top-full z-20 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md">{t("clickAgainToConfirm")}</span> : null}
-                  </div>
+                  <DeleteButton label={t("deleteFeedback")} disabled={isBusy} onDelete={() => remove(item)} />
                 </div>
               </header>
 

@@ -237,4 +237,22 @@ Back SHALL use the same toolbar position and control as Analyze, flush pending s
 ### Requirement: Stable PDF and template panels
 PDF page rendering SHALL reserve stable layout space and scrollbar width while loading or resizing, so completing a render cannot trigger an endless resize/render cycle. Changing the profile or output visibility SHALL still hide the stale PDF immediately.
 
-Template Creator panels SHALL have continuous visible borders within their clipping bounds and scrollable properties. When every supported block type is present, the add area SHALL show a plain explanatory message instead of disabled add controls. Removing a block SHALL make its type available in the Add block selector again.
+Template Creator panels SHALL have continuous visible borders within their clipping bounds and scrollable properties. When every supported block type is present, the add area SHALL be hidden. Removing a block SHALL make its type available in the Add block selector again.
+
+
+### Requirement: Consistent and concise editor sections
+Profile Builder section headers SHALL have balanced vertical spacing and a pointer cursor without hover color changes. Optional Add actions SHALL not create an empty grid row in headers without descriptions. Upload and template screens SHALL avoid repeated instructions and retain concise guidance for file limits, saving, privacy, and template editing.
+
+
+### Requirement: Shared CV upload presentation
+Analyzer and Profile Builder SHALL render their file dropzone through the same shared component, with identical spacing, border, icon sizing, and hover/focus treatment. Each workflow SHALL retain its own queue, processing, limits, and messages. Disabled upload controls SHALL reject both file selection and drops.
+
+The upload instruction and its visual emphasis SHALL remain stable while conversion preferences load. Upload SHALL remain disabled until those preferences are ready; processing status text SHALL appear only during actual conversion.
+
+Template Creator SHALL omit redundant preview captions, layout-guide footnotes, raw block-kind labels, and placement badges in the block list. Placement SHALL remain editable in Properties. Block panels SHALL avoid duplicated outer and header padding.
+
+
+### Requirement: Application confirmation dialogs
+Profile Builder SHALL use the shared application confirmation dialog for discarding template changes and destructive editor actions. Confirmed template navigation SHALL clear the unsaved-change guard before routing; cancellation SHALL preserve edits and remain on the current screen. Browser-native unload protection MAY remain for closing or reloading the tab.
+
+The upload screen SHALL place a short three-point explanation with icons beside the upload card on desktop and below it on smaller screens, replacing the standalone introductory paragraph.

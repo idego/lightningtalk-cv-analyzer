@@ -349,3 +349,13 @@
   .profile-creator-preview { display: block; }
   .profile-creator-switch { display: none; }
 }
+
+@keyframes delete-confirm-shake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  20%, 60% { transform: translateX(-3px) rotate(-12deg); }
+  40%, 80% { transform: translateX(3px) rotate(12deg); }
+}
+.delete-confirm-shake { animation: delete-confirm-shake 360ms ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  .delete-confirm-shake { animation: none; }
+}
