@@ -148,7 +148,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
         {!data && !loadError ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingFeedback")}</div> : null}
         {loadError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void load()}>{t("retry")}</Button></div> : null}
         {data?.items.map((item) => {
-          const context = feedbackContext(item);
+          const context = feedbackContext(item, t);
           const moduleReport = isAnalysisReport(item.context_report) ? item.context_report : null;
           const moduleCategory = isReportModuleCategory(item.source_category) ? item.source_category : null;
           const key = itemKey(item);

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { analysisAccessTokenForUser } from "@/lib/analysis-access";
+import { profileBuilderOwnerToken } from "@/lib/profile-builder-owner";
 import { getWebUser } from "@/lib/web-user";
 import { ProfileBodyTooLarge, readProfileBody } from "@/lib/profile-request-body";
 
@@ -19,7 +19,7 @@ async function proxy(request: Request, context: Context) {
   if (!validCrud && !validAction) return NextResponse.json({ error: "Unknown Profile Builder action" }, { status: 404, headers: privateHeaders });
 
   try {
-    const headers: Record<string, string> = { "X-Profile-Builder-Access-Token": analysisAccessTokenForUser(user.id) };
+    const headers: Record<string, string> = { "X-Profile-Builder-Access-Token": profileBuilderOwnerToken(user.id) };
     let body: BodyInit | undefined;
     if (request.method === "POST" || request.method === "PUT") {
       if (action === "extract") {

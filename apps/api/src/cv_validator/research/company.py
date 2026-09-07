@@ -14,10 +14,17 @@ from cv_validator.research.domain import (
     CompanyResearchInvalidResponse,
     CompanyResearchRequest,
 )
-from cv_validator.research.subjects import accepted_records, subject_key, supported_field
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
+from cv_validator.research.versions import COMPANY_RESEARCH_VERSION
+from cv_validator.research.subjects import (
+    accepted_records,
+    safe_public_subject,
+    subject_key,
+    supported_field,
+)
 
-RESEARCH_VERSION = "company-research-v2"
-PROMPT_VERSION = "company-research-prompt-v5"
+RESEARCH_VERSION = COMPANY_RESEARCH_VERSION
+PROMPT_VERSION = "company-research-prompt-v6"
 SCHEMA_VERSION = "company-research-schema-v2"
 MAX_ORGANIZATIONS = 12
 
@@ -51,7 +58,7 @@ class CompanyResearchService:
             "source": "openai_web_search",
             "accessed_at": datetime.now(timezone.utc).isoformat(),
             "versions": {"research": RESEARCH_VERSION, "prompt": PROMPT_VERSION, "schema": SCHEMA_VERSION},
-            "model": {"provider": "openai", "configured": "gpt-5.6-luna", "response": response_model},
+            "model": {"provider": "openai", "configured": PINNED_OPENAI_MODEL, "response": response_model},
             "usage": deepcopy(usage),
         })
         return result
@@ -62,7 +69,7 @@ def build_company_research_request(stored_report: dict[str, Any]) -> CompanyRese
     seen: set[tuple[str, str]] = set()
     for record in accepted_records(stored_report, "employment"):
         subject = supported_field(record, "organization")
-        if subject is None or not _safe_organization_subject(subject):
+        if subject is None or not safe_public_subject(subject) or _is_self_employment_label(subject):
             continue
         key = subject_key("company", subject)
         if key in seen:
@@ -86,6 +93,13 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
     if returned != expected or len(returned) != len(payload["organizations"]):
         raise CompanyResearchInvalidResponse("subject_mismatch")
     for organization in payload["organizations"]:
+        finding_confidences = [finding["confidence"] for finding in organization["findings"]]
+        if organization["confidence"] == "high" and (
+            not finding_confidences or any(value != "high" for value in finding_confidences)
+        ):
+            raise CompanyResearchInvalidResponse("unsupported_high_confidence")
+        if organization["existence"] == "insufficient_evidence" and organization["confidence"] != "low":
+            raise CompanyResearchInvalidResponse("insufficient_evidence_confidence")
         claims_public_facts = organization["existence"] != "insufficient_evidence" or any(
             organization[key] is not None
             for key in ("activity", "official_website")
@@ -110,18 +124,6 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
             ):
                 raise CompanyResearchInvalidResponse("limited_presence_contradiction")
 
-
-def _safe_organization_subject(value: str) -> bool:
-    stripped = value.strip()
-    if not stripped or len(stripped) > 200 or any(ord(char) < 32 for char in stripped):
-        return False
-    if "@" in stripped or re.search(r"(?:https?://|www\.)", stripped, re.IGNORECASE):
-        return False
-    if re.search(r"\+?\d[\d\s().-]{6,}\d", stripped):
-        return False
-    if _is_self_employment_label(value):
-        return False
-    return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2
 
 
 def _is_self_employment_label(value: str) -> bool:

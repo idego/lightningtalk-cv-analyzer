@@ -70,3 +70,10 @@ The frontend SHALL include a Docker build/runtime definition suitable for later 
 #### Scenario: Web image builds
 - **WHEN** the web Dockerfile is built
 - **THEN** it produces a runnable image that serves the Next.js app
+
+### Requirement: Deployment-wide AI usage dashboard
+The authenticated shell SHALL expose a `Dashboard` route that reads the immutable deployment-wide AI usage summary and presents processed-report throughput, total/average tokens, estimated USD/PLN cost, and per-operation breakdown. Deployment totals survive analysis deletion and MUST NOT expose CV content or candidate PII.
+
+#### Scenario: Signed-in recruiter opens Dashboard
+- **WHEN** a signed-in recruiter opens `/dashboard`
+- **THEN** deployment-wide report count, token/cost metrics, and operation breakdown are shown from the accounting ledger

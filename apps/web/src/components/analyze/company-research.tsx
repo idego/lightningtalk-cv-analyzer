@@ -67,6 +67,13 @@ export function CompanyResearchPanel({
   async function startResearch() {
     await getAutoResearchOrchestrator()?.runManual(report, settings, "company");
   }
+  const sectionFeedbackTarget = feedbackTarget(
+    feedbackManifest,
+    "company_research_result",
+    "company_research",
+    "section",
+  );
+
 
   return (
     <HoverDisclosure
@@ -87,7 +94,7 @@ export function CompanyResearchPanel({
             busyAriaLabel={t("companyResearchInProgress")}
             disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
           /> : null}
-        {!readOnly && hasContent && feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section")!} /> : null}
+        {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
       </div>}
     >
       {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
@@ -150,7 +157,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
       action={
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
-          {searchHref ? <GoogleSearchAction href={searchHref} /> : null}
+          {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} /> : null}
         </div>
       }
       contentClassName="pt-3"

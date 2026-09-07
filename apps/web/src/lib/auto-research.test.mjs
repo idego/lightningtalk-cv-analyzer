@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   createAutoResearchOrchestrator,
   eligibleAutoResearchKinds,
-  withAnalysisAccessToken,
 } from "./auto-research.ts";
 
 function field(value) {
@@ -14,7 +13,6 @@ function field(value) {
 function report() {
   return {
     analysis_id: "analysis-1",
-    analysis_access_token: "token",
     ai_features_enabled: true,
     ai_capabilities: {
       document_analysis: true,
@@ -27,11 +25,13 @@ function report() {
       employment: [{
         id: "work-1",
         status: "accepted",
+        relation_status: "supported",
         organization: field("Example Systems"),
       }],
       education: [{
         id: "education-1",
         status: "accepted",
+        relation_status: "supported",
         institution: field("Example University"),
         certificate: null,
       }],
@@ -119,15 +119,11 @@ test("automatic research calls every eligible research endpoint after base analy
   ]);
 });
 
-test("batch access token is attached before automatic research eligibility is checked", () => {
+test("automatic research eligibility does not require a browser capability token", () => {
   const value = report();
-  delete value.analysis_access_token;
-
-  const prepared = withAnalysisAccessToken(value, "batch-token");
-
-  assert.equal(prepared.analysis_access_token, "batch-token");
+  assert.equal(Object.hasOwn(value, "analysis_access_token"), false);
   assert.deepEqual(
-    [...eligibleAutoResearchKinds(prepared)].sort(),
+    [...eligibleAutoResearchKinds(value)].sort(),
     ["company", "education", "linkedin"],
   );
 });
@@ -183,6 +179,6 @@ test("refresh bypasses a report result and requests fresh research", async () =>
 
   assert.deepEqual(calls, [{
     url: "/api/analyses/analysis-1/research/company",
-    body: { accessToken: "token", aiEnabled: true, refresh: true },
+    body: { refresh: true },
   }]);
 });

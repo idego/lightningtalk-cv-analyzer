@@ -88,6 +88,9 @@ if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
 `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths in the env
 file, or copy the volumes to the new project once while the stack is stopped.
 
+
+Container resource limits are bounded in Compose and can be overridden with the documented `WEB_*`, `API_*`, and `GEONAMES_INIT_*` resource variables. Runtime images execute as non-root users. `GEONAMES_SNAPSHOT_VERSION` must match `config/geonames.lock`; changing the snapshot requires intentionally refreshing the lock and reference data together.
+
 Production deploys an exact reviewed SHA:
 
 ```bash
@@ -124,13 +127,13 @@ pseudonymous accounting correlation key; report/audit/research rows are still
 deleted according to normal lifecycle rules. The ledger must never contain CV
 text, evidence, prompts, model responses, candidate data, e-mail addresses, or
 other PII. The API is internal-only; browser access to deployment totals goes
-through the authenticated web route, and per-report totals additionally use the
-existing owner-scoped analysis access token.
+through the authenticated web route, and per-report totals additionally require the
+authenticated web user to own the analysis by stable Better Auth user id.
 
 ## Data and logs
 
-- Raw uploads are processed in memory and are not persisted.
-- Audit JSON contains the validated report, not the ownership token.
+- After a report is committed, its original PDF/DOCX is retained only for the configured analysis-retention window so the owner can reopen the preview; it is deleted with the analysis or retention purge.
+- Audit JSON contains the validated report and never contains ownership credentials or internal owner ids.
 - Logs may contain identifiers, status, duration, and safe error codes only.
 - Never log CV text, evidence excerpts, model output, secrets, or local paths.
 - Research cache audit records expose hit, partial-hit, miss, refresh, and

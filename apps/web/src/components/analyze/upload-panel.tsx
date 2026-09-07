@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
@@ -155,12 +155,12 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
     const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
-    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | { detail?: string } | null;
+    const payload = await response.json().catch(() => null) as AnalysisReport | { detail?: string } | null;
     if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
     if (!response.ok) throw new Error(analysisErrorMessage(payload && "detail" in payload ? payload.detail : null));
     if (!payload || !("analysis_id" in payload) || !payload.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
-    const report = payload as AnalysisReport & { analysis_access_token?: string };
-    return { filename: file.name, status: report.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(report, report.analysis_access_token) };
+    const report = payload as AnalysisReport;
+    return { filename: file.name, status: report.base_analysis?.status === "partial" ? "partial" : "ok", report: report };
   }
 
   async function submit() {

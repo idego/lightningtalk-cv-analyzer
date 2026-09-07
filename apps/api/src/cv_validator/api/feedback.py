@@ -4,10 +4,11 @@ import hashlib
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -21,9 +22,6 @@ CONTEXT_REPORT_MAX_CHARS = 400_000
 class TargetKind(StrEnum):
     REVIEW_FINDING = "review_finding"
     STRUCTURED_FACT = "structured_fact"
-    STRUCTURAL_OBSERVATION = "structural_observation"
-    FILE_DETAIL = "file_detail"
-    LINK_RESULT = "link_result"
     COMPANY_RESEARCH_RESULT = "company_research_result"
     EDUCATION_RESEARCH_RESULT = "education_research_result"
     LINKEDIN_RESEARCH_RESULT = "linkedin_research_result"
@@ -84,12 +82,15 @@ class FeedbackInput(BaseModel):
 
     @field_validator("context_report")
     @classmethod
-    def limit_context_report(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+    def sanitize_context_report(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         if value is None:
             return None
-        if len(json.dumps(value, separators=(",", ":"))) > CONTEXT_REPORT_MAX_CHARS:
+        sanitized = _sanitize_context_report(value)
+        if len(json.dumps(sanitized, separators=(",", ":"))) > CONTEXT_REPORT_MAX_CHARS:
             raise ValueError("context_report_too_large")
-        return value
+        return sanitized
 
     @model_validator(mode="after")
     def validate_combination(self) -> "FeedbackInput":
@@ -121,6 +122,37 @@ class TriageInput(BaseModel):
         if CONTACT_RE.search(normalized):
             raise ValueError("note_contains_contact_data")
         return normalized or None
+
+
+_INTERNAL_CONTEXT_KEYS = {
+    "analysis_access_token",
+    "access_token",
+    "owner_user_id",
+    "share_token",
+}
+
+
+def _sanitize_context_report(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_context_report(item)
+            for key, item in value.items()
+            if not _internal_context_key(key)
+        }
+    if isinstance(value, list):
+        return [_sanitize_context_report(item) for item in value]
+    return value
+
+
+def _internal_context_key(key: Any) -> bool:
+    if not isinstance(key, str):
+        return False
+    normalized = key.casefold()
+    return (
+        normalized in _INTERNAL_CONTEXT_KEYS
+        or normalized.endswith("_access_token")
+        or normalized.endswith("_owner_id")
+    )
 
 
 def init_feedback_schema(conn: sqlite3.Connection) -> None:
@@ -231,11 +263,16 @@ class FeedbackStore:
         with self._connect() as conn:
             init_feedback_schema(conn)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def pseudonym(self, purpose: Literal["actor", "maintainer"], value: str) -> str:
         return hashlib.sha256(f"{purpose}:{value}".encode()).hexdigest()
@@ -273,11 +310,21 @@ class FeedbackStore:
         normalized_email = actor_email.strip().lower()[:320] if actor_email else None
         now = _now()
         with self._connect() as conn:
-            target = conn.execute("SELECT kind FROM feedback_targets WHERE target_id=? AND analysis_id=?", (target_id, analysis_id)).fetchone()
+            conn.execute("BEGIN IMMEDIATE")
+            target = conn.execute(
+                "SELECT kind FROM feedback_targets WHERE target_id=? AND analysis_id=?",
+                (target_id, analysis_id),
+            ).fetchone()
             if target is None:
                 return None
             since = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
-            writes = conn.execute("SELECT COUNT(*) FROM feedback_events WHERE actor_hash=? AND created_at>=?", (actor_hash, since)).fetchone()[0]
+            writes = conn.execute(
+                """SELECT COUNT(*)
+                   FROM feedback_events e
+                   JOIN feedback_targets t ON t.target_id = e.target_id
+                   WHERE e.actor_hash=? AND t.analysis_id=? AND e.created_at>=?""",
+                (actor_hash, analysis_id, since),
+            ).fetchone()[0]
             if writes >= 30:
                 raise ValueError("feedback_rate_limit")
             if target["kind"] == TargetKind.OPERATION_FAILURE:
@@ -378,32 +425,6 @@ def _target_candidates(payload: dict[str, Any]):
         for value in base_analysis.get(category, []) if isinstance(base_analysis.get(category), list) else []:
             if isinstance(value, dict) and isinstance(value.get("id"), str):
                 yield TargetKind.STRUCTURED_FACT, category, value["id"], versions, None
-    deterministic = payload.get("deterministic") if isinstance(payload.get("deterministic"), dict) else {}
-    for category in ("candidates", "facts"):
-        for value in deterministic.get(category, []) if isinstance(deterministic.get(category), list) else []:
-            if isinstance(value, dict) and isinstance(value.get("id"), str):
-                yield TargetKind.STRUCTURED_FACT, category, value["id"], versions, None
-    understanding = payload.get("document_understanding") if isinstance(payload.get("document_understanding"), dict) else {}
-    for category in ("records", "skills"):
-        for value in understanding.get(category, []) if isinstance(understanding.get(category), list) else []:
-            if isinstance(value, dict) and isinstance(value.get("id"), str):
-                yield TargetKind.STRUCTURED_FACT, category, value["id"], versions, None
-    structural = payload.get("structural_audits") or []
-    if isinstance(structural, dict):
-        structural = structural.get("observations") or structural.get("audits") or []
-    for item in structural if isinstance(structural, list) else []:
-        if isinstance(item, dict) and isinstance(item.get("id") or item.get("code"), str):
-            yield TargetKind.STRUCTURAL_OBSERVATION, "structural", item.get("id") or item["code"], versions, None
-    for item in deterministic.get("observations", []) if isinstance(deterministic.get("observations"), list) else []:
-        if isinstance(item, dict) and isinstance(item.get("id"), str):
-            yield TargetKind.STRUCTURAL_OBSERVATION, "deterministic", item["id"], versions, None
-    details = payload.get("file_details", {}).get("fields", {}) if isinstance(payload.get("file_details"), dict) else {}
-    for field in details if isinstance(details, dict) else []:
-        yield TargetKind.FILE_DETAIL, "file_detail", field, versions, None
-    links = payload.get("link_inspection", {}).get("links", []) if isinstance(payload.get("link_inspection"), dict) else []
-    for link in links if isinstance(links, list) else []:
-        if isinstance(link, dict) and isinstance(link.get("link_id"), str):
-            yield TargetKind.LINK_RESULT, "link", link["link_id"], versions, None
     for key, kind in (("company_research", TargetKind.COMPANY_RESEARCH_RESULT), ("education_research", TargetKind.EDUCATION_RESEARCH_RESULT), ("linkedin_discovery", TargetKind.LINKEDIN_RESEARCH_RESULT)):
         result = payload.get(key)
         if isinstance(result, dict) and result.get("status") == "completed":
@@ -412,10 +433,6 @@ def _target_candidates(payload: dict[str, Any]):
                 yield kind, key, str(index), versions, None
         elif isinstance(result, dict) and result.get("status") == "failed":
             yield TargetKind.OPERATION_FAILURE, key, "failure", versions, _failure(key, result, versions)
-    ai = payload.get("ai_analysis")
-    if isinstance(ai, dict) and ai.get("status") == "failed":
-        yield TargetKind.OPERATION_FAILURE, "ai_analysis", "failure", versions, _failure("ai_analysis", ai, versions)
-
 
 def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[str, str]):
     base = payload.get("base_analysis") if isinstance(payload.get("base_analysis"), dict) else {}
@@ -507,11 +524,6 @@ def _versions(payload: dict[str, Any]) -> dict[str, str]:
         "contract": str(payload.get("contract_version") or "unknown")[:80],
         "strategy": str(strategy.get("version") or "unknown")[:80],
     }
-    ai = payload.get("ai_analysis")
-    if isinstance(ai, dict) and isinstance(ai.get("versions"), dict):
-        for key in ("prompt", "schema", "input_contract", "deterministic_observations"):
-            if isinstance(ai["versions"].get(key), str):
-                values[key] = ai["versions"][key][:80]
     return values
 
 

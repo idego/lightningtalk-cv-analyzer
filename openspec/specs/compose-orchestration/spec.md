@@ -56,3 +56,10 @@ Project docs SHALL describe env setup and reverse-proxy deployment pattern for a
 - **WHEN** README and root `.env.example` are reviewed
 - **THEN** they describe compose startup, required env vars, and TLS termination at external reverse proxy (not Vercel)
 - **AND** `.env.example` lists every variable an operator may set, including the optional dev-only `API_DEV_PORT`
+
+### Requirement: Runtime containment
+Long-lived `web` and `api` runtime containers and the feedback initializer SHALL execute as non-root users. Compose SHALL define bounded CPU, memory, and PID limits for the long-lived services and GeoNames initializer, with documented environment overrides. `make dev`, `make dev-down`, and `make deploy` SHALL consistently use `COMPOSE_PROJECT_NAME` so named-volume identity does not change between paths.
+
+#### Scenario: Production compose is inspected
+- **WHEN** an operator renders the production Compose config
+- **THEN** web/API services have explicit resource bounds and the deployed project uses the configured project name

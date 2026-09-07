@@ -17,9 +17,9 @@ def _store(tmp_path):
         conn.execute(
             """INSERT INTO reports(
                    input_hash, contract_version, strategy_name, strategy_version,
-                   status, created_at, analysis_id
+                   status, created_at, analysis_id, owner_user_id
                ) VALUES('hash','base-analysis-v2','test','v1','complete',
-                        '2026-01-01T00:00:00+00:00','analysis-1')"""
+                        '2026-01-01T00:00:00+00:00','analysis-1','owner-1')"""
         )
     return FeedbackStore(db_path), db_path
 
@@ -139,7 +139,7 @@ def test_feedback_survives_single_analysis_deletion(tmp_path):
         "0" * 64,
         report,
         analysis_id=analysis_id,
-        access_token="token-1",
+        owner_user_id="token-1",
         source_filename="cv.pdf",
     )
     p_store.complete_analysis_run(analysis_id, "completed")
@@ -200,7 +200,7 @@ def test_feedback_survives_delete_all_analyses(tmp_path):
             f"{i}" * 64,
             report,
             analysis_id=aid,
-            access_token="shared-token",
+            owner_user_id="shared-token",
             source_filename=f"cv-{i}.pdf",
         )
         p_store.complete_analysis_run(aid, "completed")
@@ -241,14 +241,14 @@ def test_feedback_survives_retention_purge(tmp_path):
         "0" * 64,
         report,
         analysis_id=aid,
-        access_token="owner-token",
+        owner_user_id="owner-token",
         source_filename="old_cv.pdf",
     )
     p_store.complete_analysis_run(aid, "completed")
 
     payload = {
         **report,
-        "ai_analysis": {
+        "company_research": {
             "status": "failed",
             "failure_reason": "timeout",
             "attempt_count": 2,
@@ -388,7 +388,7 @@ def test_feedback_migration_from_legacy_schema_with_fk(tmp_path):
 
 def test_failure_feedback_contract_is_closed(tmp_path):
     store, _ = _store(tmp_path)
-    target = store.materialize("analysis-1", {"ruleset_version":"v1","ai_analysis":{"status":"failed","failure_reason":"timeout","attempt_count":2}})
+    target = store.materialize("analysis-1", {"ruleset_version":"v1","company_research":{"status":"failed","failure_reason":"timeout","attempt_count":2}})
     failure = next(item for item in target if item["kind"] == "operation_failure")
     with pytest.raises(ValueError, match="failure_feedback_is_closed"):
         store.put("analysis-1", failure["target_id"], "actor", FeedbackInput(rating="not_helpful", reason="inaccurate"))
@@ -399,3 +399,40 @@ def test_context_report_size_is_limited():
     with pytest.raises(ValidationError):
         FeedbackInput(comment="Too big", context_report={"blob": "x" * 400_001})
     assert FeedbackInput(comment="Fits", context_report={"blob": "x" * 1000}).context_report is not None
+
+
+def test_feedback_context_report_strips_internal_capability_fields_recursively(tmp_path):
+    store, _ = _store(tmp_path)
+    target = store.materialize("analysis-1", {"ruleset_version": "v1"})[0]
+    result = store.put(
+        "analysis-1",
+        target["target_id"],
+        "actor@example.com",
+        FeedbackInput(
+            rating="helpful",
+            context_report={
+                "analysis_access_token": "secret",
+                "nested": {"owner_user_id": "owner", "safe": "value"},
+                "items": [{"access_token": "also-secret", "safe": 1}],
+            },
+        ),
+    )
+    assert result is not None
+    inbox = store.inbox()["items"][0]["context_report"]
+    assert inbox == {"nested": {"safe": "value"}, "items": [{"safe": 1}]}
+
+
+def test_feedback_rate_limit_is_scoped_per_analysis(tmp_path):
+    store, _ = _store(tmp_path)
+    first = store.materialize("analysis-1", {"ruleset_version": "v1"})[0]
+    second = store.materialize("analysis-2", {"ruleset_version": "v1"})[0]
+    actor = "actor@example.com"
+    for index in range(30):
+        target = store.materialize(
+            "analysis-1",
+            {"ruleset_version": "v1", "findings": [{"id": f"finding-{index}"}]},
+        )[-1]
+        store.put("analysis-1", target["target_id"], actor, FeedbackInput(rating="helpful"))
+    with pytest.raises(ValueError, match="feedback_rate_limit"):
+        store.put("analysis-1", first["target_id"], actor, FeedbackInput(rating="helpful"))
+    assert store.put("analysis-2", second["target_id"], actor, FeedbackInput(rating="helpful"))

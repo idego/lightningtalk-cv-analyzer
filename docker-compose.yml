@@ -10,16 +10,19 @@ services:
     volumes:
       - web_auth_data:/app/data
       - ./config/feedback-access.json:/config/feedback-access.json:ro
+    cpus: ${FEEDBACK_INIT_CPUS:-0.50}
+    mem_limit: ${FEEDBACK_INIT_MEMORY_LIMIT:-512m}
+    pids_limit: 128
     restart: "no"
 
   geonames-init:
     build:
       context: ./apps/api
-      target: runtime
+      target: geonames-init
     command: ["cv-geonames-bootstrap"]
     environment:
       GEONAMES_TARGET: /reference-data
-      GEONAMES_SNAPSHOT_VERSION: ${GEONAMES_SNAPSHOT_VERSION:-2026-09-02}
+      GEONAMES_SNAPSHOT_VERSION: ${GEONAMES_SNAPSHOT_VERSION:-2026-08-21}
       GEONAMES_CITIES500_URL: ${GEONAMES_CITIES500_URL:-https://download.geonames.org/export/dump/cities500.zip}
       GEONAMES_COUNTRY_INFO_URL: ${GEONAMES_COUNTRY_INFO_URL:-https://download.geonames.org/export/dump/countryInfo.txt}
       GEONAMES_ALTERNATE_NAMES_URL: ${GEONAMES_ALTERNATE_NAMES_URL:-https://download.geonames.org/export/dump/alternateNamesV2.zip}
@@ -31,6 +34,9 @@ services:
     # healthcheck would always fail while the job is working.
     healthcheck:
       disable: true
+    cpus: ${GEONAMES_INIT_CPUS:-2.0}
+    mem_limit: ${GEONAMES_INIT_MEMORY_LIMIT:-4g}
+    pids_limit: 512
     restart: "no"
     logging:
       driver: json-file
@@ -47,8 +53,8 @@ services:
     environment:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
-      BASE_URL: ${BASE_URL:-http://localhost:3000}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      BASE_URL: ${BASE_URL:-http://localhost:3001}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3001}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
       BETTER_AUTH_DB_PATH: ${BETTER_AUTH_DB_PATH:-/app/data/auth.db}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
@@ -63,6 +69,9 @@ services:
         condition: service_healthy
       feedback-init:
         condition: service_completed_successfully
+    cpus: ${WEB_CPUS:-1.0}
+    mem_limit: ${WEB_MEMORY_LIMIT:-1g}
+    pids_limit: 256
     restart: unless-stopped
     logging:
       driver: json-file
@@ -78,6 +87,9 @@ services:
       - "8000"
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/cv_analyzer.db}
+      # Used only to authenticate privileged web -> API control-plane writes.
+      # Rotation does not affect persisted analysis ownership.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -107,6 +119,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    cpus: ${API_CPUS:-2.0}
+    mem_limit: ${API_MEMORY_LIMIT:-4g}
+    pids_limit: 512
     restart: unless-stopped
     logging:
       driver: json-file

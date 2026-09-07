@@ -68,3 +68,17 @@ def test_company_research_rejects_invalid_operating_periods(period: dict, reason
         )
 
     assert info.value.reason == reason
+
+
+def test_company_high_confidence_requires_high_confidence_findings() -> None:
+    payload = company_payload()
+    payload["organizations"][0]["confidence"] = "high"
+    payload["organizations"][0]["findings"][0]["confidence"] = "medium"
+
+    with pytest.raises(CompanyResearchInvalidResponse) as info:
+        validate_company_research(
+            payload,
+            request=CompanyResearchRequest(({"organization": "Example Systems"},)),
+        )
+
+    assert info.value.reason == "unsupported_high_confidence"

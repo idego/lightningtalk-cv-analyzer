@@ -17,7 +17,6 @@
   "properties": {
     "contract_version": { "const": "base-analysis-v2" },
     "analysis_id": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "analysis_access_token": { "type": "string", "minLength": 1, "maxLength": 256 },
     "ai_features_enabled": { "type": "boolean" },
     "ai_capabilities": {
       "type": "object",

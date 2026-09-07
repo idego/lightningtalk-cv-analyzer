@@ -25,7 +25,7 @@ def _run_preflight(env_file: Path, reference_mode: str) -> subprocess.CompletedP
 def test_automatic_preflight_accepts_versioned_offline_build(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "CV_VALIDATOR_AI_ENABLED=false\nGEONAMES_SNAPSHOT_VERSION=2026-09-02\n",
+        "CV_VALIDATOR_AI_ENABLED=false\nGEONAMES_SNAPSHOT_VERSION=2026-08-21\n",
         encoding="utf-8",
     )
 
@@ -39,7 +39,7 @@ def test_automatic_preflight_rejects_insecure_mirror(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(
         "CV_VALIDATOR_AI_ENABLED=false\n"
-        "GEONAMES_SNAPSHOT_VERSION=2026-09-02\n"
+        "GEONAMES_SNAPSHOT_VERSION=2026-08-21\n"
         "GEONAMES_CITIES500_URL=http://example.test/cities500.zip\n",
         encoding="utf-8",
     )

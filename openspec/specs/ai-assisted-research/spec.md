@@ -8,11 +8,7 @@ Defines optional cited public-web research after a validated base analysis.
 
 ### Requirement: Research only accepted base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported named
-organization. Education research SHALL use accepted education records with a
-supported institution or certificate. LinkedIn discovery SHALL require a
-supported candidate name and may use accepted organization and role fields as
-search hints.
+Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use accepted education records with a supported relation and supported institution or certificate. Certificate-only rows are valid education-research subjects. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
 Ambiguous records, ambiguous fields, self-employment labels, skills, raw
 extractor candidates, reviewer-rejected candidates, and unvalidated model
@@ -105,7 +101,7 @@ High confidence SHALL require supported name alignment plus at least one indepen
 ### Requirement: Persistence and reusable cache
 
 Completed category results SHALL be stored under the owning analysis. Reusable
-public-entity cache entries MUST exclude candidate-specific data. Every cache
+public-entity cache entries MUST exclude candidate-specific data and batch-level search queries/limitations from other subjects; any saved usage attribution SHALL be per subject rather than assigned only to the first item in a batch. Every cache
 hit or miss SHALL be recorded for the owning analysis, and responses SHALL
 disclose whether a result came from cache.
 

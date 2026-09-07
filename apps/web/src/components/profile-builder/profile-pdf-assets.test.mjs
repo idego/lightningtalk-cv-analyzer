@@ -11,7 +11,7 @@ const webRoot = new URL("../../../", import.meta.url);
 test("production build prepares the exact pinned, self-hosted PDF.js assets", () => {
   const packageFile = JSON.parse(readFileSync(new URL("package.json", webRoot), "utf8"));
   assert.match(packageFile.scripts.build, /prepare-pdf-worker/);
-  assert.match(readFileSync(new URL("Dockerfile", webRoot), "utf8"), /RUN pnpm build/);
+  assert.match(readFileSync(new URL("Dockerfile", webRoot), "utf8"), /RUN [^\n]*pnpm build/);
   const prepared = spawnSync(process.execPath, [new URL("scripts/prepare-pdf-worker.mjs", webRoot).pathname], { encoding: "utf8" });
   assert.equal(prepared.status, 0, prepared.stderr);
   const dependency = dirname(require.resolve("pdfjs-dist/package.json"));

@@ -10,12 +10,24 @@ from cv_validator.research.openai_client import OpenAIResponsesLinkedInResearche
 
 def response(*, status="completed", output_text=None, searches=1):
     url = "https://www.linkedin.com/in/synthetic-example"
+    def profile(profile_url):
+        return {
+            "profile_url": profile_url, "source_urls": [profile_url],
+            "confidence": "high", "uncertainty": "Name only",
+            "photo_visible": "unknown", "photo_source_url": None,
+            "connection_count": {"visibility": "unknown", "minimum": None,
+                                 "maximum": None, "display": None, "source_url": None},
+            "connection_completeness_flag": False,
+        }
+
     payload = {
-        "possible_profiles": [
-            {"profile_url": url, "confidence": "high", "uncertainty": "Name only"},
-            {"profile_url": "https://www.linkedin.com/in/unsupported-example"},
-        ],
-        "search_limitations": [],
+        "schema_version": "linkedin-discovery-schema-v3",
+        "outcome": "completed",
+        "possible_profiles": [profile(url), profile("https://www.linkedin.com/in/unsupported-example")],
+        "linkedin_not_found": False,
+        "not_found_caveat": "Public search does not verify identity.",
+        "searches_performed": ["synthetic query"],
+        "search_limitations": ["Indexed public sources only."],
     }
     return SimpleNamespace(
         status=status,
@@ -54,6 +66,7 @@ def test_discovery_preserves_request_limits_and_normalizes_sourced_profiles():
 @pytest.mark.parametrize(("overrides", "reason"), [
     ({"status": "incomplete"}, "truncated"),
     ({"output_text": "invalid"}, "json_parse"),
+    ({"output_text": "{}"}, "schema"),
     ({"searches": 0}, "search_count"),
     ({"searches": 5}, "search_count"),
 ])
