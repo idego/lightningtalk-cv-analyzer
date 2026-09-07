@@ -58,7 +58,7 @@ Set `OPENAI_API_KEY` and replace `BETTER_AUTH_SECRET` with a random secret of at
 make dev
 ```
 
-Open [localhost:3001/analyze](http://localhost:3001/analyze). Local development bypasses sign-in and binds the app to loopback. The first start downloads and builds the GeoNames indexes; this can take several minutes. Later starts reuse them.
+Open [localhost:3000/analyze](http://localhost:3000/analyze). Local development bypasses sign-in for a loopback BASE_URL. The first start downloads and builds the GeoNames indexes; this can take several minutes. Later starts reuse them.
 
 **3. Stop when you are done.**
 
@@ -106,7 +106,7 @@ Local API documentation is available at [127.0.0.1:8001/docs](http://127.0.0.1:8
 
 ## Deploy and maintain
 
-Production uses Docker Compose. Configure `.env`, keep `WEB_HOST=127.0.0.1`, and put a TLS reverse proxy in front of the web app. Then run `make deploy-check` and `make deploy`.
+Production uses Docker Compose. Configure `.env` and put a TLS reverse proxy in front of the published web port. Then run `make deploy-check` and `make deploy`.
 
 | Guide | Covers |
 | --- | --- |
