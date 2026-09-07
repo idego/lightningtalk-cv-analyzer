@@ -332,6 +332,13 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
             else:
                 normalized = True
         organization["findings"] = retained_findings
+        if "lifecycle_events" in organization:
+            events = []
+            for event in organization["lifecycle_events"]:
+                event["source_urls"] = [url for url in event["source_urls"] if _canonical_source_url(url) in canonical_sources]
+                if event["source_urls"]:
+                    events.append(event)
+            organization["lifecycle_events"] = events
         official_website = organization.get("official_website")
         if official_website and _source_origin(official_website) not in source_origins:
             organization["official_website"] = None
@@ -341,6 +348,7 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
                 "existence": "insufficient_evidence",
                 "activity": None,
                 "operating_periods": [],
+                "lifecycle_events": [],
                 "offices": [],
                 "relationship": None,
                 "official_website": None,

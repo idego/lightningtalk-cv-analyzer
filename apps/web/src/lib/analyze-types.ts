@@ -50,6 +50,14 @@ export type EducationRecord = AnalysisRecord & {
 };
 
 export type CompanyResearch = {
+  timeline_findings?: Array<{
+    kind: "employment_before_founding" | "employment_after_closure";
+    record_id: string;
+    organization: string;
+    cv_date: string;
+    event_date: string;
+    source_urls: string[];
+  }>;
   status: "completed";
   outcome: "completed" | "insufficient_evidence";
   accessed_at: string;

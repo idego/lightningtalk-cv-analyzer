@@ -15,6 +15,7 @@ from cv_validator.research.domain import (
     CompanyResearchRequest,
 )
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
+from cv_validator.research.company_timeline import date_bounds
 from cv_validator.research.versions import COMPANY_RESEARCH_VERSION
 from cv_validator.research.subjects import (
     accepted_records,
@@ -24,8 +25,8 @@ from cv_validator.research.subjects import (
 )
 
 RESEARCH_VERSION = COMPANY_RESEARCH_VERSION
-PROMPT_VERSION = "company-research-prompt-v6"
-SCHEMA_VERSION = "company-research-schema-v2"
+PROMPT_VERSION = "company-research-prompt-v7"
+SCHEMA_VERSION = "company-research-schema-v3"
 MAX_ORGANIZATIONS = 12
 
 
@@ -93,6 +94,16 @@ def validate_company_research(payload: Any, *, request: CompanyResearchRequest) 
     if returned != expected or len(returned) != len(payload["organizations"]):
         raise CompanyResearchInvalidResponse("subject_mismatch")
     for organization in payload["organizations"]:
+        events = organization["lifecycle_events"]
+        if len({event["kind"] for event in events}) != len(events):
+            raise CompanyResearchInvalidResponse("duplicate_lifecycle_event")
+        if any(date_bounds(event["date"]) is None for event in events):
+            raise CompanyResearchInvalidResponse("invalid_lifecycle_date")
+        if events and organization["existence"] != "supported":
+            raise CompanyResearchInvalidResponse("unsupported_lifecycle")
+        bounds = {event["kind"]: date_bounds(event["date"]) for event in events}
+        if "founded" in bounds and "closed" in bounds and bounds["founded"][0] > bounds["closed"][1]:
+            raise CompanyResearchInvalidResponse("contradictory_lifecycle")
         finding_confidences = [finding["confidence"] for finding in organization["findings"]]
         if organization["confidence"] == "high" and (
             not finding_confidences or any(value != "high" for value in finding_confidences)

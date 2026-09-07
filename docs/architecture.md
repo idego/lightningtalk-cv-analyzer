@@ -30,6 +30,10 @@ PDF or DOCX upload
   and insufficient evidence. Only a sourced institution conflict creates an attention
   finding; missing research evidence remains a panel status. Older results without
   this assessment remain readable and need fresh research for a new verdict.
+- Company lifecycle events carry exact public source URLs. Owner-scoped code
+  compares high-confidence, unambiguous business bounds with accepted employment
+  start dates using date intervals. Unclear continuity, missing evidence and
+  ambiguous entities produce no flag. These comparisons are never cached publicly.
 - Company, education, and LinkedIn research receives only accepted subjects.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.

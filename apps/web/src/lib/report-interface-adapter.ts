@@ -375,8 +375,27 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       sourceUrls: [...new Set(supported.flatMap((item) => item.source_urls))],
     }];
   });
+  const companyFindings: ReportFinding[] = (report.company_research?.timeline_findings ?? []).flatMap((item) => {
+    const employment = report.base_analysis.employment.find((entry) => entry.id === item.record_id && entry.status === "accepted" && entry.relation_status === "supported");
+    if (!employment || !item.source_urls.length || !["employment_before_founding", "employment_after_closure"].includes(item.kind)) return [];
+    const before = item.kind === "employment_before_founding";
+    const label = language === "pl"
+      ? before ? "Praca przed powstaniem firmy" : "Praca po zamknięciu firmy"
+      : before ? "Employment predates company" : "Employment follows company closure";
+    return [{
+      id: `company-${item.record_id}-${item.kind}`,
+      whatWeFound: `${label}: ${item.organization}`,
+      whyItMatters: language === "pl"
+        ? `Początek pracy w CV: ${item.cv_date}. ${before ? "Powstanie" : "Zamknięcie"} firmy według źródła: ${item.event_date}.`
+        : `Employment starts in the CV: ${item.cv_date}. Company ${before ? "founded" : "closed"} according to the source: ${item.event_date}.`,
+      whatToCheck: language === "pl" ? "Sprawdź daty i historię firmy, w tym poprzedników i zmiany nazwy." : "Review the dates and business history, including predecessors and name changes.",
+      evidence: [...(employment.organization?.evidence ?? []), ...(employment.start_date?.evidence ?? [])],
+      sourceUrls: item.source_urls,
+    }];
+  });
   const attention: ReportFinding[] = [
     ...institutionFindings,
+    ...companyFindings,
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
     ...comparisons

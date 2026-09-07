@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "outcome", "organizations", "searches_performed", "search_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "company-research-schema-v2"},
+    "schema_version": {"type": "string", "const": "company-research-schema-v3"},
     "outcome": {"type": "string", "enum": ["completed", "insufficient_evidence"]},
     "organizations": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/organization"}},
     "searches_performed": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}},
@@ -42,10 +42,24 @@
         "uncertainty": {"type": "string", "minLength": 1}
       }
     },
+    "lifecycleEvent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "date", "source_urls", "source_kind", "confidence"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["founded", "closed"]},
+        "date": {"type": "string", "pattern": "^[0-9]{4}(-[0-9]{2})?(-[0-9]{2})?$"},
+        "source_urls": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^https://"}},
+        "source_kind": {"type": "string", "enum": ["official_registry", "official_website"]},
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]}
+      }
+    },
     "organization": {
       "type": "object", "additionalProperties": false,
-      "required": ["query_subject", "existence", "activity", "operating_periods", "offices", "relationship", "official_website", "company_pages", "registries", "confidence", "uncertainty", "findings", "limited_online_presence", "limited_online_presence_reason"],
+      "required": ["entity_match", "continuity_unclear", "lifecycle_events", "query_subject", "existence", "activity", "operating_periods", "offices", "relationship", "official_website", "company_pages", "registries", "confidence", "uncertainty", "findings", "limited_online_presence", "limited_online_presence_reason"],
       "properties": {
+        "entity_match": {"type": "string", "enum": ["unique", "ambiguous"]},
+        "continuity_unclear": {"type": "boolean"},
+        "lifecycle_events": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/lifecycleEvent"}},
         "query_subject": {"type": "string", "minLength": 1},
         "existence": {"type": "string", "enum": ["supported", "conflicting", "insufficient_evidence"]},
         "activity": {"$ref": "#/$defs/nullableString"},

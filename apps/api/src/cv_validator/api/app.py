@@ -81,6 +81,7 @@ from cv_validator.research.domain import (
     LinkedInResearchInvalidResponse,
     LinkedInResearchTimeout,
 )
+from cv_validator.research.company_timeline import apply_company_timeline
 from cv_validator.research.education import (
     EducationResearchService,
     apply_owner_scoped_education_context,
@@ -1051,6 +1052,8 @@ def create_app(
                         subject_results[request_index] = subject
                 complete_results = [item for item in subject_results if item is not None]
                 result = merge_subject_results(category, complete_results, descriptors)
+                if category == "company":
+                    result = apply_company_timeline(result, stored)
                 if category == "education":
                     result = apply_owner_scoped_education_context(
                         result, stored, location_resolver=resolver,
