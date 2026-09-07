@@ -74,6 +74,16 @@ def test_bootstrap_builds_and_reuses_a_complete_release(tmp_path: Path) -> None:
     )
     postal.close()
     assert json.loads((release / "release.json").read_text())["snapshot_version"] == "2026-09-02"
+    assert all((release / name).stat().st_mode & 0o777 == 0o644 for name in (
+        "locations.sqlite3",
+        "locations.manifest.json",
+        "postal-codes.sqlite3",
+        "postal-codes.manifest.json",
+        "release.json",
+    ))
+
+    (release / "locations.sqlite3").chmod(0o600)
+    (release / "locations.manifest.json").chmod(0o600)
 
     bootstrap_reference_data(
         target,
@@ -81,6 +91,8 @@ def test_bootstrap_builds_and_reuses_a_complete_release(tmp_path: Path) -> None:
         source_urls=URLS,
         downloader=lambda *_: pytest.fail("valid release must not download"),
     )
+    assert (release / "locations.sqlite3").stat().st_mode & 0o777 == 0o644
+    assert (release / "locations.manifest.json").stat().st_mode & 0o777 == 0o644
 
 
 def test_failed_refresh_preserves_current_release_and_recovers_staging(tmp_path: Path) -> None:
