@@ -6,10 +6,11 @@ from cv_validator.research.domain import CompanyResearchInvalidResponse
 
 def company_payload() -> dict:
     return {
-        "schema_version": "company-research-schema-v2",
+        "schema_version": "company-research-schema-v3",
         "outcome": "completed",
         "organizations": [{
             "query_subject": "Example Systems",
+            "entity_match": "ambiguous", "continuity_unclear": True, "lifecycle_events": [],
             "existence": "supported",
             "activity": "Software services",
             "operating_periods": [{

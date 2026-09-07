@@ -116,9 +116,9 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 2);
-  assert.equal(presentation.worthKnowing.length, 1);
-  assert.equal(presentation.attention[1].evidence[0].source_id, "block-1");
+  assert.equal(presentation.attention.length, 1);
+  assert.equal(presentation.worthKnowing.length, 2);
+  assert.equal(presentation.attention[0].evidence[0].source_id, "block-1");
   assert.equal(
     [...presentation.attention, ...presentation.worthKnowing]
       .every((item) => item.evidence.length > 0),
@@ -217,13 +217,14 @@ test("outside-EU status is neutral overview information, not a finding", () => {
 
   value.mechanical.eu_status.sources[0].country_code = "PL";
   value.mechanical.eu_status.inside_eu = ["PL"];
-  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "inside");
 
   value.mechanical.eu_status.sources = [value.mechanical.eu_status.sources[1]];
   value.mechanical.eu_status.primary_source = "phone_prefix";
   value.mechanical.eu_status.inside_eu = [];
   value.mechanical.eu_status.outside_eu = ["CA"];
-  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
+  value.mechanical.location_resolution = [];
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "unknown");
 });
 
 test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {

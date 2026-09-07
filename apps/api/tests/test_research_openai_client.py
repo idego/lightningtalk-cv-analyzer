@@ -56,6 +56,7 @@ class Client:
 def company_item(subject: str, source: str) -> dict:
     return {
         "query_subject": subject,
+        "entity_match": "ambiguous", "continuity_unclear": True, "lifecycle_events": [],
         "existence": "supported",
         "activity": "Software services",
         "operating_periods": [],
@@ -83,6 +84,7 @@ def education_item(institution: str, program: str, source: str) -> dict:
         "institution": institution,
         "program": program,
         "degree": None,
+            "institution_existence": "insufficient_evidence", "resolved_institution": None,
         "program_exists": "supported",
         "degree_exists": "evidence_unavailable",
         "dates": None,
@@ -106,7 +108,7 @@ def test_company_research_maps_reversed_model_rows_by_echoed_subject() -> None:
     first_source = "https://first.example/"
     second_source = "https://second.example/"
     payload = {
-        "schema_version": "company-research-schema-v2",
+        "schema_version": "company-research-schema-v3",
         "outcome": "completed",
         "organizations": [
             company_item("Second Systems", second_source),
@@ -135,7 +137,7 @@ def test_education_research_maps_reversed_model_rows_by_echoed_subject() -> None
     first_source = "https://first.example.edu/"
     second_source = "https://second.example.edu/"
     payload = {
-        "schema_version": "education-research-schema-v5",
+        "schema_version": "education-research-schema-v6",
         "outcome": "completed",
         "credentials": [
             education_item("Second University", "Physics", second_source),

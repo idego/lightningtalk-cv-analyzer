@@ -45,10 +45,11 @@ class AdaptiveCompanyResearcher:
 
 def company_result() -> dict:
     return {
-        "schema_version": "company-research-schema-v2",
+        "schema_version": "company-research-schema-v3",
         "outcome": "completed",
         "organizations": [{
             "query_subject": "Example Systems",
+            "entity_match": "ambiguous", "continuity_unclear": True, "lifecycle_events": [],
             "existence": "supported",
             "activity": "Software services",
             "operating_periods": [],
@@ -76,12 +77,13 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v5",
+        "schema_version": "education-research-schema-v6",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
             "program": "Computer Science",
             "degree": None,
+            "institution_existence": "insufficient_evidence", "resolved_institution": None,
             "program_exists": "supported",
             "degree_exists": "evidence_unavailable",
             "dates": None,
