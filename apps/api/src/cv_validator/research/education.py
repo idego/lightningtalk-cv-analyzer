@@ -17,8 +17,8 @@ from cv_validator.research.versions import EDUCATION_RESEARCH_VERSION
 from cv_validator.research.subjects import accepted_records, safe_public_subject, supported_field
 
 RESEARCH_VERSION = EDUCATION_RESEARCH_VERSION
-PROMPT_VERSION = "education-research-prompt-v7"
-SCHEMA_VERSION = "education-research-schema-v5"
+PROMPT_VERSION = "education-research-prompt-v8"
+SCHEMA_VERSION = "education-research-schema-v6"
 MAX_CREDENTIALS = 12
 
 
@@ -171,6 +171,15 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
     if returned != expected or len(returned) != len(payload["credentials"]):
         raise EducationResearchInvalidResponse()
     for credential in payload["credentials"]:
+        existence = credential["institution_existence"]
+        institution_findings = [item for item in credential["findings"] if item["kind"] == "institution_existence"]
+        if existence != "insufficient_evidence" and (
+            not credential["resolved_institution"] or not institution_findings
+            or any(not item["source_urls"] for item in institution_findings)
+        ):
+            raise EducationResearchInvalidResponse()
+        if existence == "conflicting" and not any(item["confidence"] == "high" for item in institution_findings):
+            raise EducationResearchInvalidResponse()
         kinds = {finding["kind"] for finding in credential["findings"]}
         required: set[str] = set()
         for field, kind in (

@@ -384,7 +384,15 @@ def _retain_cited_education_findings(
                 retained_findings.append(finding)
             else:
                 normalized = True
+        # Institution verdicts require the exact cited page, not merely its origin.
+        for finding in retained_findings:
+            if finding["kind"] == "institution_existence":
+                finding["source_urls"] = [url for url in finding["source_urls"] if _canonical_source_url(url) in canonical_sources]
+        retained_findings = [finding for finding in retained_findings if finding["source_urls"]]
         credential["findings"] = retained_findings
+        if not any(finding["kind"] == "institution_existence" for finding in retained_findings):
+            credential["institution_existence"] = "insufficient_evidence"
+            credential["resolved_institution"] = None
         retained_kinds = {finding["kind"] for finding in retained_findings}
         for field, kind in (
             ("program_exists", "program"),

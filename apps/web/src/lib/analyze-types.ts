@@ -99,6 +99,8 @@ export type EducationResearch = {
     institution: string | null;
     program: string | null;
     degree: string | null;
+    institution_existence?: "supported" | "conflicting" | "insufficient_evidence";
+    resolved_institution?: string | null;
     program_exists: "supported" | "mismatch" | "evidence_unavailable";
     degree_exists: "supported" | "mismatch" | "evidence_unavailable";
     dates: string | null;

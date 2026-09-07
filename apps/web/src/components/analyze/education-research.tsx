@@ -22,7 +22,7 @@ import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 type Credential = EducationResearch["credentials"][number];
 
 function EducationResult({ credential }: { credential: Credential }) {
-  const { t } = useCopy();
+  const { t, settings } = useCopy();
   const searchHref = educationGoogleSearchUrl({
     institution: credential.institution,
     program: credential.program,
@@ -40,6 +40,9 @@ function EducationResult({ credential }: { credential: Credential }) {
     action={<div className="flex flex-wrap items-center gap-2 sm:justify-end"><ResearchConfidenceBadge confidence={credential.confidence} />{searchHref ? <GoogleSearchAction href={searchHref} subject={subject} /> : null}</div>}
     contentClassName="space-y-2 pt-3"
   >
+    {credential.institution_existence ? <p className="text-xs text-muted-foreground">{settings.uiLanguage === "pl"
+      ? ({ supported: "Uczelnia potwierdzona", conflicting: "Sprzeczne dane uczelni", insufficient_evidence: "Uczelnia niepotwierdzona" })[credential.institution_existence]
+      : ({ supported: "Institution found", conflicting: "Institution details conflict", insufficient_evidence: "Institution not confirmed" })[credential.institution_existence]}</p> : null}
     {details ? <p className="text-muted-foreground">{details}</p> : null}
     {credential.location_difference_for_review ? <p className="rounded border border-amber-500/30 p-2 text-xs">{t("forReview")} {credential.location_difference_for_review} {t("doesNotVerifyCandidateLocation")}</p> : null}
     <p className="text-xs text-muted-foreground">{credential.uncertainty}</p>

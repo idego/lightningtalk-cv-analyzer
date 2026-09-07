@@ -12,6 +12,7 @@ export type ReportFinding = {
   whyItMatters: string;
   whatToCheck: string;
   evidence: Evidence[];
+  sourceUrls?: string[];
 };
 
 export type OverviewRecord = {
@@ -361,7 +362,21 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         linkedinEvidence,
       )
     : null;
+  const institutionFindings: ReportFinding[] = (report.education_research?.credentials ?? []).flatMap((credential, index) => {
+    if (credential.institution_existence !== "conflicting" || !credential.resolved_institution) return [];
+    const supported = credential.findings.filter((item) => item.kind === "institution_existence" && item.confidence === "high" && item.source_urls.length);
+    if (!supported.length) return [];
+    return [{
+      id: `institution-conflict-${index}`,
+      whatWeFound: `${language === "pl" ? "Sprzeczne dane uczelni" : "Institution details conflict"}: ${credential.institution}`,
+      whyItMatters: supported.map((item) => item.summary).join(" "),
+      whatToCheck: language === "pl" ? "Sprawdź nazwę uczelni i cytowane źródło." : "Review the institution name and cited source.",
+      evidence: [],
+      sourceUrls: [...new Set(supported.flatMap((item) => item.source_urls))],
+    }];
+  });
   const attention: ReportFinding[] = [
+    ...institutionFindings,
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
     ...comparisons

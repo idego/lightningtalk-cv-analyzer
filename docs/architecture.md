@@ -26,6 +26,10 @@ PDF or DOCX upload
   resolution, accepted postal-address checks, and informational EU status.
 - A postal-looking token is not a candidate address until supported context
   accepts that relation.
+- Education research distinguishes supported institution existence, cited conflicts,
+  and insufficient evidence. Only a sourced institution conflict creates an attention
+  finding; missing research evidence remains a panel status. Older results without
+  this assessment remain readable and need fresh research for a new verdict.
 - Company, education, and LinkedIn research receives only accepted subjects.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.

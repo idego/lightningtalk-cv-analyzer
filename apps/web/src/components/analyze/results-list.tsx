@@ -17,6 +17,7 @@ import { GoogleSearchAction } from "@/components/analyze/google-search-action";
 import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
+import { ResearchSources } from "@/components/analyze/research-sources";
 import { ReportAiCost } from "@/components/analyze/report-ai-cost";
 
 export function FlagList({ flags }: { flags: ReportFinding[] }) {
@@ -36,6 +37,7 @@ export function FlagList({ flags }: { flags: ReportFinding[] }) {
             <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whyItMatters")}</dt><dd className="mt-1 leading-relaxed">{flag.whyItMatters}</dd></div>
             <div><dt className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{t("whatToCheck")}</dt><dd className="mt-1 leading-relaxed">{flag.whatToCheck}</dd></div>
           </dl>
+          {flag.sourceUrls?.length ? <ResearchSources urls={flag.sourceUrls} /> : null}
           {flag.evidence.length ? (
             <div className="mt-3 space-y-1 border-l-2 pl-2 text-xs text-muted-foreground">
               {flag.evidence.map((evidence, index) => (
