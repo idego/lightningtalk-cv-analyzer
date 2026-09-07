@@ -175,3 +175,43 @@ Profile retention follows the existing configured retention period, using the
 profile's last-updated timestamp. Deleting an analysis does not delete a separately
 saved editable profile. Back up the existing API database to include profiles,
 templates, custom fields, and preferences. No new database service is required.
+
+
+## Consolidated-branch upgrade
+
+Before the first upgrade from the token-owned `base-analysis-v2` database, stop
+writes and back up both application and authentication volumes. Deploy web and
+API together; their internal owner header changes as one contract. Do not rotate
+`BETTER_AUTH_SECRET` during this first upgrade. Existing hashes move into a
+transient `legacy_analysis_owners` mapping instead of being discarded. On an
+authenticated request, the private API derives that user's old HMAC and binds
+only matching reports/runs to the stable Better Auth user id. Original uploads,
+share links, feedback snapshots, authorship, triage and events are retained.
+Repeated or concurrent binding is safe. Normal retention also removes unclaimed
+migration mappings; it continues to retain feedback and the AI usage ledger.
+
+When rotating the authentication secret before every retained owner has returned,
+set `CV_VALIDATOR_LEGACY_OWNER_SECRET` to the original secret in the API environment.
+Already bound analysis ownership is independent of secret rotation. Profile Builder
+still uses its original server-only HMAC namespace for existing profiles, templates
+and preferences, so preserve its original auth secret until those records have a
+separately planned ownership migration. No owner token is returned to the browser.
+Databases already upgraded by dropping hashes without preserving a mapping need a
+pre-upgrade backup to recover ownership; this migration cannot reconstruct a lost
+secret or unknown user identity.
+
+The `volume-init` one-shot container fixes ownership of the two existing named
+application volumes before API and feedback initialization start. It runs as root
+only for this operation; API runs as UID/GID 10001 and the web/feedback initializer
+as UID/GID 1000. This covers existing root-owned SQLite databases, not just fresh
+empty volumes. Do not replace it with world-writable permissions or expose the API.
+Custom database paths must stay within their respective `/app/data` mounts.
+
+The GeoNames version must match `config/geonames.lock` (`2026-08-21` for this
+snapshot); update old environment files that still use `2026-09-02`, or intentionally
+refresh both the approved data and lock together. The web host port remains 3001
+by default and the container still listens on 3000.
+
+A code-only checkout of an older token-owned version is not a database rollback.
+Restore the backed-up volumes together with that version. Never delete volumes to
+make an upgrade pass.

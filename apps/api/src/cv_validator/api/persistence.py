@@ -70,6 +70,12 @@ class PersistenceStore:
             _require_current_report_schema(conn)
             conn.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS legacy_analysis_owners (
+                    analysis_id TEXT PRIMARY KEY,
+                    token_hash TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS legacy_analysis_owners_token
+                    ON legacy_analysis_owners(token_hash);
                 DROP TABLE IF EXISTS linkedin_comparison;
                 DROP TABLE IF EXISTS linkedin_confirmation;
                 CREATE TABLE IF NOT EXISTS reports (
@@ -240,6 +246,46 @@ class PersistenceStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS analysis_runs_owner ON analysis_runs(owner_user_id, created_at DESC)"
             )
+
+    def bind_legacy_owner(self, owner_user_id: str, legacy_access_token: str) -> None:
+        """Bind matching legacy history and re-key feedback without losing snapshots.
+
+        Called only with identity derived by the authenticated private boundary.
+        New writes continue to use owner_user_id, never capability-token ownership.
+        """
+        token_hash = _token_hash(legacy_access_token)
+        old_actor = hashlib.sha256(f"actor:{legacy_access_token}".encode()).hexdigest()
+        new_actor = hashlib.sha256(f"actor:{owner_user_id}".encode()).hexdigest()
+        try:
+            with self._connect() as conn:
+                pending = conn.execute("""SELECT 1 FROM legacy_analysis_owners WHERE token_hash = ?
+                    UNION ALL SELECT 1 FROM feedback_responses WHERE actor_hash = ? LIMIT 1""",
+                    (token_hash, old_actor)).fetchone()
+                if pending is None:
+                    return
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("PRAGMA defer_foreign_keys = ON")
+                for table in ("reports", "analysis_runs"):
+                    conn.execute(f"""UPDATE {table} SET owner_user_id = ?
+                        WHERE owner_user_id IS NULL AND analysis_id IN (
+                            SELECT analysis_id FROM legacy_analysis_owners WHERE token_hash = ?
+                        )""", (owner_user_id, token_hash))
+                # Move parent and triage keys in one deferred-FK transaction. If
+                # both versions already exist, retain the older record for inbox
+                # review rather than overwrite either user's recorded response.
+                targets = conn.execute("""SELECT target_id FROM feedback_responses AS old
+                    WHERE actor_hash = ? AND NOT EXISTS (
+                        SELECT 1 FROM feedback_responses AS new
+                        WHERE new.target_id = old.target_id AND new.actor_hash = ?
+                    )""", (old_actor, new_actor)).fetchall()
+                for row in targets:
+                    for table in ("feedback_responses", "feedback_triage", "feedback_events"):
+                        conn.execute(f"""UPDATE {table} SET actor_hash = ?
+                            WHERE target_id = ? AND actor_hash = ?""",
+                            (new_actor, row["target_id"], old_actor))
+                conn.execute("DELETE FROM legacy_analysis_owners WHERE token_hash = ?", (token_hash,))
+        except sqlite3.Error as exc:
+            raise PersistenceError("legacy ownership migration failed") from exc
 
     def create_analysis_run(
         self,
@@ -665,6 +711,7 @@ class PersistenceStore:
         placeholders = ",".join("?" for _ in analysis_ids)
         with self._connect() as conn:
             for table in (
+                "legacy_analysis_owners",
                 "diagnostic_events",
                 "research_cache_audit",
                 "company_research",
@@ -906,6 +953,7 @@ class PersistenceStore:
             if expired_ids:
                 placeholders = ",".join("?" for _ in expired_ids)
                 for table in (
+                    "legacy_analysis_owners",
                     "research_cache_audit",
                     "company_research",
                     "education_research",
@@ -1087,32 +1135,35 @@ def _candidate_name(payload: dict[str, Any]) -> str | None:
 
 
 def _ensure_owner_schema(conn: sqlite3.Connection) -> None:
-    """Add stable owner columns to databases created before owner-id scoping.
+    """Preserve legacy v2 owner hashes until the authenticated owner returns.
 
-    Existing capability-token rows cannot be mapped back to a Better Auth user id,
-    so they remain inaccessible until naturally purged. New writes never use the
-    legacy token-hash columns.
+    The private web boundary supplies a stable user id. Only the API, using the
+    original auth secret, can derive the matching old HMAC; clients cannot claim
+    rows with a browser-supplied capability. Old pilot schemas are still rejected.
     """
     report_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(reports)").fetchall()
     }
-    current_report_columns = {
+    required = {
         "input_hash", "contract_version", "strategy_name", "strategy_version",
         "status", "created_at", "analysis_id", "source_filename",
     }
-    current_schema = bool(report_columns) and current_report_columns.issubset(report_columns)
-    if current_schema and "owner_user_id" not in report_columns:
-        conn.execute("ALTER TABLE reports ADD COLUMN owner_user_id TEXT")
-    if current_schema and "access_token_hash" in report_columns:
-        conn.execute("ALTER TABLE reports DROP COLUMN access_token_hash")
-
-    run_columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(analysis_runs)").fetchall()
-    }
-    if current_schema and run_columns and "owner_user_id" not in run_columns:
-        conn.execute("ALTER TABLE analysis_runs ADD COLUMN owner_user_id TEXT")
-    if current_schema and "access_token_hash" in run_columns:
-        conn.execute("ALTER TABLE analysis_runs DROP COLUMN access_token_hash")
+    if not report_columns or not required.issubset(report_columns):
+        return
+    conn.execute("""CREATE TABLE IF NOT EXISTS legacy_analysis_owners (
+        analysis_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL
+    )""")
+    for table in ("reports", "analysis_runs"):
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not columns:
+            continue
+        if "owner_user_id" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN owner_user_id TEXT")
+        if "access_token_hash" in columns:
+            conn.execute(f"""INSERT OR IGNORE INTO legacy_analysis_owners
+                SELECT analysis_id, access_token_hash FROM {table}
+                WHERE owner_user_id IS NULL AND access_token_hash IS NOT NULL""")
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN access_token_hash")
 
 
 def _require_current_report_schema(conn: sqlite3.Connection) -> None:

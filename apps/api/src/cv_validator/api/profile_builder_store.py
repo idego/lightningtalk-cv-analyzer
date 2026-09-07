@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 from cv_validator.api.persistence import PersistenceStore
 from cv_validator.errors import PersistenceError
@@ -33,10 +34,15 @@ class ProfileBuilderStore:
             conn.executescript('CREATE TABLE IF NOT EXISTS candidate_profiles (\n                    profile_id TEXT PRIMARY KEY,\n                    access_token_hash TEXT NOT NULL,\n                    source_filename TEXT NOT NULL,\n                    profile_json TEXT NOT NULL,\n                    anonymization_json TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE INDEX IF NOT EXISTS candidate_profiles_owner_updated\n                    ON candidate_profiles(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_templates (\n                    access_token_hash TEXT NOT NULL,\n                    template_id TEXT NOT NULL,\n                    name TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL,\n                    PRIMARY KEY (access_token_hash, template_id)\n                );\n                CREATE INDEX IF NOT EXISTS profile_templates_owner_updated\n                    ON profile_templates(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_custom_fields (\n                    field_id TEXT PRIMARY KEY,\n                    field_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE TABLE IF NOT EXISTS profile_builder_preferences (\n                    access_token_hash TEXT PRIMARY KEY,\n                    preferences_json TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                ')
             _sanitize_profile_builder_storage(conn)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.config.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def purge_expired(self) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self._retention_days())).isoformat()

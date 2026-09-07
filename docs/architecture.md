@@ -77,9 +77,8 @@ The authoritative executable contracts are:
 ## Profile Builder
 
 The CVtoBlind-replacement workflow is restored from `origin/feature/profile-builder`
-(`5f4b934`) without merging its obsolete analyzer implementation. The analyzer's
-`base-analysis-v2` contract, prompts, reviewer policy, research, and history are
-unchanged. Profile conversion is a separate editable-document workflow:
+(`5f4b934`) without merging its obsolete analyzer implementation. The builder does not alter the analyzer's prompts or reviewer policy. Analyzer
+ownership and research hardening remain separate concerns. Profile conversion is a separate editable-document workflow:
 
 `PDF/DOCX -> current text-only Docling converter -> bounded structured extraction -> CandidateProfile -> editing + visibility/template snapshot -> native DOCX -> LibreOffice PDF`.
 

@@ -16,7 +16,7 @@ from time import perf_counter
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -268,10 +268,29 @@ def create_app(
             if isinstance(postal_resolver, SQLitePostalCodeResolver):
                 postal_resolver.close()
 
+    legacy_owner_secret = os.environ.get("CV_VALIDATOR_LEGACY_OWNER_SECRET") or os.environ.get("BETTER_AUTH_SECRET")
+
+    def bind_authenticated_owner(x_analysis_owner_id: str | None = Header(default=None)) -> None:
+        if x_analysis_owner_id is None:
+            return
+        owner_user_id = _owner_user_id(x_analysis_owner_id)
+        if not legacy_owner_secret:
+            return
+        legacy_token = hmac.new(
+            legacy_owner_secret.encode(),
+            f"cv-analysis-history:{owner_user_id}".encode(),
+            "sha256",
+        ).hexdigest()
+        try:
+            store.bind_legacy_owner(owner_user_id, legacy_token)
+        except PersistenceError as exc:
+            raise HTTPException(status_code=503, detail="analysis_ownership_migration_failed") from exc
+
     app = FastAPI(
         title="CV Analyzer",
         version="2.0.0",
         lifespan=lifespan,
+        dependencies=[Depends(bind_authenticated_owner)],
     )
 
     def capabilities() -> dict:

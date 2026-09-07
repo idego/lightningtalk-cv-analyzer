@@ -52,3 +52,19 @@ An analysis owner SHALL be able to create a high-entropy share capability for on
 #### Scenario: Shared analysis is deleted
 - **WHEN** the owning user deletes an analysis that has active share capabilities
 - **THEN** those shared report and document URLs stop resolving
+
+
+### Requirement: Preserve existing v2 owners on upgrade
+An upgrade from token-owned `base-analysis-v2` SHALL retain legacy owner hashes in
+a transient mapping until matched to an authenticated user through the private
+web/API boundary. The API SHALL derive the prior HMAC from a server-held secret,
+not accept a browser-supplied claim. Binding SHALL be idempotent, preserve source
+documents and shares, and re-key feedback authorship together with its triage and
+events without losing snapshots. New writes SHALL use stable user ids. Unmatched
+mappings SHALL expire with their analysis, not delete long-lived feedback.
+
+#### Scenario: Existing owner returns after deployment
+- **WHEN** the authenticated owner opens history after the web/API upgrade
+- **THEN** matching retained reports and uploads are available without re-upload
+- **AND** another user's reports remain inaccessible
+- **AND** prior feedback and triage are preserved

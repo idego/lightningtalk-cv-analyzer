@@ -23,8 +23,8 @@ FROM base AS dev
 COPY tests ./tests
 
 RUN pip install --no-cache-dir ".[dev]" \
-    && addgroup --system app \
-    && adduser --system --ingroup app app \
+    && addgroup --system --gid 10001 app \
+    && adduser --system --uid 10001 --ingroup app --home /home/app app \
     && mkdir -p /app/data \
     && chown -R app:app /app/data
 
@@ -37,8 +37,8 @@ CMD ["cv-geonames-bootstrap"]
 
 FROM base AS runtime
 
-RUN addgroup --system app \
-    && adduser --system --ingroup app app \
+RUN addgroup --system --gid 10001 app \
+    && adduser --system --uid 10001 --ingroup app --home /home/app app \
     && mkdir -p /app/data \
     && chown -R app:app /app/data
 USER app

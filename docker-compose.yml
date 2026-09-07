@@ -1,5 +1,25 @@
 services:
+  volume-init:
+    build:
+      context: ./apps/api
+      target: runtime
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R app:app /api-data && chown -R 1000:1000 /web-data"]
+    volumes:
+      - cv_validator_data:/api-data
+      - web_auth_data:/web-data
+    healthcheck:
+      disable: true
+    cpus: 0.50
+    mem_limit: 128m
+    pids_limit: 64
+    restart: "no"
+
   feedback-init:
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     build:
       context: ./apps/web
       target: feedback-init
@@ -87,9 +107,10 @@ services:
       - "8000"
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/cv_analyzer.db}
-      # Used only to authenticate privileged web -> API control-plane writes.
-      # Rotation does not affect persisted analysis ownership.
+      # Privileged writes and authenticated migration of legacy analysis owners.
+      # Already migrated ownership no longer depends on this secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
+      CV_VALIDATOR_LEGACY_OWNER_SECRET: ${CV_VALIDATOR_LEGACY_OWNER_SECRET:-}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -111,6 +132,8 @@ services:
         target: /app/reference-data
         read_only: true
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       geonames-init:
         condition: service_completed_successfully
     healthcheck:
@@ -137,6 +160,8 @@ services:
       CV_VALIDATOR_REPO_ROOT: /workspace
     volumes:
       - ./scripts:/workspace/scripts:ro
+      - ./config:/workspace/config:ro
+      - ./apps/web/Dockerfile:/workspace/apps/web/Dockerfile:ro
       - ./docker-compose.yml:/workspace/docker-compose.yml:ro
       - ./docker-compose.reference-data.yml:/workspace/docker-compose.reference-data.yml:ro
       - ./.gitignore:/workspace/.gitignore:ro

@@ -225,6 +225,7 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
           PRIMARY KEY(target_id, actor_hash),
           FOREIGN KEY(target_id) REFERENCES feedback_targets(target_id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS feedback_responses_actor ON feedback_responses(actor_hash);
         CREATE INDEX IF NOT EXISTS feedback_responses_active ON feedback_responses(withdrawn_at, updated_at);
         CREATE TABLE IF NOT EXISTS feedback_events (
           id INTEGER PRIMARY KEY AUTOINCREMENT, target_id TEXT NOT NULL, actor_hash TEXT NOT NULL,

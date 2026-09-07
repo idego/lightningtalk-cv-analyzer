@@ -63,3 +63,11 @@ Long-lived `web` and `api` runtime containers and the feedback initializer SHALL
 #### Scenario: Production compose is inspected
 - **WHEN** an operator renders the production Compose config
 - **THEN** web/API services have explicit resource bounds and the deployed project uses the configured project name
+
+
+### Requirement: Existing-volume non-root upgrade
+A bounded, one-shot permissions initializer SHALL prepare the existing API and
+web-auth named volumes before API or feedback initialization starts. Only this
+initializer may run as root for application-volume ownership changes; long-lived
+services remain non-root. An upgrade MUST NOT require deleting existing volumes
+or making SQLite data world-writable.
