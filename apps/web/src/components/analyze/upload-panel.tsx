@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, CircleAlert, Clock3, LoaderCircle, Trash2, UploadCloud } from "lucide-react";
+import { Check, CircleAlert, Clock3, LoaderCircle, X, UploadCloud } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,6 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const routeRequest = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const openedFromHistoryPush = useRef(false);
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
@@ -230,22 +229,15 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
       <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <label
-          role="button"
-          tabIndex={0}
           className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/15 p-5 text-center outline-none transition-colors hover:bg-muted/30 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
-          onKeyDown={(event) => {
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            fileInputRef.current?.click();
-          }}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}
         >
-          <input ref={fileInputRef} type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
+          <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
           <UploadCloud className="mb-2 size-5 text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
         </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
         {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset} disabled={!files.length}>{t("reset")}</Button></div>
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}

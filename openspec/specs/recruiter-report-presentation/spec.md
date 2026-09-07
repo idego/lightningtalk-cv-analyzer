@@ -51,3 +51,7 @@ An owner-opened persisted report SHALL show a compact estimated AI cost badge ba
 #### Scenario: Report usage is available
 - **WHEN** a recruiter opens their persisted analysis and usage has been ledgered
 - **THEN** the report header shows the compact two-decimal estimated cost and a five-decimal tooltip detail
+
+
+### Requirement: Compact overview and research controls
+Education and employment overview records SHALL use two columns at desktop widths and one at mobile widths, preserving their existing order. Certifications SHALL remain a separate full-width group with Google actions aligned to its right edge. Research confidence SHALL use three dots with a localized tooltip and accessible name, without a visible text badge. Back, Copy link, and Show/Hide CV SHALL have visible outlines. Existing preview visibility and workspace breakpoints remain unchanged.

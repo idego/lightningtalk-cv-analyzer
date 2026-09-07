@@ -66,11 +66,11 @@ export function AnalysisWorkspace({
         onBack={onBack}
         center={!hasOriginalFiles ? <p className="min-w-0 truncate text-center text-xs text-foreground/75 sm:text-sm" title={t("originalNotRetained")}>{t("originalNotRetained")}</p> : null}
         action={<div className="flex items-center gap-1">
-          {!readOnly && activeReport ? <Button variant="ghost" size="sm" disabled={shareStatus === "copying"} onClick={() => void copyShareLink()}>
+          {!readOnly && activeReport ? <Button variant="outline" size="sm" className="border-foreground/25" disabled={shareStatus === "copying"} onClick={() => void copyShareLink()}>
             {shareStatus === "copying" ? <LoaderCircle className="animate-spin" /> : shareStatus === "copied" ? <Check /> : <Link2 />}
             {t(shareStatus === "copying" ? "copyingAnalysisLink" : shareStatus === "copied" ? "analysisLinkCopied" : shareStatus === "failed" ? "analysisLinkCopyFailed" : "copyAnalysisLink")}
           </Button> : null}
-          {!hasOriginalFiles ? <Button variant="ghost" size="sm" disabled><PanelRightOpen />{t("showCv")}</Button> : <Button variant="ghost" size="sm" onClick={() => setPreviewMode(previewVisible ? "hidden" : "shown")}>
+          {!hasOriginalFiles ? <Button variant="outline" size="sm" className="border-foreground/25" disabled><PanelRightOpen />{t("showCv")}</Button> : <Button variant="outline" size="sm" className="border-foreground/25" onClick={() => setPreviewMode(previewVisible ? "hidden" : "shown")}>
             {previewVisible ? <PanelRightClose /> : <PanelRightOpen />}
             {t(previewVisible ? "hideCv" : "showCv")}
           </Button>}

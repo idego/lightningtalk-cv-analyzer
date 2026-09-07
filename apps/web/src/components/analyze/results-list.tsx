@@ -174,7 +174,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
 
           {overview.education.length || overview.educationStatus ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
-            <div className="grid gap-y-1">
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {overview.education.map((item) => {
                 const href = educationGoogleSearchUrl({ institution: item.searchSubject, program: item.searchContext });
                 return <OverviewRow
@@ -193,7 +193,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
 
           {overview.certifications.length ? <section aria-labelledby="overview-certifications" className="border-t pt-4">
             <h4 id="overview-certifications" className="mb-2 text-xs font-semibold text-foreground">{t("certifications")}</h4>
-            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+            <div className="grid gap-y-1">
               {overview.certifications.map((item) => {
                 const href = educationGoogleSearchUrl({ institution: null, certificate: item.searchSubject, program: item.searchContext });
                 return <OverviewRow
@@ -211,7 +211,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
 
           {overview.employment.length || overview.employmentStatus ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
-            <div className="grid gap-y-1">
+            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
               {overview.employment.map((item) => {
                 const href = companyGoogleSearchUrl({ organization: item.searchSubject, location: item.searchContext });
                 return <OverviewRow
