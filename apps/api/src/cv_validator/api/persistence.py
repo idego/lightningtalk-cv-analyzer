@@ -359,6 +359,7 @@ class PersistenceStore:
                 SUM(CASE WHEN estimated_cost_usd IS NULL AND total_tokens > 0 THEN 1 ELSE 0 END) AS unpriced_requests,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                COALESCE(SUM(cache_write_input_tokens), 0) AS cache_write_input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
                 SUM(CAST(COALESCE(estimated_cost_usd, '0') AS REAL)) AS estimated_cost_usd,
@@ -1004,6 +1005,7 @@ def _usage_aggregate(row: dict[str, Any]) -> dict[str, Any]:
         "unpriced_requests": int(row.get("unpriced_requests") or 0),
         "input_tokens": int(row.get("input_tokens") or 0),
         "cached_input_tokens": int(row.get("cached_input_tokens") or 0),
+        "cache_write_input_tokens": int(row.get("cache_write_input_tokens") or 0),
         "output_tokens": int(row.get("output_tokens") or 0),
         "total_tokens": int(row.get("total_tokens") or 0),
         "estimated_cost_usd": (
@@ -1024,6 +1026,7 @@ def _usage_group_aggregate(row: dict[str, Any]) -> dict[str, Any]:
         "attempts": summary["requests"],
         "input_tokens": summary["input_tokens"],
         "cached_input_tokens": summary["cached_input_tokens"],
+        "cache_write_input_tokens": summary["cache_write_input_tokens"],
         "output_tokens": summary["output_tokens"],
         "total_tokens": summary["total_tokens"],
         "estimated_cost_usd": summary["estimated_cost_usd"],

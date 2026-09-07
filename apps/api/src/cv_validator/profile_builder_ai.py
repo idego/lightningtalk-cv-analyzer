@@ -153,6 +153,7 @@ def build_profile_extraction_request(
         },
         "tools": [],
         "store": settings.store,
+        "prompt_cache_key": PROFILE_BUILDER_PROMPT_VERSION,
         "max_output_tokens": settings.max_output_tokens,
     }
     return ProfileExtractionRequest(
@@ -212,6 +213,7 @@ def build_profile_summary_request(
         ],
         "tools": [],
         "store": settings.store,
+        "prompt_cache_key": PROFILE_SUMMARY_PROMPT_VERSION,
         "max_output_tokens": min(
             settings.max_output_tokens, PROFILE_SUMMARY_MAX_OUTPUT_TOKENS
         ),
