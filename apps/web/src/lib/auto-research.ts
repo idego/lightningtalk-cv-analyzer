@@ -1,24 +1,31 @@
-import type { AnalysisReport } from "@/lib/analyze-types";
-import type { AppSettings } from "@/lib/app-settings";
+import { researchErrorFields, type ResearchErrorDetails } from "./research-error-details.js";
+import type { AnalysisReport } from "./analyze-types.ts";
+import type { AppSettings } from "./app-settings.ts";
+import { isSelfEmploymentLabel } from "./relationship-labels.js";
 
 export const AUTO_RESEARCH_MAX_CONCURRENCY = 2;
 export type AutoResearchKind = "company" | "education" | "linkedin";
 export type AutoResearchStatus = "pending" | "running" | "succeeded" | "failed" | "manual-action";
-export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string; httpStatus?: number };
+export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string; diagnostics?: ResearchErrorDetails; httpStatus?: number };
 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
 
-export function withAnalysisAccessToken(
-  report: AnalysisReport,
-  accessToken: string | undefined,
-): AnalysisReport {
-  if (report.analysis_access_token || !accessToken) return report;
-  return { ...report, analysis_access_token: accessToken };
+function supported(field: { value: string; status: string } | null | undefined) {
+  return field?.status === "supported" && safePublicSubject(field.value);
 }
 
-function supported(field: { value: string; status: string } | null | undefined) {
-  return field?.status === "supported" && field.value.trim().length > 0;
+function safePublicSubject(value: string) {
+  const normalized = value.trim();
+  return Boolean(normalized)
+    && normalized.length <= 200
+    && !/[\u0000-\u001f\u007f]/.test(normalized)
+    && !/@|https?:\/\/|www\.|\+?\d[\d\s().-]{6,}\d/i.test(normalized)
+    && /[^\W\d_]/u.test(normalized);
+}
+
+function acceptedRelation(record: { status: string; relation_status?: string }) {
+  return record.status === "accepted" && record.relation_status === "supported";
 }
 
 export function researchEligibility(report: AnalysisReport) {
@@ -26,10 +33,12 @@ export function researchEligibility(report: AnalysisReport) {
     return { company: false, education: false, linkedin: false };
   }
   const employment = report.base_analysis.employment.some(
-    (record) => record.status === "accepted" && supported(record.organization),
+    (record) => acceptedRelation(record)
+      && supported(record.organization)
+      && !isSelfEmploymentLabel(record.organization?.value ?? ""),
   );
   const education = report.base_analysis.education.some(
-    (record) => record.status === "accepted"
+    (record) => acceptedRelation(record)
       && supported(record.institution),
   );
   const linkedin = supported(report.base_analysis.profile.candidate_name);
@@ -46,23 +55,13 @@ export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnable
 }
 
 export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResearchKind> {
-  if (!report.analysis_access_token || report.ai_features_enabled === false) return new Set();
+  if (report.ai_features_enabled === false) return new Set();
   const eligible = researchEligibility(report);
   return new Set([
     eligible.company && "company",
     eligible.education && "education",
     eligible.linkedin && "linkedin",
   ].filter(Boolean) as AutoResearchKind[]);
-}
-
-export function announcedAutoResearchKinds(
-  reports: AnalysisReport[],
-  settings: AppSettings,
-): AutoResearchKind[] {
-  const enabled = new Set(effectiveAutoResearchKinds(settings));
-  const eligible = new Set(reports.flatMap((report) => [...eligibleAutoResearchKinds(report)]));
-  return (["company", "education", "linkedin"] as AutoResearchKind[])
-    .filter((kind) => enabled.has(kind) && eligible.has(kind));
 }
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
@@ -126,15 +125,20 @@ export function createAutoResearchOrchestrator({
         const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
         const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accessToken: report.analysis_access_token, aiEnabled: settings.aiEnabled, refresh }),
+          body: JSON.stringify({ refresh }),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-        if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status });
+        if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status, ...researchErrorFields(payload) });
         writeLedger(report.analysis_id, kind, "succeeded");
         publish(report.analysis_id, kind, { status: "succeeded", result: payload[RESULT_KEYS[kind]] });
       } catch (cause) {
         writeLedger(report.analysis_id, kind, "failed");
-        publish(report.analysis_id, kind, { status: "failed", message: cause instanceof Error ? cause.message : `Automatic ${kind} research failed.`, httpStatus: (cause as { httpStatus?: number }).httpStatus });
+        const failure = cause as { httpStatus?: number; code?: string; reason?: string };
+        const diagnostics: ResearchErrorDetails = {
+          operation: `${kind}_research`, analysisId: report.analysis_id, occurredAt: new Date().toISOString(),
+          code: failure.code ?? "network_error", httpStatus: failure.httpStatus, reason: failure.reason,
+        };
+        publish(report.analysis_id, kind, { status: "failed", message: "Research failed", httpStatus: failure.httpStatus, diagnostics });
       } finally { requests.delete(requestKey); resolve(); }
     }));
     requests.set(requestKey, completion);

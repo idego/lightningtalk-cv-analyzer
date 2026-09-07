@@ -5,13 +5,14 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import Iterator
 
 from cv_validator.location.index import SourceSpec, build_location_index
 from cv_validator.location.postal import SQLitePostalCodeResolver, build_postal_index
@@ -72,10 +73,9 @@ def bootstrap_reference_data(
             _make_release_readable(release)
             _promote(target, release)
             return release
+        previous = _current_release(target)
         if release.exists():
             shutil.rmtree(release)
-
-        previous = _current_release(target)
         staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=target))
         try:
             inputs = staging / "inputs"
@@ -189,7 +189,7 @@ def _valid_release(
         )
         postal.close()
         return True
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError, sqlite3.DatabaseError):
         return False
 
 

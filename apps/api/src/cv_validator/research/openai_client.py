@@ -6,8 +6,10 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import openai
+from jsonschema import Draft202012Validator, FormatChecker
 
 from cv_validator.research.domain import CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchRequest, CompanyResearchTimeout, EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchRequest, EducationResearchTimeout, LinkedInDiscoveryRequest, LinkedInResearchClientError, LinkedInResearchInvalidResponse, LinkedInResearchTimeout
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.linkedin import DEFAULT_MAX_PROFILES, MAX_PROFILES_LIMIT
 
 
@@ -28,7 +30,7 @@ class OpenAIResponsesCompanyResearcher:
         schema = json.loads(files("cv_validator.research.contracts").joinpath("company-research.schema.json").read_text())
         try:
             response = self._client.responses.create(
-                model="gpt-5.6-luna",
+                model=PINNED_OPENAI_MODEL,
                 reasoning={"effort": "medium"},
                 instructions=prompt,
                 input=json.dumps({"organization_facts": request.input_facts}, ensure_ascii=False),
@@ -37,6 +39,7 @@ class OpenAIResponsesCompanyResearcher:
                 max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "company_research", "strict": True, "schema": schema}},
                 store=False,
+                prompt_cache_key="cv-research-company-v1",
                 max_output_tokens=MAX_OUTPUT_TOKENS["company"],
             )
         except openai.APITimeoutError as exc:
@@ -53,16 +56,21 @@ class OpenAIResponsesCompanyResearcher:
             raise CompanyResearchInvalidResponse(
                 "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
             ) from exc
+        _validate_response_schema(
+            payload, schema, CompanyResearchInvalidResponse, response
+        )
+        payload["organizations"] = _reorder_company_subjects(
+            payload["organizations"], request, response
+        )
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise CompanyResearchInvalidResponse("search_count")
+            raise CompanyResearchInvalidResponse(
+                "search_count",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
         payload["searches_performed"] = actual_queries
-        if len(payload.get("organizations", [])) == len(request.input_facts):
-            for organization, input_fact in zip(
-                payload["organizations"], request.input_facts, strict=True
-            ):
-                organization["query_subject"] = input_fact["organization"]
         _retain_cited_company_urls(payload, source_urls)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
@@ -77,12 +85,13 @@ class OpenAIResponsesEducationResearcher:
         schema = json.loads(files("cv_validator.research.contracts").joinpath("education-research.schema.json").read_text())
         try:
             response = self._client.responses.create(
-                model="gpt-5.6-luna", reasoning={"effort": "medium"}, instructions=prompt,
+                model=PINNED_OPENAI_MODEL, reasoning={"effort": "medium"}, instructions=prompt,
                 input=json.dumps({"education_facts": request.input_facts}, ensure_ascii=False),
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "education_research", "strict": True, "schema": schema}},
-                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["education"],
+                store=False, prompt_cache_key="cv-research-education-v1",
+                max_output_tokens=MAX_OUTPUT_TOKENS["education"],
             )
         except openai.APITimeoutError as exc:
             raise EducationResearchTimeout() from exc
@@ -98,17 +107,21 @@ class OpenAIResponsesEducationResearcher:
             raise EducationResearchInvalidResponse(
                 "invalid_json", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
             ) from exc
+        _validate_response_schema(
+            payload, schema, EducationResearchInvalidResponse, response
+        )
+        payload["credentials"] = _reorder_education_subjects(
+            payload["credentials"], request, response
+        )
         source_urls = _source_urls(response)
         actual_queries = _search_queries(response)
         if not actual_queries or len(actual_queries) > 4:
-            raise EducationResearchInvalidResponse("search_count")
+            raise EducationResearchInvalidResponse(
+                "search_count",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
         payload["searches_performed"] = actual_queries
-        if len(payload.get("credentials", [])) == len(request.input_facts):
-            for credential, input_fact in zip(
-                payload["credentials"], request.input_facts, strict=True
-            ):
-                for field in ("institution", "program"):
-                    credential[field] = input_fact.get(field)
         _retain_cited_education_findings(payload, source_urls)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
@@ -131,27 +144,22 @@ class OpenAIResponsesLinkedInResearcher:
         self._max_profiles = max_profiles
 
     def discover(self, request: LinkedInDiscoveryRequest):
-        return self._call(
-            "linkedin-discovery.schema.json",
-            "linkedin_discovery",
-            {
-                "candidate_name": request.candidate["name"],
-                "search_hints": request.candidate.get("search_hints", []),
-                "max_profiles": self._max_profiles,
-            },
-        )
-
-    def _call(self, schema_file: str, schema_name: str, input_payload: dict[str, Any]):
+        input_payload = {
+            "candidate_name": request.candidate["name"],
+            "search_hints": request.candidate.get("search_hints", []),
+            "max_profiles": self._max_profiles,
+        }
         prompt = files("cv_validator.research.contracts").joinpath("linkedin-prompt.md").read_text()
-        schema = json.loads(files("cv_validator.research.contracts").joinpath(schema_file).read_text())
+        schema = json.loads(files("cv_validator.research.contracts").joinpath("linkedin-discovery.schema.json").read_text())
         try:
             response = self._client.responses.create(
-                model="gpt-5.6-luna", reasoning={"effort": "medium"}, instructions=prompt,
+                model=PINNED_OPENAI_MODEL, reasoning={"effort": "medium"}, instructions=prompt,
                 input=json.dumps(input_payload, ensure_ascii=False),
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
-                text={"format": {"type": "json_schema", "name": schema_name, "strict": True, "schema": schema}},
-                store=False, max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
+                text={"format": {"type": "json_schema", "name": "linkedin_discovery", "strict": True, "schema": schema}},
+                store=False, prompt_cache_key="cv-research-linkedin-v1",
+                max_output_tokens=MAX_OUTPUT_TOKENS["linkedin"],
             )
         except openai.APITimeoutError as exc:
             raise LinkedInResearchTimeout() from exc
@@ -167,18 +175,101 @@ class OpenAIResponsesLinkedInResearcher:
             raise LinkedInResearchInvalidResponse(
                 "json_parse", usage=getattr(response, "usage", None), model=getattr(response, "model", None)
             ) from exc
+        _validate_response_schema(
+            payload, schema, LinkedInResearchInvalidResponse, response
+        )
         searches = _search_queries(response)
         if not searches or len(searches) > 4:
-            raise LinkedInResearchInvalidResponse("search_count")
+            raise LinkedInResearchInvalidResponse(
+                "search_count",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
         payload["searches_performed"] = searches
         sources = _source_urls(response)
-        if schema_name == "linkedin_discovery":
-            _retain_sourced_linkedin_profiles(
-                payload, sources, connection_threshold=self._connection_threshold
-            )
-            _normalize_linkedin_confidence(payload, input_payload)
+        _retain_sourced_linkedin_profiles(
+            payload, sources, connection_threshold=self._connection_threshold
+        )
+        _normalize_linkedin_confidence(payload, input_payload)
         usage = response.usage.model_dump() if response.usage is not None else {}
         return payload, response.model, usage
+
+
+def _validate_response_schema(
+    payload: Any,
+    schema: dict[str, Any],
+    error_type: type[Exception],
+    response: Any,
+) -> None:
+    if list(
+        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(payload)
+    ):
+        raise error_type(
+            "schema",
+            usage=getattr(response, "usage", None),
+            model=getattr(response, "model", None),
+        )
+
+
+def _normalized_subject(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _reorder_company_subjects(
+    organizations: list[dict[str, Any]],
+    request: CompanyResearchRequest,
+    response: Any,
+) -> list[dict[str, Any]]:
+    by_subject: dict[str, dict[str, Any]] = {}
+    for organization in organizations:
+        key = _normalized_subject(organization["query_subject"])
+        if not key or key in by_subject:
+            raise CompanyResearchInvalidResponse(
+                "subject_mismatch",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
+        by_subject[key] = organization
+    expected = [_normalized_subject(item["organization"]) for item in request.input_facts]
+    if set(by_subject) != set(expected) or len(by_subject) != len(expected):
+        raise CompanyResearchInvalidResponse(
+            "subject_mismatch",
+            usage=getattr(response, "usage", None),
+            model=getattr(response, "model", None),
+        )
+    return [by_subject[key] for key in expected]
+
+
+def _education_subject_key(item: dict[str, Any]) -> tuple[str, str]:
+    return tuple(
+        _normalized_subject(item.get(field))
+        for field in ("institution", "program")
+    )
+
+
+def _reorder_education_subjects(
+    credentials: list[dict[str, Any]],
+    request: EducationResearchRequest,
+    response: Any,
+) -> list[dict[str, Any]]:
+    by_subject: dict[tuple[str, str], dict[str, Any]] = {}
+    for credential in credentials:
+        key = _education_subject_key(credential)
+        if key in by_subject:
+            raise EducationResearchInvalidResponse(
+                "subject_mismatch",
+                usage=getattr(response, "usage", None),
+                model=getattr(response, "model", None),
+            )
+        by_subject[key] = credential
+    expected = [_education_subject_key(item) for item in request.input_facts]
+    if set(by_subject) != set(expected) or len(by_subject) != len(expected):
+        raise EducationResearchInvalidResponse(
+            "subject_mismatch",
+            usage=getattr(response, "usage", None),
+            model=getattr(response, "model", None),
+        )
+    return [by_subject[key] for key in expected]
 
 
 def _source_urls(response: Any) -> set[str]:
@@ -241,6 +332,13 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
             else:
                 normalized = True
         organization["findings"] = retained_findings
+        if "lifecycle_events" in organization:
+            events = []
+            for event in organization["lifecycle_events"]:
+                event["source_urls"] = [url for url in event["source_urls"] if _canonical_source_url(url) in canonical_sources]
+                if event["source_urls"]:
+                    events.append(event)
+            organization["lifecycle_events"] = events
         official_website = organization.get("official_website")
         if official_website and _source_origin(official_website) not in source_origins:
             organization["official_website"] = None
@@ -250,6 +348,7 @@ def _retain_cited_company_urls(payload: dict[str, Any], sources: set[str]) -> No
                 "existence": "insufficient_evidence",
                 "activity": None,
                 "operating_periods": [],
+                "lifecycle_events": [],
                 "offices": [],
                 "relationship": None,
                 "official_website": None,
@@ -293,7 +392,15 @@ def _retain_cited_education_findings(
                 retained_findings.append(finding)
             else:
                 normalized = True
+        # Institution verdicts require the exact cited page, not merely its origin.
+        for finding in retained_findings:
+            if finding["kind"] == "institution_existence":
+                finding["source_urls"] = [url for url in finding["source_urls"] if _canonical_source_url(url) in canonical_sources]
+        retained_findings = [finding for finding in retained_findings if finding["source_urls"]]
         credential["findings"] = retained_findings
+        if not any(finding["kind"] == "institution_existence" for finding in retained_findings):
+            credential["institution_existence"] = "insufficient_evidence"
+            credential["resolved_institution"] = None
         retained_kinds = {finding["kind"] for finding in retained_findings}
         for field, kind in (
             ("program_exists", "program"),

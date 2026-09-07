@@ -70,3 +70,24 @@ The frontend SHALL include a Docker build/runtime definition suitable for later 
 #### Scenario: Web image builds
 - **WHEN** the web Dockerfile is built
 - **THEN** it produces a runnable image that serves the Next.js app
+
+### Requirement: Deployment-wide AI usage dashboard
+The authenticated shell SHALL expose a `Dashboard` route that reads the immutable deployment-wide AI usage summary and presents processed-report throughput, total/average tokens, estimated USD/PLN cost, and per-operation breakdown. Deployment totals survive analysis deletion and MUST NOT expose CV content or candidate PII.
+
+#### Scenario: Signed-in recruiter opens Dashboard
+- **WHEN** a signed-in recruiter opens `/dashboard`
+- **THEN** deployment-wide report count, token/cost metrics, and operation breakdown are shown from the accounting ledger
+
+
+### Requirement: Application-wide AI accounting
+Dashboard totals SHALL include every recorded provider attempt across Analyzer, public research, and Profile Builder. Profile Builder extraction, automatic/manual summary, AI actions, and translation SHALL appear as separate operations in the shared immutable usage ledger. Each attempt SHALL record available provider token usage before downstream validation, including refusals and responses discarded before a retry. Transport failures without provider usage SHALL be marked usage-unavailable rather than fabricated usage. Cached input tokens SHALL use the shared pricing catalog.
+
+Profile Builder accounting SHALL use independent random accounting identifiers without profile content, filenames, access tokens, or candidate identifiers. Editing, export, and accepting an existing proposal SHALL not add AI usage. Profile deletion SHALL not delete accounting events. Report throughput and per-report averages SHALL remain Analyzer-only; deployment totals SHALL cover the whole application. Historical unrecorded Profile Builder usage SHALL not be invented.
+
+
+### Requirement: Prompt-cache write accounting
+Usage normalization SHALL distinguish cached reads and provider-reported cache-write input tokens, bounded by total input without double counting. The shared pricing catalog SHALL support a cache-write input rate, falling back to the ordinary input rate when absent. The immutable ledger and deployment/per-operation summaries SHALL retain cache-write counts; historical rows SHALL default to zero and SHALL not be repriced. Analyzer passes, research categories, and Profile Builder operations SHALL provide stable prompt-cache keys without placing candidate content or access tokens in those keys.
+
+
+### Requirement: Consistent two-click deletion
+Analysis history, recent profiles, the profiles catalog, and feedback items SHALL use a shared delete button. Its default icon SHALL use foreground color, becoming destructive on hover or confirmation. The first activation SHALL show a localized second-click hint and briefly shake the icon; reduced-motion preference SHALL disable that animation. The second activation SHALL delete, with duplicate clicks disabled while pending. Blur or Escape SHALL cancel confirmation.

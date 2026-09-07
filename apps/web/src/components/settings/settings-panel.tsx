@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
 import { updateAppSettings, useCopy, type AppLanguage, type CopyKey } from "@/lib/app-settings";
 
 type Capability = { ready: boolean; version?: string | null; recovery?: string | null };
@@ -13,6 +14,8 @@ type RefreshFeedback = "idle" | "refreshing" | "updated";
 const capabilityLabels: Record<string, CopyKey> = {
   database: "database", geonames: "geoNamesResolver", postal_reference_data: "postalReferenceData", base_analysis: "baseAnalysis",
   company_research: "companyResearch", education_research: "educationResearch", linkedin_research: "linkedinResearch",
+  profile_builder: "profileBuilder", profile_pdf_export: "profilePdfExport",
+  feedback: "feedbackCollection", feedback_inbox: "feedbackInbox",
 };
 
 export function SettingsPanel() {
@@ -23,6 +26,8 @@ export function SettingsPanel() {
   const [retentionDays, setRetentionDays] = useState("90");
   const [retentionLoading, setRetentionLoading] = useState(true);
   const [retentionMessage, setRetentionMessage] = useState<string | null>(null);
+  const [retentionCanManage, setRetentionCanManage] = useState(false);
+  const [retentionConfirmOpen, setRetentionConfirmOpen] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
 
@@ -32,6 +37,7 @@ export function SettingsPanel() {
     setLoading(true);
     try {
       const response = await fetch("/api/health", { cache: "no-store" });
+      if (!response.ok) throw new Error("health_unavailable");
       setHealth(await response.json());
     } catch {
       setHealth({ status: "unavailable", ready: false, capabilities: {} });
@@ -57,28 +63,45 @@ export function SettingsPanel() {
     void fetch("/api/settings/retention", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("retention_unavailable");
-        const body = await response.json() as { days: number };
+        const body = await response.json() as { days: number; canManage?: boolean };
         setRetentionDays(String(body.days));
+        setRetentionCanManage(body.canManage === true);
       })
       .catch(() => setRetentionMessage(t("retentionUnavailable")))
       .finally(() => setRetentionLoading(false));
   }, [t]);
 
-  async function saveRetention() {
+  function requestRetentionSave() {
     const days = Number(retentionDays);
     if (!Number.isInteger(days) || days < 1 || days > 3650) {
       setRetentionMessage(t("enterWholeNumber"));
       return;
     }
+    if (!retentionCanManage) {
+      setRetentionMessage(t("retentionOwnerOnly"));
+      return;
+    }
+    setRetentionMessage(null);
+    setRetentionConfirmOpen(true);
+  }
+
+  async function saveRetention() {
+    const days = Number(retentionDays);
     setRetentionLoading(true);
     setRetentionMessage(null);
-    const response = await fetch("/api/settings/retention", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ days }),
-    });
-    setRetentionLoading(false);
-    setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    try {
+      const response = await fetch("/api/settings/retention", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      setRetentionMessage(response.ok ? t("saved") : t("retentionCouldNotSave"));
+    } catch {
+      setRetentionMessage(t("retentionCouldNotSave"));
+    } finally {
+      setRetentionLoading(false);
+      setRetentionConfirmOpen(false);
+    }
   }
 
   async function deleteAllAnalyses() {
@@ -136,16 +159,31 @@ export function SettingsPanel() {
       </div>
       {settings.aiEnabled && anyResearchAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
     </section>
+    <ProfileBuilderSettings />
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
+      <p className="mt-1 text-sm text-muted-foreground">{t("retentionGlobalDescription")}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
         <label htmlFor="retention-days">{t("keepFor")}</label>
-        <input id="retention-days" type="number" min={1} max={3650} value={retentionDays} onChange={(event) => setRetentionDays(event.target.value)} className="h-10 w-24 rounded-md border bg-background px-3" />
+        <input id="retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={retentionLoading || !retentionCanManage} onChange={(event) => setRetentionDays(event.target.value)} className="h-10 w-24 rounded-md border bg-background px-3 disabled:cursor-not-allowed disabled:opacity-60" />
         <span>{t("days")}</span>
-        <Button variant="outline" onClick={() => void saveRetention()} disabled={retentionLoading}>{t("save")}</Button>
+        <Button variant="outline" onClick={requestRetentionSave} disabled={retentionLoading || !retentionCanManage}>{t("save")}</Button>
       </div>
+      {!retentionLoading && !retentionCanManage ? <p className="mt-2 text-xs text-muted-foreground">{t("retentionOwnerOnly")}</p> : null}
       <div className="mt-5 border-t pt-5"><Button variant="outline" className="text-destructive hover:text-destructive" disabled={deletingAll} onClick={() => setDeleteAllOpen(true)}><Trash2 />{t("deleteAll")}</Button></div>
-      {retentionMessage ? <p className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
+      {retentionMessage ? <p role="status" className="mt-3 text-sm text-muted-foreground">{retentionMessage}</p> : null}
+      <Dialog open={retentionConfirmOpen} onOpenChange={(open) => { if (!retentionLoading) setRetentionConfirmOpen(open); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("confirmRetentionChange")}</DialogTitle>
+            <DialogDescription>{t("retentionGlobalConfirm", { days: retentionDays })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={retentionLoading} onClick={() => setRetentionConfirmOpen(false)}>{t("cancel")}</Button>
+            <Button disabled={retentionLoading} onClick={() => void saveRetention()}>{t("save")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={deleteAllOpen} onOpenChange={(open) => { if (!deletingAll) setDeleteAllOpen(open); }}>
         <DialogContent>
           <DialogHeader>
@@ -161,11 +199,14 @@ export function SettingsPanel() {
     </section>
     <section className="rounded-xl border bg-card p-5">
       <div className="mb-4 flex items-center justify-between gap-4"><h3 className="font-medium">{t("health")}</h3><Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} />{t(refreshFeedback === "refreshing" ? "refreshing" : refreshFeedback === "updated" ? "updated" : "refresh")}</Button></div>
-      <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{health?.ready ? t("ready") : t("degraded")}</div>
-      <div className="divide-y">
-        {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ? t(capabilityLabels[name]) : name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
-        {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-4 text-sm text-destructive">{t("apiHealthUnavailable")}</p> : null}
-      </div>
+      <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${loading ? "bg-muted text-muted-foreground" : health?.ready ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>{loading ? <RefreshCw className="size-4 animate-spin" /> : health?.ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}{loading ? t("checkingSystem") : health?.ready ? t("ready") : t("degraded")}</div>
+      {!loading && !Object.keys(health?.capabilities ?? {}).length ? <p className="py-2 text-sm text-destructive">{t("apiHealthUnavailable")}</p> : null}
+      {Object.keys(health?.capabilities ?? {}).length ? <details open={health ? !health.ready : false} className="group rounded-lg border bg-muted/10">
+        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring">{t("technicalDetails")}</summary>
+        <div className="divide-y border-t px-3">
+          {Object.entries(health?.capabilities ?? {}).map(([name, capability]) => <div key={name} className="flex items-start justify-between gap-4 py-3 text-sm"><div><p className="font-medium">{capabilityLabels[name] ? t(capabilityLabels[name]) : name}</p>{capability.recovery ? <p className="mt-1 text-xs text-muted-foreground">{capability.recovery}</p> : null}</div><div className="flex items-center gap-2 whitespace-nowrap">{capability.version ? <span className="text-xs text-muted-foreground">{capability.version}</span> : null}{capability.ready ? <CheckCircle2 className="size-4 text-emerald-600" /> : <CircleAlert className="size-4 text-amber-600" />}</div></div>)}
+        </div>
+      </details> : null}
     </section>
   </div>;
 }

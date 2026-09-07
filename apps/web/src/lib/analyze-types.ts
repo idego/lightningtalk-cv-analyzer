@@ -50,6 +50,14 @@ export type EducationRecord = AnalysisRecord & {
 };
 
 export type CompanyResearch = {
+  timeline_findings?: Array<{
+    kind: "employment_before_founding" | "employment_after_closure";
+    record_id: string;
+    organization: string;
+    cv_date: string;
+    event_date: string;
+    source_urls: string[];
+  }>;
   status: "completed";
   outcome: "completed" | "insufficient_evidence";
   accessed_at: string;
@@ -99,6 +107,8 @@ export type EducationResearch = {
     institution: string | null;
     program: string | null;
     degree: string | null;
+    institution_existence?: "supported" | "conflicting" | "insufficient_evidence";
+    resolved_institution?: string | null;
     program_exists: "supported" | "mismatch" | "evidence_unavailable";
     degree_exists: "supported" | "mismatch" | "evidence_unavailable";
     dates: string | null;
@@ -156,7 +166,6 @@ export type LinkedInDiscovery = {
 export type AnalysisReport = {
   contract_version: "base-analysis-v2";
   analysis_id: string;
-  analysis_access_token?: string;
   ai_features_enabled?: boolean;
   ai_capabilities?: {
     document_analysis: boolean;

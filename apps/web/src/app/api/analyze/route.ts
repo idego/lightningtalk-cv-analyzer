@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { analysisAccessTokenForUser } from "@/lib/analysis-access";
+import {
+  analysisOwnerHeaders,
+  INTERNAL_API_URL,
+} from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
 
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
+const REPORT_LANGUAGES = new Set(["en", "pl"]);
 
 export async function POST(req: Request) {
   const user = await getWebUser();
-
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -17,22 +19,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
+  const reportLanguage = (req.headers.get("X-Report-Language") ?? "en")
+    .trim()
+    .toLowerCase();
+  if (!REPORT_LANGUAGES.has(reportLanguage)) {
+    return NextResponse.json(
+      { error: "unsupported_report_language" },
+      { status: 400 },
+    );
+  }
+
   const payload = new FormData();
   payload.append("file", file, file.name);
-
-  const analysisAccessToken = analysisAccessTokenForUser(user.id);
   const requestId = req.headers.get("X-Analysis-Request-Id");
-  const upstream = await fetch(`${INTERNAL_API_URL}/analyze`, {
-    method: "POST",
-    body: payload,
-    headers: {
-      "X-Analysis-Access-Token": analysisAccessToken,
-      "X-Report-Language": req.headers.get("X-Report-Language") ?? "en",
-      ...(requestId ? { "X-Analysis-Request-Id": requestId } : {}),
-    },
-  });
 
-  const data = await upstream.json();
-  if (upstream.ok && data && typeof data === "object") data.analysis_access_token = analysisAccessToken;
-  return NextResponse.json(data, { status: upstream.status });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${INTERNAL_API_URL}/analyze`, {
+      method: "POST",
+      body: payload,
+      headers: {
+        ...analysisOwnerHeaders(user.id),
+        "X-Report-Language": reportLanguage,
+        ...(requestId ? { "X-Analysis-Request-Id": requestId } : {}),
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: "upstream_unavailable" }, { status: 502 });
+  }
+
+  const text = await upstream.text().catch(() => "");
+  if (!text) return NextResponse.json({}, { status: upstream.status });
+  try {
+    return NextResponse.json(JSON.parse(text), { status: upstream.status });
+  } catch {
+    return NextResponse.json(
+      { error: "upstream_invalid_response" },
+      { status: upstream.ok ? 502 : upstream.status },
+    );
+  }
 }

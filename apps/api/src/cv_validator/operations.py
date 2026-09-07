@@ -6,7 +6,6 @@ import threading
 from collections import Counter
 from datetime import datetime, timezone
 from hashlib import sha256
-from time import perf_counter
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -88,6 +87,7 @@ _SAFE_LOG_FIELDS = {
     "coverage_gaps_count",
     "input_tokens",
     "cached_input_tokens",
+    "cache_write_input_tokens",
     "output_tokens",
     "total_tokens",
     "cache_outcome",
@@ -107,10 +107,6 @@ def safe_log(event: str, **fields: Any) -> None:
     ):
         allowed["rejection_reason_histogram"] = histogram
     logger.info(json.dumps(allowed, sort_keys=True, separators=(",", ":")))
-
-
-def timer() -> float:
-    return perf_counter()
 
 
 class AnalysisRecorder:

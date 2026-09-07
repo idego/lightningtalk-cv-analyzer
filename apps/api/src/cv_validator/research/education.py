@@ -12,11 +12,13 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from cv_validator.location import Ambiguous, LocationResolver, Resolved, ResolutionLevel
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
-from cv_validator.research.subjects import accepted_records, supported_field
+from cv_validator.openai_config import PINNED_OPENAI_MODEL
+from cv_validator.research.versions import EDUCATION_RESEARCH_VERSION
+from cv_validator.research.subjects import accepted_records, safe_public_subject, supported_field
 
-RESEARCH_VERSION = "education-research-v4"
-PROMPT_VERSION = "education-research-prompt-v5"
-SCHEMA_VERSION = "education-research-schema-v3"
+RESEARCH_VERSION = EDUCATION_RESEARCH_VERSION
+PROMPT_VERSION = "education-research-prompt-v8"
+SCHEMA_VERSION = "education-research-schema-v6"
 MAX_CREDENTIALS = 12
 
 
@@ -47,7 +49,7 @@ class EducationResearchService:
             "status": "completed", "authority": "ai_research", "source": "openai_web_search",
             "accessed_at": datetime.now(timezone.utc).isoformat(),
             "versions": {"research": RESEARCH_VERSION, "prompt": PROMPT_VERSION, "schema": SCHEMA_VERSION},
-            "model": {"provider": "openai", "configured": "gpt-5.6-luna", "response": response_model},
+            "model": {"provider": "openai", "configured": PINNED_OPENAI_MODEL, "response": response_model},
             "usage": deepcopy(usage),
         })
         return result
@@ -143,12 +145,10 @@ def build_education_research_request(stored_report: dict[str, Any]) -> Education
     for record in accepted_records(stored_report, "education"):
         institution = supported_field(record, "institution")
         program = supported_field(record, "program")
-        if institution is not None and not _safe_subject(institution):
-            continue
-        if institution is None:
+        if institution is None or not safe_public_subject(institution):
             continue
         fact: dict[str, Any] = {"institution": institution}
-        if program is not None and _safe_subject(program):
+        if program is not None and safe_public_subject(program):
             fact["program"] = program[:200]
         key = _key(fact)
         if key in seen:
@@ -171,10 +171,23 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
     if returned != expected or len(returned) != len(payload["credentials"]):
         raise EducationResearchInvalidResponse()
     for credential in payload["credentials"]:
+        existence = credential["institution_existence"]
+        institution_findings = [item for item in credential["findings"] if item["kind"] == "institution_existence"]
+        if existence != "insufficient_evidence" and (
+            not credential["resolved_institution"] or not institution_findings
+            or any(not item["source_urls"] for item in institution_findings)
+        ):
+            raise EducationResearchInvalidResponse()
+        if existence == "conflicting" and not any(item["confidence"] == "high" for item in institution_findings):
+            raise EducationResearchInvalidResponse()
         kinds = {finding["kind"] for finding in credential["findings"]}
         required: set[str] = set()
-        for field, kind in (("program_exists", "program"), ("degree_exists", "degree")):
-            if credential[field] != "evidence_unavailable": required.add(kind)
+        for field, kind in (
+            ("program_exists", "program"),
+            ("degree_exists", "degree"),
+        ):
+            if credential[field] != "evidence_unavailable":
+                required.add(kind)
         if credential["dates"] is not None: required.add("dates")
         if credential["city"] is not None or credential["country"] is not None: required.add("location")
         if credential["cv_consistency"] != "evidence_unavailable": required.add("cv_consistency")
@@ -185,16 +198,10 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
 
 
 def _key(item: dict[str, Any]) -> tuple[str, str]:
-    return tuple(str(item.get(field) or "").strip().casefold() for field in ("institution", "program"))
-
-
-def _safe_subject(value: str) -> bool:
-    stripped = value.strip()
-    if not stripped or len(stripped) > 200 or any(ord(char) < 32 for char in stripped):
-        return False
-    if "@" in stripped or re.search(r"(?:https?://|www\.)|\+?\d[\d\s().-]{6,}\d", stripped, re.I):
-        return False
-    return len(re.findall(r"[^\W\d_]", stripped, re.UNICODE)) >= 2
+    return tuple(
+        str(item.get(field) or "").strip().casefold()
+        for field in ("institution", "program")
+    )
 
 
 def _declared_country_code(stored_report: dict[str, Any]) -> str:

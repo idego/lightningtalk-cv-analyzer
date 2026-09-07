@@ -1,35 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import replace
 from typing import Any
 
 from cv_validator.analysis import (
     AnalysisInput,
     AnalysisStrategy,
-    UnavailableAnalysisStrategy,
     validate_analysis_report,
 )
 
 
-@dataclass(frozen=True)
-class PipelineResult:
-    report: dict[str, Any]
-    input_hash: str
-    source_filename: str
-    report_language: str
-
-
-def analyze_cv_bytes_result(
+def analyze_cv_bytes(
     content: bytes,
     filename: str,
     *,
-    strategy: AnalysisStrategy | None = None,
+    strategy: AnalysisStrategy,
     report_language: str = "en",
     analysis_id: str | None = None,
     correlation_id: str | None = None,
     recorder: Any = None,
-) -> PipelineResult:
+) -> dict[str, Any]:
     request = AnalysisInput.from_upload(content, filename, report_language)
     request = replace(
         request,
@@ -37,44 +27,9 @@ def analyze_cv_bytes_result(
         correlation_id=correlation_id,
         recorder=recorder,
     )
-    selected_strategy = strategy or UnavailableAnalysisStrategy()
-    payload = selected_strategy.analyze(request)
-    _require_strategy_identity(payload, selected_strategy, request)
-    return PipelineResult(
-        report=validate_analysis_report(payload),
-        input_hash=request.sha256,
-        source_filename=filename,
-        report_language=report_language,
-    )
-
-
-def analyze_cv_bytes(
-    content: bytes,
-    filename: str,
-    *,
-    strategy: AnalysisStrategy | None = None,
-    report_language: str = "en",
-) -> dict[str, Any]:
-    return analyze_cv_bytes_result(
-        content,
-        filename,
-        strategy=strategy,
-        report_language=report_language,
-    ).report
-
-
-def analyze_cv_file(
-    path: Path,
-    *,
-    strategy: AnalysisStrategy | None = None,
-    report_language: str = "en",
-) -> dict[str, Any]:
-    return analyze_cv_bytes(
-        path.read_bytes(),
-        path.name,
-        strategy=strategy,
-        report_language=report_language,
-    )
+    payload = strategy.analyze(request)
+    _require_strategy_identity(payload, strategy, request)
+    return validate_analysis_report(payload)
 
 
 def _require_strategy_identity(

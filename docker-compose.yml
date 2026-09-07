@@ -1,5 +1,26 @@
 services:
+  volume-init:
+    build:
+      context: ./apps/api
+      target: runtime
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R app:app /api-data && chown -R 1000:1000 /web-data && chmod -R a+rX /reference-data"]
+    volumes:
+      - cv_validator_data:/api-data
+      - web_auth_data:/web-data
+      - geonames_data:/reference-data
+    healthcheck:
+      disable: true
+    cpus: 0.50
+    mem_limit: 128m
+    pids_limit: 64
+    restart: "no"
+
   feedback-init:
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     build:
       context: ./apps/web
       target: feedback-init
@@ -9,16 +30,19 @@ services:
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
     volumes:
       - web_auth_data:/app/data
+    cpus: ${FEEDBACK_INIT_CPUS:-0.50}
+    mem_limit: ${FEEDBACK_INIT_MEMORY_LIMIT:-512m}
+    pids_limit: 128
     restart: "no"
 
   geonames-init:
     build:
       context: ./apps/api
-      target: runtime
+      target: geonames-init
     command: ["cv-geonames-bootstrap"]
     environment:
       GEONAMES_TARGET: /reference-data
-      GEONAMES_SNAPSHOT_VERSION: ${GEONAMES_SNAPSHOT_VERSION:-2026-09-02}
+      GEONAMES_SNAPSHOT_VERSION: ${GEONAMES_SNAPSHOT_VERSION:-2026-08-21}
       GEONAMES_CITIES500_URL: ${GEONAMES_CITIES500_URL:-https://download.geonames.org/export/dump/cities500.zip}
       GEONAMES_COUNTRY_INFO_URL: ${GEONAMES_COUNTRY_INFO_URL:-https://download.geonames.org/export/dump/countryInfo.txt}
       GEONAMES_ALTERNATE_NAMES_URL: ${GEONAMES_ALTERNATE_NAMES_URL:-https://download.geonames.org/export/dump/alternateNamesV2.zip}
@@ -30,6 +54,9 @@ services:
     # healthcheck would always fail while the job is working.
     healthcheck:
       disable: true
+    cpus: ${GEONAMES_INIT_CPUS:-2.0}
+    mem_limit: ${GEONAMES_INIT_MEMORY_LIMIT:-4g}
+    pids_limit: 512
     restart: "no"
     logging:
       driver: json-file
@@ -62,6 +89,9 @@ services:
         condition: service_healthy
       feedback-init:
         condition: service_completed_successfully
+    cpus: ${WEB_CPUS:-1.0}
+    mem_limit: ${WEB_MEMORY_LIMIT:-1g}
+    pids_limit: 256
     restart: unless-stopped
     logging:
       driver: json-file
@@ -77,6 +107,10 @@ services:
       - "8000"
     environment:
       CV_VALIDATOR_DB_PATH: ${CV_VALIDATOR_DB_PATH:-/app/data/cv_analyzer.db}
+      # Privileged writes and authenticated migration of legacy analysis owners.
+      # Already migrated ownership no longer depends on this secret.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
+      CV_VALIDATOR_LEGACY_OWNER_SECRET: ${CV_VALIDATOR_LEGACY_OWNER_SECRET:-}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -98,6 +132,8 @@ services:
         target: /app/reference-data
         read_only: true
     depends_on:
+      volume-init:
+        condition: service_completed_successfully
       geonames-init:
         condition: service_completed_successfully
     healthcheck:
@@ -106,6 +142,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    cpus: ${API_CPUS:-2.0}
+    mem_limit: ${API_MEMORY_LIMIT:-4g}
+    pids_limit: 512
     restart: unless-stopped
     logging:
       driver: json-file
@@ -121,6 +160,8 @@ services:
       CV_VALIDATOR_REPO_ROOT: /workspace
     volumes:
       - ./scripts:/workspace/scripts:ro
+      - ./config:/workspace/config:ro
+      - ./apps/web/Dockerfile:/workspace/apps/web/Dockerfile:ro
       - ./docker-compose.yml:/workspace/docker-compose.yml:ro
       - ./docker-compose.reference-data.yml:/workspace/docker-compose.reference-data.yml:ro
       - ./.gitignore:/workspace/.gitignore:ro

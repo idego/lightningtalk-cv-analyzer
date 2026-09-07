@@ -9,7 +9,7 @@ state, or hiring action.
 ## Requirements
 
 ### Requirement: Feedback targets
-Every visible signal in a report SHALL be addressable by a deterministic target id derived from the analysis id and the signal's kind and key. Supported kinds are `review_finding`, `structured_fact`, `structural_observation`, `file_detail`, `link_result`, `company_research_result`, `education_research_result`, `linkedin_research_result`, `operation_failure`, and `report_overall`.
+Every visible signal in a report SHALL be addressable by a deterministic target id derived from the analysis id and the signal's kind and key. Supported kinds are `review_finding`, `structured_fact`, `company_research_result`, `education_research_result`, `linkedin_research_result`, `operation_failure`, and `report_overall`; removed analysis systems MUST NOT materialize feedback targets.
 
 Report controls SHALL expose feedback at the CV overview and whole-section level for worth-knowing findings, company research, education research, and LinkedIn profile research. Research entries and individual findings SHALL NOT render separate feedback controls.
 
@@ -18,7 +18,7 @@ Report controls SHALL expose feedback at the CV overview and whole-section level
 - **THEN** both renderings resolve to the same target id
 
 ### Requirement: Contextual feedback capture
-A signed-in user who can open an analysis SHALL be able to submit a comment without a rating, rate any target `helpful` or `not_helpful` without a comment, and optionally choose one reason (`inaccurate`, `missing_context`, `misleading_importance`, `duplicate`, `unclear`, `stale_research`, `wrong_source`, `operation_failed`, `other`). At least a rating or a non-empty comment is required. The response SHALL retain the author's email and a snapshot of the displayed section (`context_label` up to 200 characters, `context_text` up to 12000 characters, and `context_report`, the analysis report JSON up to 400000 serialized characters) so maintainers can review it in context. The inbox SHALL re-render the referenced report section from `context_report` with the same components as the analysis view, without feedback or research actions, and SHALL fall back to `context_text` when no report snapshot is stored. A comment SHALL be at most 180 characters after whitespace normalization and MUST NOT contain URLs, email addresses, or phone numbers. Writes use `PUT /analyses/{analysis_id}/feedback/{target_id}` through the web proxy, which caps a request body at 512 KiB. One actor may write at most 30 times per minute per analysis.
+A signed-in user who can open an analysis SHALL be able to submit a comment without a rating, rate any target `helpful` or `not_helpful` without a comment, and optionally choose one reason (`inaccurate`, `missing_context`, `misleading_importance`, `duplicate`, `unclear`, `stale_research`, `wrong_source`, `operation_failed`, `other`). At least a rating or a non-empty comment is required. The response SHALL retain the author's email and a snapshot of the displayed section (`context_label` up to 200 characters, `context_text` up to 12000 characters, and `context_report`, the analysis report JSON up to 400000 serialized characters after recursively removing internal ownership/capability fields) so maintainers can review it in context. The inbox SHALL re-render the referenced report section from `context_report` with the same components as the analysis view, without feedback or research actions, and SHALL fall back to `context_text` when no report snapshot is stored. A comment SHALL be at most 180 characters after whitespace normalization and MUST NOT contain URLs, email addresses, or phone numbers. Writes use `PUT /analyses/{analysis_id}/feedback/{target_id}` through the web proxy, which caps a request body at 512 KiB. One actor may write at most 30 times per minute per analysis.
 
 #### Scenario: Comment with contact data
 - **WHEN** a comment contains an email address, URL, or phone-like number
@@ -29,7 +29,7 @@ A signed-in user who can open an analysis SHALL be able to submit a comment with
 - **THEN** capture controls are hidden and the web proxy refuses new writes with 404 `feedback_disabled`, while existing feedback and the inbox stay available
 
 #### Scenario: Rate limit exceeded
-- **WHEN** an actor exceeds 30 feedback writes in a minute
+- **WHEN** an actor exceeds 30 feedback writes in a minute for one analysis
 - **THEN** the API responds 422 `feedback_rate_limit`
 
 ### Requirement: Feedback lifecycle and analysis decoupling

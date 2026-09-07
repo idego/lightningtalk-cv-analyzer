@@ -116,9 +116,9 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 2);
-  assert.equal(presentation.worthKnowing.length, 1);
-  assert.equal(presentation.attention[1].evidence[0].source_id, "block-1");
+  assert.equal(presentation.attention.length, 1);
+  assert.equal(presentation.worthKnowing.length, 2);
+  assert.equal(presentation.attention[0].evidence[0].source_id, "block-1");
   assert.equal(
     [...presentation.attention, ...presentation.worthKnowing]
       .every((item) => item.evidence.length > 0),
@@ -135,13 +135,14 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(overview.phoneCountry, "PL");
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
+  assert.equal(overview.employment[0].detail, "2020 – 2024 · Example Systems · Warsaw");
   assert.equal(overview.employment.length, 1);
   assert.equal(overview.attentionRecords[0].value, "MongoDB");
   assert.equal(overview.attentionRecords[0].needsReview, true);
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 
-test("CV overview omits certificates, including certificate-only education records", () => {
+test("CV overview renders certificates, including certificate-only education records", () => {
   const value = report();
   value.base_analysis.education[0].certificate = field("AWS Cloud Practitioner");
   value.base_analysis.education.push({
@@ -155,7 +156,9 @@ test("CV overview omits certificates, including certificate-only education recor
   const overview = adaptReportInterface(value, "en").overview;
 
   assert.equal(overview.education.length, 1);
-  assert.doesNotMatch(JSON.stringify(overview.education), /AWS|Azure/);
+  assert.match(JSON.stringify(overview.education), /AWS Cloud Practitioner/);
+  assert.equal(overview.certifications.length, 1);
+  assert.equal(overview.certifications[0].value, "Azure Fundamentals");
 });
 
 test("CV overview renders when optional review annotations are absent", () => {
@@ -214,13 +217,14 @@ test("outside-EU status is neutral overview information, not a finding", () => {
 
   value.mechanical.eu_status.sources[0].country_code = "PL";
   value.mechanical.eu_status.inside_eu = ["PL"];
-  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "inside");
 
   value.mechanical.eu_status.sources = [value.mechanical.eu_status.sources[1]];
   value.mechanical.eu_status.primary_source = "phone_prefix";
   value.mechanical.eu_status.inside_eu = [];
   value.mechanical.eu_status.outside_eu = ["CA"];
-  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "outside");
+  value.mechanical.location_resolution = [];
+  assert.equal(adaptReportInterface(value, "en").overview.euStatus, "unknown");
 });
 
 test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {

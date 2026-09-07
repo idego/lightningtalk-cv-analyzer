@@ -1,19 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, CircleAlert, Clock3, LoaderCircle, Trash2 } from "lucide-react";
+import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
+import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
-import { getAutoResearchOrchestrator, withAnalysisAccessToken } from "@/lib/auto-research";
-import { type BatchProgress, currentBatchIndex, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
+import { getAutoResearchOrchestrator } from "@/lib/auto-research";
+import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
-const ACCEPT = ".pdf,.docx";
 const ESTIMATED_SECONDS_PER_CV = 35;
 const COMPLETE_CARD_MS = 1200;
 const CANCELLED_STATUS = 409;
@@ -35,13 +35,18 @@ function reportResult(filename: string, report: AnalysisReport): AnalyzeItemResu
 function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchProgress; elapsedSeconds: number; onCancel: () => void }) {
   const { t } = useCopy();
   const complete = batch.phase === "complete";
-  const currentIndex = currentBatchIndex(batch);
+  const currentIndex = batch.results.length;
   const statuses = deriveBatchStatuses(batch);
   const total = batch.filenames.length;
   const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="analysis-flow-enter mx-auto max-w-3xl"><CardContent className="py-8">
     <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current: currentIndex + 1, total })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("batchResultsInHistory") : batch.filenames[currentIndex]}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div> : null}</div>
-    <ol className="mt-4 divide-y rounded-lg border px-3">{batch.filenames.map((name, index) => { const status = statuses[index]; return <li key={`${name}-${index}`} className="flex min-w-0 items-center gap-3 py-2.5 text-sm"><span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${status === "completed" ? "bg-emerald-500/15 text-emerald-700" : status === "failed" ? "bg-destructive/10 text-destructive" : status === "analyzing" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{status === "completed" ? <Check className="size-3.5" /> : status === "failed" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1 truncate">{name}</span><span className="shrink-0 text-xs text-muted-foreground">{status === "completed" ? t("completed") : status === "failed" ? t("failed") : status === "analyzing" ? t("analyzingStatus") : t("waiting")}</span></li>; })}</ol>
+    <ol className="mt-4 divide-y rounded-lg border px-3">{batch.filenames.map((name, index) => {
+      const status = statuses[index];
+      const result = batch.results[index];
+      const failure = status === "failed" && result?.status === "error" ? result.error : null;
+      return <li key={`${name}-${index}`} className="flex min-w-0 items-start gap-3 py-2.5 text-sm"><span className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${status === "completed" ? "bg-emerald-500/15 text-emerald-700" : status === "failed" ? "bg-destructive/10 text-destructive" : status === "analyzing" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{status === "completed" ? <Check className="size-3.5" /> : status === "failed" ? <CircleAlert className="size-3.5" /> : index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate">{name}</span>{failure ? <span className="mt-0.5 block text-xs leading-relaxed text-destructive">{failure}</span> : null}</span><span className="mt-0.5 shrink-0 text-xs text-muted-foreground">{status === "completed" ? t("completed") : status === "failed" ? t("failed") : status === "analyzing" ? t("analyzingStatus") : t("waiting")}</span></li>;
+    })}</ol>
     {!complete ? <div className="mt-4 flex justify-center"><Button variant="outline" onClick={onCancel}>{t("cancel")}</Button></div> : null}
   </CardContent></Card>;
 }
@@ -50,10 +55,12 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const { settings, t } = useCopy();
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const [historyQuery, setHistoryQuery] = useState("");
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
   const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const routeRequest = useRef(0);
   const openedFromHistoryPush = useRef(false);
@@ -131,22 +138,35 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
 
   const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
   const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
-  function onFilesSelected(list: FileList | null) { if (list) store.enqueue(Array.from(list)); }
+
+  function analysisErrorMessage(detail: unknown) {
+    if (detail === "document_text_layer_unavailable") return t("cvNeedsTextLayer");
+    if (detail === "document_conversion_failed") return t("cvCouldNotRead");
+    if (detail === "upload_size_limit_exceeded") return t("cvTooLarge");
+    if (detail === "empty_upload") return t("cvEmptyFile");
+    if (detail === "unsupported_file_type") return t("cvUnsupportedType");
+    if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");
+    if (detail === "upload_read_error") return t("uploadCouldNotRead");
+    return t("analysisFailed");
+  }
 
   async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
     const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
-    const payload = await response.json().catch(() => null) as (AnalysisReport & { analysis_access_token?: string }) | null;
+    const payload = await response.json().catch(() => null) as AnalysisReport | { detail?: string } | null;
     if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
-    if (!response.ok) throw new Error(t("analysisFailedWithStatus", { status: response.status }));
-    if (!payload?.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
-    return { filename: file.name, status: payload.base_analysis?.status === "partial" ? "partial" : "ok", report: withAnalysisAccessToken(payload, payload.analysis_access_token) };
+    if (!response.ok) throw new Error(analysisErrorMessage(payload && "detail" in payload ? payload.detail : null));
+    if (!payload || !("analysis_id" in payload) || !payload.analysis_id) return { filename: file.name, status: "error", error: t("noResult") };
+    const report = payload as AnalysisReport;
+    return { filename: file.name, status: report.base_analysis?.status === "partial" ? "partial" : "ok", report: report };
   }
 
   async function submit() {
-    setError(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
+    setError(null); setNotice(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     if (running) return;
     const queue = acceptedFiles;
+    const failedFiles: File[] = [];
+    const failureMessages: string[] = [];
     setElapsedSeconds(0);
     const token = store.start(queue);
     for (const file of queue) {
@@ -154,18 +174,28 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
       store.beginFile(token, file, requestId);
       let result: AnalyzeItemResult;
       try { result = await analyzeFile(file, requestId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
-      if (result.status !== "error") void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+      if (result.status === "error") {
+        failedFiles.push(file);
+        failureMessages.push(`${file.name}: ${result.error}`);
+      } else {
+        void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+      }
       if (!store.record(result, file, token)) return;
     }
     store.complete();
     await new Promise((resolve) => window.setTimeout(resolve, COMPLETE_CARD_MS));
     store.clearBatch();
+    if (failedFiles.length) {
+      store.enqueue(failedFiles);
+      setError(failureMessages.join("\n"));
+    }
   }
 
-  function reset() { if (running) return; store.clearQueue(); setError(null); }
+  function reset() { if (running) return; store.clearQueue(); setError(null); setNotice(null); }
   function cancel() {
     const { requestId } = store.cancel();
     setElapsedSeconds(0);
+    setNotice(t("analysisCancelled"));
     if (requestId) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
   }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
@@ -197,16 +227,14 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     {batch ? <AnalysisProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancel} /> : <Card>
       <CardHeader><CardTitle>{t("uploadTitle")}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-6 text-center" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onFilesSelected(event.dataTransfer.files); }}>
-          <input type="file" className="hidden" multiple accept={ACCEPT} onChange={(event) => onFilesSelected(event.target.files)} />
-          <p className="text-sm font-medium">{t("drop")}</p><p className="mt-1 text-xs text-muted-foreground">{t("accepted")}</p>
-        </label>
-        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({acceptedFiles.length} {t("valid")})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><Trash2 className="size-4" /></Button></li>)}</ul></div> : null}
-        {unsupportedFiles.length ? <p className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
-        <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset}>{t("reset")}</Button></div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <CvUploadDropzone label={t("drop")} hint={t("accepted")} onFilesSelected={(files) => store.enqueue(files)} />
+        {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
+        {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
+        <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset} disabled={!files.length}>{t("reset")}</Button></div>
+        {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
+        {error ? <p role="alert" className="whitespace-pre-line text-sm text-destructive">{error}</p> : null}
       </CardContent>
     </Card>}
-    <RecentAnalyses onOpen={openHistorical} refreshKey={historyVersion} highlightIds={sessionIds} />
+    <RecentAnalyses query={historyQuery} onQueryChange={setHistoryQuery} onOpen={openHistorical} refreshKey={historyVersion} highlightIds={sessionIds} />
   </div>;
 }

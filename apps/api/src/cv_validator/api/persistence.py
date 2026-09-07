@@ -5,17 +5,22 @@ import sqlite3
 import hashlib
 import hmac
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from cv_validator.analysis import validate_analysis_report
 from cv_validator.api.feedback import init_feedback_schema
 from cv_validator.errors import AnalysisNotFoundPersistenceError, PersistenceError
-from cv_validator.serialization import deserialize_analysis_payload
+from cv_validator.research.versions import (
+    COMPANY_RESEARCH_VERSION,
+    EDUCATION_RESEARCH_VERSION,
+    LINKEDIN_DISCOVERY_VERSION,
+)
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
@@ -30,22 +35,20 @@ class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
         self._event_write_lock = threading.Lock()
-        self._purge_listener: Callable[[tuple[str, ...]], None] | None = None
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.config.retention_days = self.get_retention_days()
 
-    def set_purge_listener(
-        self,
-        listener: Callable[[tuple[str, ...]], None] | None,
-    ) -> None:
-        self._purge_listener = listener
-
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.config.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     @staticmethod
     def _require_report_parent(conn: sqlite3.Connection, analysis_id: str) -> None:
@@ -63,9 +66,18 @@ class PersistenceStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            _ensure_owner_schema(conn)
             _require_current_report_schema(conn)
             conn.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS legacy_analysis_owners (
+                    analysis_id TEXT PRIMARY KEY,
+                    token_hash TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS legacy_analysis_owners_token
+                    ON legacy_analysis_owners(token_hash);
+                DROP TABLE IF EXISTS linkedin_comparison;
+                DROP TABLE IF EXISTS linkedin_confirmation;
                 CREATE TABLE IF NOT EXISTS reports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     input_hash TEXT NOT NULL,
@@ -75,7 +87,7 @@ class PersistenceStore:
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     analysis_id TEXT NOT NULL,
-                    access_token_hash TEXT,
+                    owner_user_id TEXT NOT NULL,
                     source_filename TEXT
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
@@ -113,18 +125,6 @@ class PersistenceStore:
                 );
                 CREATE TABLE IF NOT EXISTS linkedin_discovery (
                     analysis_id TEXT NOT NULL, research_version TEXT NOT NULL,
-                    status TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
-                    configured_model TEXT NOT NULL, response_model TEXT, accessed_at TEXT NOT NULL,
-                    usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
-                    PRIMARY KEY (analysis_id, research_version), FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
-                );
-                CREATE TABLE IF NOT EXISTS linkedin_confirmation (
-                    analysis_id TEXT PRIMARY KEY, profile_url TEXT NOT NULL, discovery_version TEXT NOT NULL,
-                    confirmed_at TEXT NOT NULL, audit_json TEXT NOT NULL,
-                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
-                );
-                CREATE TABLE IF NOT EXISTS linkedin_comparison (
-                    analysis_id TEXT NOT NULL, research_version TEXT NOT NULL, profile_url TEXT NOT NULL,
                     status TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
                     configured_model TEXT NOT NULL, response_model TEXT, accessed_at TEXT NOT NULL,
                     usage_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -170,7 +170,7 @@ class PersistenceStore:
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     completed_at TEXT,
-                    access_token_hash TEXT NOT NULL,
+                    owner_user_id TEXT NOT NULL,
                     error_code TEXT
                 );
                 CREATE TABLE IF NOT EXISTS diagnostic_events (
@@ -201,6 +201,7 @@ class PersistenceStore:
                     latency_ms INTEGER NOT NULL,
                     input_tokens INTEGER NOT NULL,
                     cached_input_tokens INTEGER NOT NULL,
+                    cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
                     output_tokens INTEGER NOT NULL,
                     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL,
@@ -240,19 +241,65 @@ class PersistenceStore:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS reports_owner_created ON reports(owner_user_id, created_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS analysis_runs_owner ON analysis_runs(owner_user_id, created_at DESC)"
+            )
+
+    def bind_legacy_owner(self, owner_user_id: str, legacy_access_token: str) -> None:
+        """Bind matching legacy history and re-key feedback without losing snapshots.
+
+        Called only with identity derived by the authenticated private boundary.
+        New writes continue to use owner_user_id, never capability-token ownership.
+        """
+        token_hash = _token_hash(legacy_access_token)
+        old_actor = hashlib.sha256(f"actor:{legacy_access_token}".encode()).hexdigest()
+        new_actor = hashlib.sha256(f"actor:{owner_user_id}".encode()).hexdigest()
+        try:
+            with self._connect() as conn:
+                pending = conn.execute("""SELECT 1 FROM legacy_analysis_owners WHERE token_hash = ?
+                    UNION ALL SELECT 1 FROM feedback_responses WHERE actor_hash = ? LIMIT 1""",
+                    (token_hash, old_actor)).fetchone()
+                if pending is None:
+                    return
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("PRAGMA defer_foreign_keys = ON")
+                for table in ("reports", "analysis_runs"):
+                    conn.execute(f"""UPDATE {table} SET owner_user_id = ?
+                        WHERE owner_user_id IS NULL AND analysis_id IN (
+                            SELECT analysis_id FROM legacy_analysis_owners WHERE token_hash = ?
+                        )""", (owner_user_id, token_hash))
+                # Move parent and triage keys in one deferred-FK transaction. If
+                # both versions already exist, retain the older record for inbox
+                # review rather than overwrite either user's recorded response.
+                targets = conn.execute("""SELECT target_id FROM feedback_responses AS old
+                    WHERE actor_hash = ? AND NOT EXISTS (
+                        SELECT 1 FROM feedback_responses AS new
+                        WHERE new.target_id = old.target_id AND new.actor_hash = ?
+                    )""", (old_actor, new_actor)).fetchall()
+                for row in targets:
+                    for table in ("feedback_responses", "feedback_triage", "feedback_events"):
+                        conn.execute(f"""UPDATE {table} SET actor_hash = ?
+                            WHERE target_id = ? AND actor_hash = ?""",
+                            (new_actor, row["target_id"], old_actor))
+                conn.execute("DELETE FROM legacy_analysis_owners WHERE token_hash = ?", (token_hash,))
+        except sqlite3.Error as exc:
+            raise PersistenceError("legacy ownership migration failed") from exc
 
     def create_analysis_run(
         self,
         analysis_id: str,
         correlation_id: str,
-        access_token: str,
+        owner_user_id: str,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO analysis_runs
-                   (analysis_id, correlation_id, status, created_at, access_token_hash)
+                   (analysis_id, correlation_id, status, created_at, owner_user_id)
                    VALUES (?, ?, 'running', ?, ?)""",
-                (analysis_id, correlation_id, _utc_now(), _token_hash(access_token)),
+                (analysis_id, correlation_id, _utc_now(), owner_user_id),
             )
 
     def complete_analysis_run(
@@ -290,7 +337,8 @@ class PersistenceStore:
             "event_id", "event_key", "analysis_id", "correlation_id", "operation", "category", "provider",
             "configured_model", "response_model", "reasoning_effort", "attempt",
             "outcome", "error_code", "started_at", "completed_at", "latency_ms",
-            "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens",
+            "input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "total_tokens",
             "estimated_cost_usd", "estimated_cost_pln", "pricing_version", "pricing_reason",
             "fx_rate", "fx_version", "billing_status", "cache_outcome",
             "saved_input_tokens", "saved_cached_input_tokens", "saved_output_tokens",
@@ -304,28 +352,53 @@ class PersistenceStore:
                 )
 
     def get_usage_summary(self) -> dict[str, Any]:
+        aggregate_sql = """
+            SELECT
+                COUNT(*) AS requests,
+                SUM(CASE WHEN billing_status = 'paid' THEN 1 ELSE 0 END) AS paid_requests,
+                SUM(CASE WHEN estimated_cost_usd IS NULL AND total_tokens > 0 THEN 1 ELSE 0 END) AS unpriced_requests,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                COALESCE(SUM(cache_write_input_tokens), 0) AS cache_write_input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                SUM(CAST(COALESCE(estimated_cost_usd, '0') AS REAL)) AS estimated_cost_usd,
+                SUM(CAST(COALESCE(estimated_cost_pln, '0') AS REAL)) AS estimated_cost_pln,
+                MAX(CASE WHEN estimated_cost_usd IS NULL AND total_tokens > 0 THEN 1 ELSE 0 END) AS usd_missing,
+                MAX(CASE WHEN estimated_cost_pln IS NULL AND total_tokens > 0 THEN 1 ELSE 0 END) AS pln_missing
+            FROM ai_usage_events
+        """
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM ai_usage_events ORDER BY id").fetchall()
+            aggregate = conn.execute(aggregate_sql).fetchone()
+            report_aggregate = conn.execute(
+                aggregate_sql + " WHERE category != 'profile_builder' OR category IS NULL"
+            ).fetchone()
+            operation_rows = conn.execute(
+                aggregate_sql.replace(
+                    "SELECT\n",
+                    "SELECT\n                operation AS key,\n",
+                    1,
+                ) + " GROUP BY operation ORDER BY operation"
+            ).fetchall()
             reports_processed = int(conn.execute(
                 "SELECT COUNT(*) FROM processed_report_events"
             ).fetchone()[0])
-        usage = [dict(row) for row in rows]
-        summary = _summarize_usage(usage)
+        summary = _usage_aggregate(dict(aggregate) if aggregate is not None else {})
+        report_summary = _usage_aggregate(dict(report_aggregate))
         summary["reports_processed"] = reports_processed
         summary["average_tokens_per_report"] = (
-            round(summary["total_tokens"] / reports_processed, 1)
+            round(report_summary["total_tokens"] / reports_processed, 1)
             if reports_processed else 0.0
         )
         summary["average_estimated_cost_usd"] = _average_decimal(
-            summary["estimated_cost_usd"], reports_processed
+            report_summary["estimated_cost_usd"], reports_processed
         )
         summary["average_estimated_cost_pln"] = _average_decimal(
-            summary["estimated_cost_pln"], reports_processed
+            report_summary["estimated_cost_pln"], reports_processed
         )
-        summary["operations"] = _group_usage(
-            usage,
-            lambda item: item["operation"],
-        )
+        summary["operations"] = [
+            _usage_group_aggregate(dict(row)) for row in operation_rows
+        ]
         return summary
 
     def get_analysis_usage_summary(self, analysis_id: str) -> dict[str, Any]:
@@ -358,14 +431,14 @@ class PersistenceStore:
         ]
         usage = [{key: row[key] for key in row.keys() if key != "id"} for row in usage_rows]
         aggregate: dict[str, Any] = {
-            "attempts": len(usage), "input_tokens": 0, "cached_input_tokens": 0,
+            "attempts": len(usage), "input_tokens": 0, "cached_input_tokens": 0, "cache_write_input_tokens": 0,
             "output_tokens": 0, "total_tokens": 0, "estimated_cost_usd": "0.000000000",
         }
         cost = Decimal("0")
         cost_known = True
         for item in usage:
-            for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
-                aggregate[key] += item[key]
+            for key in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
+                aggregate[key] += item.get(key) or 0
             if item["estimated_cost_usd"] is None:
                 cost_known = False
             else:
@@ -404,13 +477,14 @@ class PersistenceStore:
         report_payload: dict[str, Any],
         *,
         analysis_id: str | None = None,
-        access_token: str | None = None,
+        owner_user_id: str,
         source_filename: str | None = None,
     ) -> str:
         selected_analysis_id = analysis_id or str(uuid4())
-        payload = validate_analysis_report(report_payload)
+        candidate_payload = dict(report_payload)
+        candidate_payload.pop("analysis_access_token", None)
+        payload = validate_analysis_report(candidate_payload)
         stored_payload = dict(payload)
-        stored_payload.pop("analysis_access_token", None)
         strategy = payload["strategy"]
         status = payload["base_analysis"]["status"]
         now = _utc_now()
@@ -422,7 +496,7 @@ class PersistenceStore:
                     INSERT INTO reports (
                         input_hash, contract_version, strategy_name,
                         strategy_version, status, created_at, analysis_id,
-                        access_token_hash, source_filename
+                        owner_user_id, source_filename
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -434,7 +508,7 @@ class PersistenceStore:
                         status,
                         now,
                         selected_analysis_id,
-                        _token_hash(access_token) if access_token else None,
+                        owner_user_id,
                         source_filename,
                     ),
                 )
@@ -515,12 +589,12 @@ class PersistenceStore:
                 "SELECT output_json FROM audit_log WHERE analysis_id = ?",
                 (analysis_id,),
             ).fetchone()
-        return None if row is None else deserialize_analysis_payload(
+        return None if row is None else validate_analysis_report(
             json.loads(row["output_json"])
         )
 
-    def list_analyses(self, access_token: str | None) -> list[dict[str, Any]]:
-        if not access_token:
+    def list_analyses(self, owner_user_id: str | None) -> list[dict[str, Any]]:
+        if not owner_user_id:
             return []
         with self._connect() as conn:
             rows = conn.execute(
@@ -532,9 +606,9 @@ class PersistenceStore:
                           ) AS has_document
                    FROM reports
                    JOIN audit_log USING (analysis_id)
-                   WHERE reports.access_token_hash = ?
+                   WHERE reports.owner_user_id = ?
                    ORDER BY reports.created_at DESC""",
-                (_token_hash(access_token),),
+                (owner_user_id,),
             ).fetchall()
         history: list[dict[str, Any]] = []
         for row in rows:
@@ -552,30 +626,29 @@ class PersistenceStore:
             )
         return history
 
-    def analysis_access_allowed(self, analysis_id: str, access_token: str | None) -> bool:
-        if not access_token:
+    def analysis_owned_by(self, analysis_id: str, owner_user_id: str | None) -> bool:
+        if not owner_user_id:
             return False
         with self._connect() as conn:
             row = conn.execute(
-                """SELECT access_token_hash FROM reports WHERE analysis_id = ?
-                   UNION ALL SELECT access_token_hash FROM analysis_runs WHERE analysis_id = ? LIMIT 1""",
+                """SELECT owner_user_id FROM reports WHERE analysis_id = ?
+                   UNION ALL SELECT owner_user_id FROM analysis_runs WHERE analysis_id = ? LIMIT 1""",
                 (analysis_id, analysis_id),
             ).fetchone()
-        return row is not None and isinstance(row["access_token_hash"], str) and hmac.compare_digest(row["access_token_hash"], _token_hash(access_token))
+        return row is not None and row["owner_user_id"] == owner_user_id
 
     def persist_analysis_share_token(
         self,
         analysis_id: str,
-        access_token: str | None,
+        owner_user_id: str | None,
         share_token: str,
     ) -> bool:
-        if not access_token:
+        if not owner_user_id:
             return False
-        access_token_hash = _token_hash(access_token)
         with self._connect() as conn:
             report = conn.execute(
-                "SELECT 1 FROM reports WHERE analysis_id = ? AND access_token_hash = ?",
-                (analysis_id, access_token_hash),
+                "SELECT 1 FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
+                (analysis_id, owner_user_id),
             ).fetchone()
             if report is None:
                 return False
@@ -615,24 +688,25 @@ class PersistenceStore:
         return {
             "filename": row["source_filename"] or "CV",
             "has_document": bool(row["has_document"]),
-            "report": deserialize_analysis_payload(json.loads(row["output_json"])),
+            "report": validate_analysis_report(json.loads(row["output_json"])),
         }
 
-    def delete_analysis(self, analysis_id: str, access_token: str | None) -> bool:
-        if not self.analysis_access_allowed(analysis_id, access_token):
+    def delete_analysis(self, analysis_id: str, owner_user_id: str | None) -> bool:
+        if not self.analysis_owned_by(analysis_id, owner_user_id):
             return False
         self._delete_analysis_ids([analysis_id])
         return True
 
-    def delete_all_analyses(self, access_token: str | None) -> int:
-        if not access_token:
+    def delete_all_analyses(self, owner_user_id: str | None) -> int:
+        if not owner_user_id:
             return 0
         with self._connect() as conn:
             analysis_ids = [
                 row[0]
                 for row in conn.execute(
-                    "SELECT analysis_id FROM reports WHERE access_token_hash = ?",
-                    (_token_hash(access_token),),
+                    """SELECT analysis_id FROM reports WHERE owner_user_id = ?
+                       UNION SELECT analysis_id FROM analysis_runs WHERE owner_user_id = ?""",
+                    (owner_user_id, owner_user_id),
                 ).fetchall()
             ]
         self._delete_analysis_ids(analysis_ids)
@@ -644,13 +718,12 @@ class PersistenceStore:
         placeholders = ",".join("?" for _ in analysis_ids)
         with self._connect() as conn:
             for table in (
+                "legacy_analysis_owners",
                 "diagnostic_events",
                 "research_cache_audit",
                 "company_research",
                 "education_research",
                 "linkedin_discovery",
-                "linkedin_comparison",
-                "linkedin_confirmation",
                 "analysis_share_tokens",
                 "source_documents",
                 "audit_log",
@@ -697,11 +770,10 @@ class PersistenceStore:
         return self.purge_expired()
 
     def get_company_research(self, analysis_id: str) -> dict[str, Any] | None:
-        from cv_validator.research.company import RESEARCH_VERSION
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM company_research WHERE analysis_id = ? AND research_version = ?",
-                (analysis_id, RESEARCH_VERSION),
+                (analysis_id, COMPANY_RESEARCH_VERSION),
             ).fetchone()
         return None if row is None else dict(row)
 
@@ -738,11 +810,10 @@ class PersistenceStore:
             raise PersistenceError("company research persistence failed") from exc
 
     def get_education_research(self, analysis_id: str) -> dict[str, Any] | None:
-        from cv_validator.research.education import RESEARCH_VERSION
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM education_research WHERE analysis_id = ? AND research_version = ?",
-                (analysis_id, RESEARCH_VERSION),
+                (analysis_id, EDUCATION_RESEARCH_VERSION),
             ).fetchone()
         return None if row is None else dict(row)
 
@@ -791,22 +862,25 @@ class PersistenceStore:
     def persist_reusable_research(self, descriptor: Any, payload: dict[str, Any]) -> None:
         now_dt = datetime.now(timezone.utc)
         expires_at = now_dt + timedelta(days=self.config.research_cache_ttl_days)
-        with self._connect() as conn:
-            conn.execute(
-                """INSERT INTO reusable_research_cache (
-                    cache_key, cache_format_version, category, normalized_subjects_json,
-                    research_version, prompt_version, schema_version, model_version,
-                    search_policy_version, payload_json, source_accessed_at, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,
-                    source_accessed_at=excluded.source_accessed_at, created_at=excluded.created_at,
-                    expires_at=excluded.expires_at, invalidated_at=NULL""",
-                (descriptor.cache_key, descriptor.cache_format_version, descriptor.category,
-                 json.dumps(descriptor.normalized_subjects), descriptor.research_version,
-                 descriptor.prompt_version, descriptor.schema_version, descriptor.model_version,
-                 descriptor.search_policy_version, json.dumps(payload), payload["accessed_at"],
-                 now_dt.isoformat(), expires_at.isoformat()),
-            )
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO reusable_research_cache (
+                        cache_key, cache_format_version, category, normalized_subjects_json,
+                        research_version, prompt_version, schema_version, model_version,
+                        search_policy_version, payload_json, source_accessed_at, created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,
+                        source_accessed_at=excluded.source_accessed_at, created_at=excluded.created_at,
+                        expires_at=excluded.expires_at, invalidated_at=NULL""",
+                    (descriptor.cache_key, descriptor.cache_format_version, descriptor.category,
+                     json.dumps(descriptor.normalized_subjects), descriptor.research_version,
+                     descriptor.prompt_version, descriptor.schema_version, descriptor.model_version,
+                     descriptor.search_policy_version, json.dumps(payload), payload["accessed_at"],
+                     now_dt.isoformat(), expires_at.isoformat()),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("reusable research persistence failed") from exc
 
     def record_cache_use(self, analysis_id: str, category: str, cache_key: str, outcome: str) -> None:
         try:
@@ -831,157 +905,133 @@ class PersistenceStore:
         return cursor.rowcount
 
     def get_linkedin_discovery(self, analysis_id: str) -> dict[str, Any] | None:
-        from cv_validator.research.linkedin import DISCOVERY_VERSION
-        return self._get_research_row("linkedin_discovery", analysis_id, DISCOVERY_VERSION)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM linkedin_discovery WHERE analysis_id = ? AND research_version = ?",
+                (analysis_id, LINKEDIN_DISCOVERY_VERSION),
+            ).fetchone()
+        return None if row is None else dict(row)
 
     def persist_linkedin_discovery(self, analysis_id: str, result: dict[str, Any]) -> None:
-        self._persist_linkedin_result("linkedin_discovery", analysis_id, result)
-
-    def confirm_linkedin_profile(self, analysis_id: str, profile_url: str, discovery_version: str) -> dict[str, Any]:
-        confirmed_at = _utc_now()
-        audit = {"action": "recruiter_confirmed_possible_profile", "analysis_id": analysis_id,
-                 "profile_url": profile_url, "discovery_version": discovery_version, "confirmed_at": confirmed_at,
-                 "caveat": "Confirmation authorizes comparison only; it does not establish identity."}
+        versions, model = result["versions"], result["model"]
         try:
             with self._connect() as conn:
                 self._require_report_parent(conn, analysis_id)
-                cursor = conn.execute(
-                    """INSERT INTO linkedin_confirmation
-                    (analysis_id, profile_url, discovery_version, confirmed_at, audit_json)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(analysis_id) DO UPDATE SET
-                        profile_url = excluded.profile_url,
-                        discovery_version = excluded.discovery_version,
-                        confirmed_at = excluded.confirmed_at,
-                        audit_json = excluded.audit_json
-                    WHERE linkedin_confirmation.discovery_version <> excluded.discovery_version""",
-                    (analysis_id, profile_url, discovery_version, confirmed_at, json.dumps(audit)),
+                conn.execute(
+                    """INSERT INTO linkedin_discovery (
+                        analysis_id, research_version, status, prompt_version, schema_version,
+                        configured_model, response_model, accessed_at, usage_json, result_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(analysis_id, research_version) DO NOTHING""",
+                    (analysis_id, versions["research"], result["status"], versions["prompt"],
+                     versions["schema"], model["configured"], model["response"], result["accessed_at"],
+                     json.dumps(result["usage"]), json.dumps(result), _utc_now()),
                 )
-                if cursor.rowcount:
-                    conn.execute(
-                        "DELETE FROM linkedin_comparison WHERE analysis_id = ?",
-                        (analysis_id,),
-                    )
-                row = conn.execute(
-                    "SELECT profile_url, audit_json FROM linkedin_confirmation WHERE analysis_id = ?",
-                    (analysis_id,),
-                ).fetchone()
-                if row is None or row["profile_url"] != profile_url:
-                    raise ValueError("different_profile_already_confirmed")
-                audit = json.loads(row["audit_json"])
-        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin confirmation persistence failed") from exc
-        return audit
-
-    def get_linkedin_confirmation(self, analysis_id: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM linkedin_confirmation WHERE analysis_id = ?", (analysis_id,)).fetchone()
-        return None if row is None else dict(row)
-
-    def get_linkedin_comparison(self, analysis_id: str) -> dict[str, Any] | None:
-        from cv_validator.research.linkedin import COMPARISON_VERSION
-        return self._get_research_row("linkedin_comparison", analysis_id, COMPARISON_VERSION)
-
-    def persist_linkedin_comparison(self, analysis_id: str, profile_url: str, result: dict[str, Any]) -> None:
-        self._persist_linkedin_result("linkedin_comparison", analysis_id, result, profile_url=profile_url)
-
-    def _get_research_row(self, table: str, analysis_id: str, version: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
-            row = conn.execute(f"SELECT * FROM {table} WHERE analysis_id = ? AND research_version = ?", (analysis_id, version)).fetchone()
-        return None if row is None else dict(row)
-
-    def _persist_linkedin_result(self, table: str, analysis_id: str, result: dict[str, Any], *, profile_url: str | None = None) -> None:
-        versions, model, now = result["versions"], result["model"], _utc_now()
-        columns = "analysis_id, research_version, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
-        values: tuple[Any, ...] = (analysis_id, versions["research"], result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
-        if profile_url is not None:
-            columns = "analysis_id, research_version, profile_url, status, prompt_version, schema_version, configured_model, response_model, accessed_at, usage_json, result_json, created_at"
-            values = (analysis_id, versions["research"], profile_url, result["status"], versions["prompt"], versions["schema"], model["configured"], model["response"], result["accessed_at"], json.dumps(result["usage"]), json.dumps(result), now)
-        placeholders = ", ".join("?" for _ in values)
-        try:
-            with self._connect() as conn:
-                self._require_report_parent(conn, analysis_id)
-                conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON CONFLICT(analysis_id, research_version) DO NOTHING", values)
-        except (OSError, sqlite3.Error) as exc: raise PersistenceError("linkedin research persistence failed") from exc
-
-    def persist_analysis_payload_for_test(self, payload: dict[str, Any]) -> None:
-        """Seed an anonymous stored payload without constructing an uploaded CV."""
-        now = _utc_now()
-        analysis_id = payload["analysis_id"]
-        validated = validate_analysis_report(payload)
-        strategy = validated["strategy"]
-        with self._connect() as conn:
-            conn.execute(
-                """INSERT INTO reports (
-                    input_hash, contract_version, strategy_name,
-                    strategy_version, status, created_at, analysis_id,
-                    access_token_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    validated["source"]["sha256"],
-                    validated["contract_version"],
-                    strategy["name"],
-                    strategy["version"],
-                    validated["base_analysis"]["status"],
-                    now,
-                    analysis_id,
-                    _token_hash("test-access-token"),
-                ),
-            )
-            conn.execute(
-                "INSERT INTO audit_log (input_hash, contract_version, output_json, created_at, analysis_id) VALUES (?, ?, ?, ?, ?)",
-                (
-                    validated["source"]["sha256"],
-                    validated["contract_version"],
-                    json.dumps(validated),
-                    now,
-                    analysis_id,
-                ),
-            )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("linkedin research persistence failed") from exc
 
     def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
-        cutoff_iso = cutoff.isoformat()
+        cutoff_iso = (
+            datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
+        ).isoformat()
         deleted: dict[str, int | tuple[str, ...]] = {}
         with self._connect() as conn:
-            expired_ids_set: set[str] = set()
-            for table, column in (
-                ("reports", "created_at"),
-                ("research_cache_audit", "created_at"),
-                ("company_research", "created_at"),
-                ("education_research", "created_at"),
-                ("linkedin_discovery", "created_at"),
-                ("linkedin_comparison", "created_at"),
-                ("linkedin_confirmation", "confirmed_at"),
-                ("source_documents", "created_at"),
-                ("audit_log", "created_at"),
-                ("analysis_runs", "created_at"),
-            ):
-                expired_ids_set.update(
+            expired_ids = sorted(
+                {
                     row[0]
                     for row in conn.execute(
-                        f"SELECT analysis_id FROM {table} WHERE {column} < ?",
+                        "SELECT analysis_id FROM reports WHERE created_at < ?",
                         (cutoff_iso,),
                     ).fetchall()
                     if isinstance(row[0], str)
-                )
-            expired_ids = sorted(expired_ids_set)
+                }
+                | {
+                    row[0]
+                    for row in conn.execute(
+                        """SELECT analysis_runs.analysis_id
+                           FROM analysis_runs
+                           LEFT JOIN reports USING (analysis_id)
+                           WHERE reports.analysis_id IS NULL AND analysis_runs.created_at < ?""",
+                        (cutoff_iso,),
+                    ).fetchall()
+                    if isinstance(row[0], str)
+                }
+            )
             if expired_ids:
                 placeholders = ",".join("?" for _ in expired_ids)
-                for table in ("research_cache_audit", "company_research", "education_research",
-                              "linkedin_discovery", "linkedin_comparison", "linkedin_confirmation",
-                              "analysis_share_tokens", "source_documents", "audit_log", "diagnostic_events"):
-                    deleted[table] = conn.execute(f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
-                deleted["reports"] = conn.execute(f"DELETE FROM reports WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
-                deleted["analysis_runs"] = conn.execute(f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})", expired_ids).rowcount
-            deleted["reusable_research_cache"] = conn.execute("DELETE FROM reusable_research_cache WHERE expires_at <= ?", (_utc_now(),)).rowcount
+                for table in (
+                    "legacy_analysis_owners",
+                    "research_cache_audit",
+                    "company_research",
+                    "education_research",
+                    "linkedin_discovery",
+                    "analysis_share_tokens",
+                    "source_documents",
+                    "audit_log",
+                    "diagnostic_events",
+                ):
+                    deleted[table] = conn.execute(
+                        f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})",
+                        expired_ids,
+                    ).rowcount
+                deleted["reports"] = conn.execute(
+                    f"DELETE FROM reports WHERE analysis_id IN ({placeholders})",
+                    expired_ids,
+                ).rowcount
+                deleted["analysis_runs"] = conn.execute(
+                    f"DELETE FROM analysis_runs WHERE analysis_id IN ({placeholders})",
+                    expired_ids,
+                ).rowcount
+            deleted["reusable_research_cache"] = conn.execute(
+                "DELETE FROM reusable_research_cache WHERE expires_at <= ?",
+                (_utc_now(),),
+            ).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
-            if expired_ids and self._purge_listener is not None:
-                self._purge_listener(tuple(expired_ids))
         return deleted
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _decimal_sum(value: Any) -> str:
+    return f"{Decimal(str(value or 0)):.9f}"
+
+
+def _usage_aggregate(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "requests": int(row.get("requests") or 0),
+        "paid_requests": int(row.get("paid_requests") or 0),
+        "unpriced_requests": int(row.get("unpriced_requests") or 0),
+        "input_tokens": int(row.get("input_tokens") or 0),
+        "cached_input_tokens": int(row.get("cached_input_tokens") or 0),
+        "cache_write_input_tokens": int(row.get("cache_write_input_tokens") or 0),
+        "output_tokens": int(row.get("output_tokens") or 0),
+        "total_tokens": int(row.get("total_tokens") or 0),
+        "estimated_cost_usd": (
+            None if row.get("usd_missing") else _decimal_sum(row.get("estimated_cost_usd"))
+        ),
+        "estimated_cost_pln": (
+            None if row.get("pln_missing") else _decimal_sum(row.get("estimated_cost_pln"))
+        ),
+        "fx_rate": str(USD_PLN_FX_RATE),
+        "fx_version": USD_PLN_FX_VERSION,
+    }
+
+
+def _usage_group_aggregate(row: dict[str, Any]) -> dict[str, Any]:
+    summary = _usage_aggregate(row)
+    return {
+        "key": str(row.get("key") or ""),
+        "attempts": summary["requests"],
+        "input_tokens": summary["input_tokens"],
+        "cached_input_tokens": summary["cached_input_tokens"],
+        "cache_write_input_tokens": summary["cache_write_input_tokens"],
+        "output_tokens": summary["output_tokens"],
+        "total_tokens": summary["total_tokens"],
+        "estimated_cost_usd": summary["estimated_cost_usd"],
+        "estimated_cost_pln": summary["estimated_cost_pln"],
+    }
 
 
 def _group_usage(
@@ -996,6 +1046,7 @@ def _group_usage(
             "attempts": 0,
             "input_tokens": 0,
             "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
             "estimated_cost_usd": Decimal("0"),
@@ -1004,8 +1055,8 @@ def _group_usage(
             "pln_cost_available": True,
         })
         group["attempts"] += 1
-        for token in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
-            group[token] += item[token]
+        for token in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
+            group[token] += item.get(token) or 0
         if item["estimated_cost_usd"] is None and item["total_tokens"] > 0:
             group["usd_cost_available"] = False
         else:
@@ -1034,6 +1085,7 @@ def _summarize_usage(usage: list[dict[str, Any]]) -> dict[str, Any]:
         "unpriced_requests": 0,
         "input_tokens": 0,
         "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
     }
@@ -1044,7 +1096,7 @@ def _summarize_usage(usage: list[dict[str, Any]]) -> dict[str, Any]:
     for item in usage:
         if item.get("billing_status") == "paid":
             summary["paid_requests"] += 1
-        for key in ("input_tokens", "cached_input_tokens", "output_tokens", "total_tokens"):
+        for key in ("input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "total_tokens"):
             summary[key] += int(item.get(key) or 0)
         token_usage = int(item.get("total_tokens") or 0)
         item_usd = item.get("estimated_cost_usd")
@@ -1093,6 +1145,38 @@ def _candidate_name(payload: dict[str, Any]) -> str | None:
     return stripped or None
 
 
+def _ensure_owner_schema(conn: sqlite3.Connection) -> None:
+    """Preserve legacy v2 owner hashes until the authenticated owner returns.
+
+    The private web boundary supplies a stable user id. Only the API, using the
+    original auth secret, can derive the matching old HMAC; clients cannot claim
+    rows with a browser-supplied capability. Old pilot schemas are still rejected.
+    """
+    report_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(reports)").fetchall()
+    }
+    required = {
+        "input_hash", "contract_version", "strategy_name", "strategy_version",
+        "status", "created_at", "analysis_id", "source_filename",
+    }
+    if not report_columns or not required.issubset(report_columns):
+        return
+    conn.execute("""CREATE TABLE IF NOT EXISTS legacy_analysis_owners (
+        analysis_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL
+    )""")
+    for table in ("reports", "analysis_runs"):
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not columns:
+            continue
+        if "owner_user_id" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN owner_user_id TEXT")
+        if "access_token_hash" in columns:
+            conn.execute(f"""INSERT OR IGNORE INTO legacy_analysis_owners
+                SELECT analysis_id, access_token_hash FROM {table}
+                WHERE owner_user_id IS NULL AND access_token_hash IS NOT NULL""")
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN access_token_hash")
+
+
 def _require_current_report_schema(conn: sqlite3.Connection) -> None:
     columns = {
         row["name"]
@@ -1106,7 +1190,7 @@ def _require_current_report_schema(conn: sqlite3.Connection) -> None:
         "status",
         "created_at",
         "analysis_id",
-        "access_token_hash",
+        "owner_user_id",
         "source_filename",
     }
     if columns and not required.issubset(columns):
@@ -1126,6 +1210,7 @@ def _ensure_ai_usage_schema(conn: sqlite3.Connection) -> None:
         "fx_version": "TEXT",
         "billing_status": "TEXT",
         "reasoning_output_tokens": "INTEGER NOT NULL DEFAULT 0",
+        "cache_write_input_tokens": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, definition in additions.items():
         if name not in columns:

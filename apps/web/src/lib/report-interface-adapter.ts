@@ -12,6 +12,7 @@ export type ReportFinding = {
   whyItMatters: string;
   whatToCheck: string;
   evidence: Evidence[];
+  sourceUrls?: string[];
 };
 
 export type OverviewRecord = {
@@ -32,8 +33,9 @@ export type ReportOverview = {
   postalCode: string | null;
   postalCountry: string | null;
   postalConsistency: "consistent" | "mismatch" | null;
-  euStatus: "inside" | "outside" | null;
+  euStatus: "inside" | "outside" | "unknown";
   education: OverviewRecord[];
+  certifications: OverviewRecord[];
   employment: OverviewRecord[];
   attentionRecords: OverviewRecord[];
   educationStatus?: string;
@@ -200,21 +202,27 @@ function join(values: Array<string | null | undefined>): string | null {
 }
 
 function dateRange(start: SupportedField | null, end: SupportedField | null): string | null {
-  return join([value(start), value(end)]);
+  const startValue = value(start);
+  const endValue = value(end);
+  if (startValue && endValue) return `${startValue} – ${endValue}`;
+  return startValue ?? endValue;
 }
 
 function educationRecord(item: AnalysisReport["base_analysis"]["education"][number]): OverviewRecord {
+  const institution = value(item.institution);
+  const certificate = value(item.certificate);
   return {
     id: item.id,
-    value: value(item.institution) ?? "Education entry",
+    value: institution ?? certificate ?? "Education entry",
     detail: join([
       value(item.program),
       value(item.degree),
+      institution ? certificate : null,
       dateRange(item.start_date, item.end_date),
       value(item.location),
     ]),
-    searchSubject: value(item.institution),
-    searchContext: value(item.program),
+    searchSubject: institution ?? certificate,
+    searchContext: value(item.program) ?? (institution ? certificate : null),
     needsReview: item.status === "ambiguous",
   };
 }
@@ -250,6 +258,10 @@ function overview(report: AnalysisReport): ReportOverview {
       .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
       .map((item) => item.record_id),
   );
+  const declaredSource = Array.isArray(eu?.sources)
+    ? eu.sources.map(record).find((item) => item?.kind === "declared_location")
+    : null;
+  const declaredCountry = text(declaredSource?.country_code) ?? text(resolution?.country_code);
   const outsideEu = Array.isArray(eu?.outside_eu) ? eu.outside_eu : [];
   const insideEu = Array.isArray(eu?.inside_eu) ? eu.inside_eu : [];
   return {
@@ -265,11 +277,18 @@ function overview(report: AnalysisReport): ReportOverview {
       : postalValidation?.status === "mismatch"
         ? "mismatch"
         : null,
-    euStatus: outsideEu.length ? "outside" : insideEu.length ? "inside" : null,
-    education: report.base_analysis.education.filter((item) => !suspectedIds.has(item.id) && value(item.institution)).map(educationRecord),
+    euStatus: declaredCountry && outsideEu.includes(declaredCountry) ? "outside" : declaredCountry && insideEu.includes(declaredCountry) ? "inside" : "unknown",
+    education: report.base_analysis.education
+      .filter((item) => !suspectedIds.has(item.id) && value(item.institution))
+      .map(educationRecord),
+    certifications: report.base_analysis.education
+      .filter((item) => !suspectedIds.has(item.id) && !value(item.institution) && value(item.certificate))
+      .map(educationRecord),
     employment: report.base_analysis.employment.filter((item) => !suspectedIds.has(item.id)).map(employmentRecord),
     attentionRecords: [
-      ...report.base_analysis.education.filter((item) => suspectedIds.has(item.id) && value(item.institution)).map(educationRecord),
+      ...report.base_analysis.education
+        .filter((item) => suspectedIds.has(item.id) && (value(item.institution) || value(item.certificate)))
+        .map(educationRecord),
       ...report.base_analysis.employment.filter((item) => suspectedIds.has(item.id)).map(employmentRecord),
     ],
     educationStatus: report.base_analysis.pass_statuses.education?.section_status,
@@ -347,18 +366,42 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         linkedinEvidence,
       )
     : null;
+  const institutionFindings: ReportFinding[] = (report.education_research?.credentials ?? []).flatMap((credential, index) => {
+    if (credential.institution_existence !== "conflicting" || !credential.resolved_institution) return [];
+    const supported = credential.findings.filter((item) => item.kind === "institution_existence" && item.confidence === "high" && item.source_urls.length);
+    if (!supported.length) return [];
+    return [{
+      id: `institution-conflict-${index}`,
+      whatWeFound: `${language === "pl" ? "Sprzeczne dane uczelni" : "Institution details conflict"}: ${credential.institution}`,
+      whyItMatters: supported.map((item) => item.summary).join(" "),
+      whatToCheck: language === "pl" ? "Sprawdź nazwę uczelni i cytowane źródło." : "Review the institution name and cited source.",
+      evidence: [],
+      sourceUrls: [...new Set(supported.flatMap((item) => item.source_urls))],
+    }];
+  });
+  const companyFindings: ReportFinding[] = (report.company_research?.timeline_findings ?? []).flatMap((item) => {
+    const employment = report.base_analysis.employment.find((entry) => entry.id === item.record_id && entry.status === "accepted" && entry.relation_status === "supported");
+    if (!employment || !item.source_urls.length || !["employment_before_founding", "employment_after_closure"].includes(item.kind)) return [];
+    const before = item.kind === "employment_before_founding";
+    const label = language === "pl"
+      ? before ? "Praca przed powstaniem firmy" : "Praca po zamknięciu firmy"
+      : before ? "Employment predates company" : "Employment follows company closure";
+    return [{
+      id: `company-${item.record_id}-${item.kind}`,
+      whatWeFound: `${label}: ${item.organization}`,
+      whyItMatters: language === "pl"
+        ? `Początek pracy w CV: ${item.cv_date}. ${before ? "Powstanie" : "Zamknięcie"} firmy według źródła: ${item.event_date}.`
+        : `Employment starts in the CV: ${item.cv_date}. Company ${before ? "founded" : "closed"} according to the source: ${item.event_date}.`,
+      whatToCheck: language === "pl" ? "Sprawdź daty i historię firmy, w tym poprzedników i zmiany nazwy." : "Review the dates and business history, including predecessors and name changes.",
+      evidence: [...(employment.organization?.evidence ?? []), ...(employment.start_date?.evidence ?? [])],
+      sourceUrls: item.source_urls,
+    }];
+  });
   const attention: ReportFinding[] = [
+    ...institutionFindings,
+    ...companyFindings,
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-    ...comparisons
-      .filter((item) => item.relationship === "different")
-      .map((_item, index) => findingFromEvidence(
-        `comparison-different-${index}`,
-        copy.mismatch,
-        copy.mismatchWhy,
-        copy.mismatchCheck,
-        comparisonEvidence,
-      )),
     ...emailFindings
       .map((item, index) => finding(`email-${index}`, { ...item, summary: [
         copy.emailTypo,
@@ -369,6 +412,15 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
   ];
 
   const worthKnowing: ReportFinding[] = [
+    ...comparisons
+      .filter((item) => item.relationship === "different")
+      .map((_item, index) => findingFromEvidence(
+        `comparison-different-${index}`,
+        copy.mismatch,
+        copy.mismatchWhy,
+        copy.mismatchCheck,
+        comparisonEvidence,
+      )),
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },

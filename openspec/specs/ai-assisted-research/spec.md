@@ -8,11 +8,7 @@ Defines optional cited public-web research after a validated base analysis.
 
 ### Requirement: Research only accepted base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported named
-organization. Education research SHALL use accepted education records with a
-supported institution or certificate. LinkedIn discovery SHALL require a
-supported candidate name and may use accepted organization and role fields as
-search hints.
+Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use accepted education records with a supported relation and supported institution. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
 Ambiguous records, ambiguous fields, self-employment labels, skills, raw
 extractor candidates, reviewer-rejected candidates, and unvalidated model
@@ -79,7 +75,7 @@ Addresses that differ only by formatting or conflicting unit or suite details SH
 - **THEN** the result contains one office at the best-supported address and notes the conflict in its optional comment
 
 ### Requirement: Education research
-Education research SHALL check public evidence for institutions, programs, degrees, certificates, dates, and location. Accreditation MAY be retained as backend research metadata but SHALL NOT be shown as a recruiter-facing status badge. A cited institution-country difference MAY be shown for manual review but is not evidence of a false CV claim. High confidence SHALL require consistent authoritative support for the exact institution and relevant credential context.
+Education research SHALL check public evidence for institutions, programs, degrees, dates, and location. It SHALL NOT research certificates or verify whether a candidate holds them. Accreditation MAY be retained as backend research metadata but SHALL NOT be shown as a recruiter-facing status badge. A cited institution-country difference MAY be shown for manual review but is not evidence of a false CV claim. High confidence SHALL require consistent authoritative support for the exact institution and relevant credential context.
 
 #### Scenario: Institution country differs
 - **WHEN** cited sources place an institution in another country
@@ -105,7 +101,7 @@ High confidence SHALL require supported name alignment plus at least one indepen
 ### Requirement: Persistence and reusable cache
 
 Completed category results SHALL be stored under the owning analysis. Reusable
-public-entity cache entries MUST exclude candidate-specific data. Every cache
+public-entity cache entries MUST exclude candidate-specific data and batch-level search queries/limitations from other subjects; any saved usage attribution SHALL be per subject rather than assigned only to the first item in a batch. Every cache
 hit or miss SHALL be recorded for the owning analysis, and responses SHALL
 disclose whether a result came from cache.
 
@@ -117,3 +113,7 @@ categories.
 
 - **WHEN** a current public-entity cache entry matches the request
 - **THEN** the API reuses it and records a cache hit for the owning analysis
+
+
+### Requirement: Actionable research errors
+Failed research SHALL show a localized explanation and allow copying safe diagnostic details: operation, error code, optional allowlisted validation reason, HTTP status, time, and analysis identifier. Diagnostics SHALL NOT contain CV text, model output, credentials, or raw logs. Automatic failures SHALL remain manually retryable.

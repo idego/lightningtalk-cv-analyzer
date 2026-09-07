@@ -194,7 +194,7 @@ function DocumentPreviewContent({ source, onHide }: { source: DocumentSource; on
         <div className="relative min-h-0 flex-1 overflow-hidden bg-muted/25"><iframe title={name} src={pdfPageWidthUrl(url)} className="h-full w-full border-0 bg-white" /></div>
       ) : (
         <div ref={viewportRef} className="document-preview-viewport relative min-h-0 flex-1 overflow-hidden bg-muted/25" onPointerDown={startPan} onPointerMove={movePan} onPointerUp={stopPan} onPointerCancel={stopPan}>
-          {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80"><LoaderCircle className="size-6 animate-spin" /></div> : null}
+          {loading ? <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/80 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />{t("loadingCvPreview")}</div> : null}
           {error ? <div className="absolute inset-x-4 top-4 z-10 rounded-lg border border-amber-500/30 bg-background p-3 text-sm">{error}</div> : null}
           <div ref={canvasRef} className="document-preview-canvas absolute left-0 top-0 origin-top-left will-change-transform" data-programmatic="false"><div ref={documentRef} className="docx-preview-host inline-block" /></div>
         </div>

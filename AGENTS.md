@@ -68,3 +68,13 @@ doc updates do not need a change proposal. When a change touches behavior
 that an `openspec/specs/*/spec.md` already describes, update that spec in the
 same commit so specs stay truthful. Do not restore archived contracts for
 removed analysis systems.
+
+
+## Profile Builder boundary
+
+Profile Builder is the restored CVtoBlind-replacement workflow, separate from CV
+analysis. Read its architecture section and `openspec/specs/profile-builder/spec.md`.
+Preserve editable profile/template snapshots, selected-field output anonymization,
+private/shared template scope, bounded AI proposals, and native DOCX/PDF parity.
+Its supported national-ID masking lives only in `profile_builder_privacy.py`; do
+not restore the removed analyzer ingestion/redaction or AI pipeline around it.

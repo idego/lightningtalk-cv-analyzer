@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-DEFAULT_PRICING_VERSION = "openai-pricing-2026-09-02"
+DEFAULT_PRICING_VERSION = "openai-pricing-2026-09-04"
 USD_PLN_FX_RATE = Decimal("3.75")
 USD_PLN_FX_VERSION = "usd-pln-fixed-3.75-v1"
 DEFAULT_PRICING: dict[str, Any] = {
@@ -17,6 +17,7 @@ DEFAULT_PRICING: dict[str, Any] = {
         "gpt-5.6-luna": {
             "input_usd_per_million": "0.20",
             "cached_input_usd_per_million": "0.02",
+            "cache_write_input_usd_per_million": "0.25",
             "output_usd_per_million": "1.20",
             "long_context_threshold": 272000,
             "long_context_input_multiplier": "2",
@@ -53,6 +54,12 @@ def normalize_usage(value: Any) -> dict[str, int]:
             details.get("cached_tokens", usage.get("cached_input_tokens"))
         ),
     )
+    cache_write_input_tokens = min(
+        input_tokens - cached_input_tokens,
+        _non_negative_int(
+            details.get("cache_write_tokens", usage.get("cache_write_input_tokens"))
+        ),
+    )
     output_tokens = _non_negative_int(usage.get("output_tokens"))
     reasoning_output_tokens = min(
         output_tokens,
@@ -64,6 +71,7 @@ def normalize_usage(value: Any) -> dict[str, int]:
     return {
         "input_tokens": input_tokens,
         "cached_input_tokens": cached_input_tokens,
+        "cache_write_input_tokens": cache_write_input_tokens,
         "output_tokens": output_tokens,
         "reasoning_output_tokens": reasoning_output_tokens,
         "total_tokens": total_tokens,
@@ -100,6 +108,9 @@ class PricingCatalog:
         try:
             input_rate = Decimal(str(rates["input_usd_per_million"]))
             cached_rate = Decimal(str(rates["cached_input_usd_per_million"]))
+            cache_write_rate = Decimal(
+                str(rates.get("cache_write_input_usd_per_million", rates["input_usd_per_million"]))
+            )
             output_rate = Decimal(str(rates["output_usd_per_million"]))
             threshold = int(rates.get("long_context_threshold", 0))
             input_multiplier = Decimal(str(rates.get("long_context_input_multiplier", "1")))
@@ -110,11 +121,13 @@ class PricingCatalog:
             input_multiplier = Decimal("1")
             output_multiplier = Decimal("1")
         cached = normalized["cached_input_tokens"]
-        uncached = max(normalized["input_tokens"] - cached, 0)
+        cache_write = normalized["cache_write_input_tokens"]
+        uncached = max(normalized["input_tokens"] - cached - cache_write, 0)
         million = Decimal(1_000_000)
         cost = (
             Decimal(uncached) * input_rate * input_multiplier
             + Decimal(cached) * cached_rate * input_multiplier
+            + Decimal(cache_write) * cache_write_rate * input_multiplier
             + Decimal(normalized["output_tokens"]) * output_rate * output_multiplier
         ) / million
         return CostEstimate(format(cost.quantize(Decimal("0.000000001")), "f"), self.version)
