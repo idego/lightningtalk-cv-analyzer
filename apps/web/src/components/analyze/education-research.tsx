@@ -6,6 +6,7 @@ import type { AnalysisReport, EducationResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { ResearchErrorNotice } from "./research-error-notice";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
@@ -25,10 +26,9 @@ function EducationResult({ credential }: { credential: Credential }) {
   const searchHref = educationGoogleSearchUrl({
     institution: credential.institution,
     program: credential.program,
-    certificate: credential.certificate,
   });
-  const subject = credential.institution ?? credential.certificate ?? t("educationResearch");
-  const details = [credential.certificate && credential.institution ? credential.certificate : null, credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ");
+  const subject = credential.institution ?? t("educationResearch");
+  const details = [credential.degree, credential.dates, credential.city, credential.country].filter(Boolean).join(" · ");
 
   return <HoverDisclosure
     className="rounded-md border bg-muted/20 p-3 text-sm"
@@ -68,11 +68,7 @@ export function EducationResearchPanel({
   const busy = automatic?.status === "pending" || automatic?.status === "running";
   const completed = Boolean(report.education_research) || automatic?.status === "succeeded";
   const hasContent = Boolean(visibleResearch || automatic?.message);
-  const automaticMessage = automatic?.status === "manual-action"
-    ? t("automaticResearchAlreadyAttempted")
-    : automatic?.status === "failed"
-      ? t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")
-      : null;
+
 
   useEffect(() => {
     onResearchChangeRef.current = onResearchChange;
@@ -119,8 +115,8 @@ export function EducationResearchPanel({
       {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
     </div>}
   >
-    {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
+    <ResearchErrorNotice state={automatic} />
     <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
-    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution ?? credential.certificate}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="ml-2 pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pl-3 pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
+    {visibleResearch ? <div className="space-y-2">{sortByResearchConfidence(visibleResearch.credentials).map((credential) => <EducationResult key={`${credential.institution}:${credential.program ?? ""}`} credential={credential} />)}{visibleResearch.searches_performed.length || visibleResearch.search_limitations.length ? <HoverDisclosure className="ml-2 pt-2 text-xs text-muted-foreground" triggerClassName="w-fit flex-none font-medium text-foreground" title={t("searchesAndLimitations")} contentClassName="pl-3 pt-2"><ul className="space-y-1">{visibleResearch.searches_performed.map((search) => <li key={search}>{t("search")}: {search}</li>)}{visibleResearch.search_limitations.map((limit) => <li key={limit}>{t("limit")}: {limit}</li>)}</ul></HoverDisclosure> : null}</div> : null}
   </HoverDisclosure>;
 }

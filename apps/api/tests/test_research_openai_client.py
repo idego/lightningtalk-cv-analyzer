@@ -82,11 +82,9 @@ def education_item(institution: str, program: str, source: str) -> dict:
     return {
         "institution": institution,
         "program": program,
-        "certificate": None,
         "degree": None,
         "program_exists": "supported",
         "degree_exists": "evidence_unavailable",
-        "certificate_exists": "evidence_unavailable",
         "dates": None,
         "city": None,
         "country": None,
@@ -137,7 +135,7 @@ def test_education_research_maps_reversed_model_rows_by_echoed_subject() -> None
     first_source = "https://first.example.edu/"
     second_source = "https://second.example.edu/"
     payload = {
-        "schema_version": "education-research-schema-v4",
+        "schema_version": "education-research-schema-v5",
         "outcome": "completed",
         "credentials": [
             education_item("Second University", "Physics", second_source),
@@ -151,8 +149,8 @@ def test_education_research_maps_reversed_model_rows_by_echoed_subject() -> None
     )
 
     result, _, _ = researcher.research(EducationResearchRequest((
-        {"institution": "First University", "program": "Computer Science", "certificate": None},
-        {"institution": "Second University", "program": "Physics", "certificate": None},
+        {"institution": "First University", "program": "Computer Science"},
+        {"institution": "Second University", "program": "Physics"},
     )))
 
     assert [item["institution"] for item in result["credentials"]] == [

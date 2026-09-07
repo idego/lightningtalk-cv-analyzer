@@ -171,8 +171,8 @@ def _education_reusable_payload(result: dict[str, Any]) -> dict[str, Any]:
         cached = {
             key: deepcopy(item[key])
             for key in (
-                "institution", "program", "certificate", "degree",
-                "program_exists", "degree_exists", "certificate_exists",
+                "institution", "program", "degree",
+                "program_exists", "degree_exists",
                 "city", "country", "confidence", "uncertainty",
             )
         }
@@ -221,7 +221,7 @@ def _descriptor(category: CacheCategory, subjects: tuple[str, ...], research: st
 def _education_subject(fact: dict[str, Any]) -> str:
     parts = [
         _normalize(str(fact.get(field) or ""))
-        for field in ("institution", "program", "certificate")
+        for field in ("institution", "program")
     ]
     return json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
 

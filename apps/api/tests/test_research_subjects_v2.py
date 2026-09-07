@@ -46,7 +46,7 @@ def test_research_uses_only_accepted_supported_records() -> None:
     }
 
 
-def test_education_research_includes_certificate_only_records() -> None:
+def test_education_research_excludes_certificate_only_records() -> None:
     report = valid_report()
     report["base_analysis"]["education"].append({
         "id": "certificate-only",
@@ -67,11 +67,14 @@ def test_education_research_includes_certificate_only_records() -> None:
     assert education.input_facts == (
         {
             "institution": "Example University",
-            "certificate": None,
             "program": "Computer Science",
         },
-        {
-            "institution": None,
-            "certificate": "AWS Cloud Practitioner",
-        },
     )
+
+
+def test_certificate_is_not_sent_even_when_an_institution_is_present() -> None:
+    report = valid_report()
+    report["base_analysis"]["education"][0]["certificate"] = supported("Example Certificate")
+    facts = build_education_research_request(report).input_facts
+    assert all("certificate" not in fact for fact in facts)
+    assert facts[0]["institution"] == "Example University"

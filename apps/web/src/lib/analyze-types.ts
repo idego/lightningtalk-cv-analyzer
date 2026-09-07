@@ -98,11 +98,9 @@ export type EducationResearch = {
   credentials: Array<{
     institution: string | null;
     program: string | null;
-    certificate: string | null;
     degree: string | null;
     program_exists: "supported" | "mismatch" | "evidence_unavailable";
     degree_exists: "supported" | "mismatch" | "evidence_unavailable";
-    certificate_exists: "supported" | "mismatch" | "evidence_unavailable";
     dates: string | null;
     city: string | null;
     country: string | null;

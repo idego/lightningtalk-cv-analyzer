@@ -6,6 +6,7 @@ import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { ResearchErrorNotice } from "./research-error-notice";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
@@ -45,11 +46,7 @@ export function CompanyResearchPanel({
   const busy = automatic?.status === "pending" || automatic?.status === "running";
   const completed = Boolean(report.company_research) || automatic?.status === "succeeded";
   const hasContent = Boolean(visibleResearch || automatic?.message);
-  const automaticMessage = automatic?.status === "manual-action"
-    ? t("automaticResearchAlreadyAttempted")
-    : automatic?.status === "failed"
-      ? t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")
-      : null;
+
 
   useEffect(() => {
     onResearchChangeRef.current = onResearchChange;
@@ -97,7 +94,7 @@ export function CompanyResearchPanel({
         {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
       </div>}
     >
-      {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
+      <ResearchErrorNotice state={automatic} />
       <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
 
       {visibleResearch ? (

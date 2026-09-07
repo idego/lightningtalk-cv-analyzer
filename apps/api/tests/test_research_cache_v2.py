@@ -76,16 +76,14 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v4",
+        "schema_version": "education-research-schema-v5",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
             "program": "Computer Science",
-            "certificate": None,
             "degree": None,
             "program_exists": "supported",
             "degree_exists": "evidence_unavailable",
-            "certificate_exists": "evidence_unavailable",
             "dates": None,
             "city": None,
             "country": None,
@@ -345,12 +343,10 @@ def test_education_cache_subject_encoding_avoids_delimiter_collisions() -> None:
     first = education_subject_descriptors(EducationResearchRequest(({
         "institution": "A",
         "program": "B|C",
-        "certificate": None,
     },)))
     second = education_subject_descriptors(EducationResearchRequest(({
         "institution": "A|B",
         "program": "C",
-        "certificate": None,
     },)))
 
     assert first[0].cache_key != second[0].cache_key

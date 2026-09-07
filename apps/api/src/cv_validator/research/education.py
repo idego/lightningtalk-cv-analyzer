@@ -17,8 +17,8 @@ from cv_validator.research.versions import EDUCATION_RESEARCH_VERSION
 from cv_validator.research.subjects import accepted_records, safe_public_subject, supported_field
 
 RESEARCH_VERSION = EDUCATION_RESEARCH_VERSION
-PROMPT_VERSION = "education-research-prompt-v6"
-SCHEMA_VERSION = "education-research-schema-v4"
+PROMPT_VERSION = "education-research-prompt-v7"
+SCHEMA_VERSION = "education-research-schema-v5"
 MAX_CREDENTIALS = 12
 
 
@@ -145,17 +145,9 @@ def build_education_research_request(stored_report: dict[str, Any]) -> Education
     for record in accepted_records(stored_report, "education"):
         institution = supported_field(record, "institution")
         program = supported_field(record, "program")
-        certificate = supported_field(record, "certificate")
-        if institution is not None and not safe_public_subject(institution):
-            institution = None
-        if certificate is not None and not safe_public_subject(certificate):
-            certificate = None
-        if institution is None and certificate is None:
+        if institution is None or not safe_public_subject(institution):
             continue
-        fact: dict[str, Any] = {
-            "institution": institution,
-            "certificate": certificate,
-        }
+        fact: dict[str, Any] = {"institution": institution}
         if program is not None and safe_public_subject(program):
             fact["program"] = program[:200]
         key = _key(fact)
@@ -184,7 +176,6 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
         for field, kind in (
             ("program_exists", "program"),
             ("degree_exists", "degree"),
-            ("certificate_exists", "certificate"),
         ):
             if credential[field] != "evidence_unavailable":
                 required.add(kind)
@@ -197,10 +188,10 @@ def validate_education_research(payload: Any, *, request: EducationResearchReque
             raise EducationResearchInvalidResponse()
 
 
-def _key(item: dict[str, Any]) -> tuple[str, str, str]:
+def _key(item: dict[str, Any]) -> tuple[str, str]:
     return tuple(
         str(item.get(field) or "").strip().casefold()
-        for field in ("institution", "program", "certificate")
+        for field in ("institution", "program")
     )
 
 

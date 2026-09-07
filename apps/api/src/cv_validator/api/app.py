@@ -1257,7 +1257,14 @@ def _research_failure(
         error_code=outcome,
         reason=_bounded_reason(getattr(exc, "reason", None) or (str(exc) if exc.args else None)),
     )
-    raise HTTPException(status_code=status_code, detail=detail) from exc
+    reason = getattr(exc, "reason", None)
+    safe_reasons = {
+        "invalid_response", "schema", "subject_mismatch", "search_count", "invalid_json", "json_parse",
+        "unsupported_high_confidence", "insufficient_evidence_confidence", "claims_without_findings",
+        "empty_operating_period", "contradictory_operating_period", "limited_presence_contradiction",
+    }
+    headers = {"X-Research-Error-Reason": reason} if isinstance(reason, str) and reason in safe_reasons else None
+    raise HTTPException(status_code=status_code, detail=detail, headers=headers) from exc
 
 
 def _bounded_reason(value: Any) -> str | None:

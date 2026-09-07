@@ -237,10 +237,10 @@ def _reorder_company_subjects(
     return [by_subject[key] for key in expected]
 
 
-def _education_subject_key(item: dict[str, Any]) -> tuple[str, str, str]:
+def _education_subject_key(item: dict[str, Any]) -> tuple[str, str]:
     return tuple(
         _normalized_subject(item.get(field))
-        for field in ("institution", "program", "certificate")
+        for field in ("institution", "program")
     )
 
 
@@ -249,7 +249,7 @@ def _reorder_education_subjects(
     request: EducationResearchRequest,
     response: Any,
 ) -> list[dict[str, Any]]:
-    by_subject: dict[tuple[str, str, str], dict[str, Any]] = {}
+    by_subject: dict[tuple[str, str], dict[str, Any]] = {}
     for credential in credentials:
         key = _education_subject_key(credential)
         if key in by_subject:
@@ -386,7 +386,6 @@ def _retain_cited_education_findings(
         for field, kind in (
             ("program_exists", "program"),
             ("degree_exists", "degree"),
-            ("certificate_exists", "certificate"),
         ):
             if kind not in retained_kinds:
                 credential[field] = "evidence_unavailable"

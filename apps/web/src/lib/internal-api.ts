@@ -1,3 +1,4 @@
+import { RESEARCH_ERROR_REASONS } from "./research-error-details";
 import { NextResponse } from "next/server";
 
 export const INTERNAL_API_URL =
@@ -33,11 +34,11 @@ export async function fetchInternalJson(
     return { status: upstream.status, ok: upstream.ok, payload: {} };
   }
   try {
-    return {
-      status: upstream.status,
-      ok: upstream.ok,
-      payload: JSON.parse(text),
-    };
+    const payload = JSON.parse(text);
+    const reason = upstream.headers.get("X-Research-Error-Reason");
+    if (!upstream.ok && payload && typeof payload === "object" && !Array.isArray(payload)
+      && reason && RESEARCH_ERROR_REASONS.has(reason)) payload.error_reason = reason;
+    return { status: upstream.status, ok: upstream.ok, payload };
   } catch {
     return {
       status: upstream.ok ? 502 : upstream.status,

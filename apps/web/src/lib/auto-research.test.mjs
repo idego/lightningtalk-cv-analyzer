@@ -182,3 +182,25 @@ test("refresh bypasses a report result and requests fresh research", async () =>
     body: { refresh: true },
   }]);
 });
+
+test("certificate-only entries never trigger education research", () => {
+  const value = report();
+  value.base_analysis.education[0].institution = null;
+  value.base_analysis.education[0].certificate = {value: "Example Certificate", status: "supported"};
+  assert.equal(eligibleAutoResearchKinds(value).has("education"), false);
+});
+
+test("failed research preserves safe diagnostic details for copying", async () => {
+  const value = report();
+  const orchestrator = createAutoResearchOrchestrator({
+    storage: storage(),
+    fetcher: async () => ({ok:false, status:502, json:async () => ({detail:"company_research_invalid_response", error_reason:"subject_mismatch"})}),
+  });
+  await orchestrator.runManual(value, settings(), "company");
+  const failure = orchestrator.getState(value.analysis_id, "company");
+  assert.equal(failure.status, "failed");
+  assert.equal(failure.diagnostics.reason, "subject_mismatch");
+  assert.equal(failure.diagnostics.code, "company_research_invalid_response");
+  assert.equal(failure.diagnostics.analysisId, value.analysis_id);
+  assert.ok(!Number.isNaN(Date.parse(failure.diagnostics.occurredAt)));
+});

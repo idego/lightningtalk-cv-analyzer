@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { ResearchErrorNotice } from "./research-error-notice";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
 import { SectionTitle } from "@/components/analyze/section-title";
@@ -157,7 +158,7 @@ export function LinkedInResearchPanel({
       {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
     </div>}
   >
-    {automatic?.message ? <p className="text-sm text-destructive">{automatic.status === "manual-action" ? t("automaticResearchAlreadyAttempted") : t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")}</p> : null}
+    <ResearchErrorNotice state={automatic} />
     {visibleDiscovery?.linkedin_not_found ? <div className="rounded border border-amber-500/30 p-2 text-sm"><Badge variant="outline">{t("noProfileFound")}</Badge><p className="mt-2">{visibleDiscovery.not_found_caveat}</p></div> : null}
     <div className="space-y-2">
       {sortByResearchConfidence(visibleDiscovery?.possible_profiles ?? []).map((profile, profileIndex) => (

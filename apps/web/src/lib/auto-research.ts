@@ -1,3 +1,4 @@
+import { researchErrorFields, type ResearchErrorDetails } from "./research-error-details.js";
 import type { AnalysisReport } from "./analyze-types.ts";
 import type { AppSettings } from "./app-settings.ts";
 import { isSelfEmploymentLabel } from "./relationship-labels.js";
@@ -5,7 +6,7 @@ import { isSelfEmploymentLabel } from "./relationship-labels.js";
 export const AUTO_RESEARCH_MAX_CONCURRENCY = 2;
 export type AutoResearchKind = "company" | "education" | "linkedin";
 export type AutoResearchStatus = "pending" | "running" | "succeeded" | "failed" | "manual-action";
-export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string; httpStatus?: number };
+export type AutoResearchState = { status: AutoResearchStatus; result?: unknown; message?: string; diagnostics?: ResearchErrorDetails; httpStatus?: number };
 
 const LEDGER_PREFIX = "cv-auto-research-v1:";
 const RESULT_KEYS = { company: "company_research", education: "education_research", linkedin: "linkedin_discovery" } as const;
@@ -38,7 +39,7 @@ export function researchEligibility(report: AnalysisReport) {
   );
   const education = report.base_analysis.education.some(
     (record) => acceptedRelation(record)
-      && (supported(record.institution) || supported(record.certificate)),
+      && supported(record.institution),
   );
   const linkedin = supported(report.base_analysis.profile.candidate_name);
   return {
@@ -127,12 +128,17 @@ export function createAutoResearchOrchestrator({
           body: JSON.stringify({ refresh }),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-        if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status });
+        if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status, ...researchErrorFields(payload) });
         writeLedger(report.analysis_id, kind, "succeeded");
         publish(report.analysis_id, kind, { status: "succeeded", result: payload[RESULT_KEYS[kind]] });
       } catch (cause) {
         writeLedger(report.analysis_id, kind, "failed");
-        publish(report.analysis_id, kind, { status: "failed", message: cause instanceof Error ? cause.message : `Automatic ${kind} research failed.`, httpStatus: (cause as { httpStatus?: number }).httpStatus });
+        const failure = cause as { httpStatus?: number; code?: string; reason?: string };
+        const diagnostics: ResearchErrorDetails = {
+          operation: `${kind}_research`, analysisId: report.analysis_id, occurredAt: new Date().toISOString(),
+          code: failure.code ?? "network_error", httpStatus: failure.httpStatus, reason: failure.reason,
+        };
+        publish(report.analysis_id, kind, { status: "failed", message: "Research failed", httpStatus: failure.httpStatus, diagnostics });
       } finally { requests.delete(requestKey); resolve(); }
     }));
     requests.set(requestKey, completion);
