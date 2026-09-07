@@ -367,6 +367,9 @@ class PersistenceStore:
         """
         with self._connect() as conn:
             aggregate = conn.execute(aggregate_sql).fetchone()
+            report_aggregate = conn.execute(
+                aggregate_sql + " WHERE category != 'profile_builder' OR category IS NULL"
+            ).fetchone()
             operation_rows = conn.execute(
                 aggregate_sql.replace(
                     "SELECT\n",
@@ -378,16 +381,17 @@ class PersistenceStore:
                 "SELECT COUNT(*) FROM processed_report_events"
             ).fetchone()[0])
         summary = _usage_aggregate(dict(aggregate) if aggregate is not None else {})
+        report_summary = _usage_aggregate(dict(report_aggregate))
         summary["reports_processed"] = reports_processed
         summary["average_tokens_per_report"] = (
-            round(summary["total_tokens"] / reports_processed, 1)
+            round(report_summary["total_tokens"] / reports_processed, 1)
             if reports_processed else 0.0
         )
         summary["average_estimated_cost_usd"] = _average_decimal(
-            summary["estimated_cost_usd"], reports_processed
+            report_summary["estimated_cost_usd"], reports_processed
         )
         summary["average_estimated_cost_pln"] = _average_decimal(
-            summary["estimated_cost_pln"], reports_processed
+            report_summary["estimated_cost_pln"], reports_processed
         )
         summary["operations"] = [
             _usage_group_aggregate(dict(row)) for row in operation_rows

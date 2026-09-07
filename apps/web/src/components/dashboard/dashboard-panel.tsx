@@ -21,6 +21,10 @@ const DASHBOARD_CURRENCY_STORAGE_KEY = "cv-analyzer-dashboard-currency";
 
 function operationLabel(key: string, language: AppLanguage): string {
   const labels: Record<string, [string, string]> = {
+    profile_builder_extraction: ["Profile Builder: CV conversion", "Profile Builder: konwersja CV"],
+    profile_builder_summary: ["Profile Builder: summary", "Profile Builder: podsumowanie"],
+    profile_builder_ai_action: ["Profile Builder: AI actions", "Profile Builder: akcje AI"],
+    profile_builder_translation: ["Profile Builder: translation", "Profile Builder: tłumaczenie"],
     base_analysis: ["CV analysis", "Analiza CV"],
     profile_analysis: ["Candidate profile", "Profil kandydata"],
     employment_analysis: ["Employment history", "Historia zatrudnienia"],

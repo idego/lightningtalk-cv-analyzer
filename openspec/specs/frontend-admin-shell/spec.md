@@ -77,3 +77,9 @@ The authenticated shell SHALL expose a `Dashboard` route that reads the immutabl
 #### Scenario: Signed-in recruiter opens Dashboard
 - **WHEN** a signed-in recruiter opens `/dashboard`
 - **THEN** deployment-wide report count, token/cost metrics, and operation breakdown are shown from the accounting ledger
+
+
+### Requirement: Application-wide AI accounting
+Dashboard totals SHALL include every recorded provider attempt across Analyzer, public research, and Profile Builder. Profile Builder extraction, automatic/manual summary, AI actions, and translation SHALL appear as separate operations in the shared immutable usage ledger. Each attempt SHALL record available provider token usage before downstream validation, including refusals and responses discarded before a retry. Transport failures without provider usage SHALL be marked usage-unavailable rather than fabricated usage. Cached input tokens SHALL use the shared pricing catalog.
+
+Profile Builder accounting SHALL use independent random accounting identifiers without profile content, filenames, access tokens, or candidate identifiers. Editing, export, and accepting an existing proposal SHALL not add AI usage. Profile deletion SHALL not delete accounting events. Report throughput and per-report averages SHALL remain Analyzer-only; deployment totals SHALL cover the whole application. Historical unrecorded Profile Builder usage SHALL not be invented.

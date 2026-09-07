@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from uuid import uuid4
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
@@ -11,7 +12,8 @@ from cv_validator.api.persistence import PersistenceStore
 from cv_validator.api.profile_builder_store import ProfileBuilderStore
 from cv_validator.errors import PersistenceError, UploadReadError
 from cv_validator.openai_config import OpenAISettings
-from cv_validator.operations import safe_log
+from cv_validator.operations import AnalysisRecorder, safe_log
+from cv_validator.usage import load_pricing_catalog
 from cv_validator.profile_builder_ai import (
     ProfileAISettings, ProfileExtractor, ProfileSummarizer, ProfileTransformer,
     ProfileExtractionError, ProfileSummaryError, ProfileTransformError,
@@ -67,6 +69,16 @@ def create_profile_builder_router(
     router = APIRouter(tags=["Profile Builder"], route_class=_PrivateProfileRoute)
     store = ProfileBuilderStore(analysis_store)
     selected_ai_settings = ProfileAISettings(**asdict(settings))
+    pricing = load_pricing_catalog()
+
+    def usage_recorder() -> AnalysisRecorder:
+        # Independent random accounting IDs; never store profile content or access tokens.
+        return AnalysisRecorder(
+            analysis_id=str(uuid4()), correlation_id=str(uuid4()),
+            diagnostic_sink=analysis_store.record_diagnostic_event,
+            usage_sink=analysis_store.record_ai_usage_event, pricing=pricing,
+        )
+
     selected_profile_extractor = profile_extractor
     selected_profile_summarizer = profile_summarizer
     selected_profile_transformer = profile_transformer
@@ -121,6 +133,7 @@ def create_profile_builder_router(
                 selected_ai_settings,
                 selected_profile_extractor,
                 redacted_document,
+                recorder=usage_recorder(),
             )
             preferences = resolved_profile_builder_preferences(token)
             profile = apply_profile_conversion_preferences(profile, preferences)
@@ -135,6 +148,7 @@ def create_profile_builder_router(
                         selected_profile_summarizer,
                         profile,
                         preferences.summary_instruction,
+                        recorder=usage_recorder(),
                     )
                 except ProfileSummaryError as exc:
                     safe_log(
@@ -182,6 +196,7 @@ def create_profile_builder_router(
                 selected_profile_summarizer,
                 sanitize_candidate_profile(request.profile),
                 request.instruction,
+                recorder=usage_recorder(),
             )
         except ProfileSummaryError as exc:
             safe_log("profile_builder_summary_failed", error_code=str(exc))
@@ -214,6 +229,7 @@ def create_profile_builder_router(
                 request.instruction,
                 mode=request.mode,
                 target_language=request.target_language,
+                recorder=usage_recorder(),
             )
         except ProfileTransformError as exc:
             safe_log("profile_builder_transform_failed", error_code=str(exc))

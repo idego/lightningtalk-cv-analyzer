@@ -4,14 +4,16 @@ import hashlib
 import json
 import math
 import re
+from time import monotonic
 from copy import deepcopy
 from dataclasses import dataclass
 from importlib.resources import files
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 import openai
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel
 from cv_validator.openai_config import OpenAISettings
+from cv_validator.operations import AnalysisRecorder, utc_now
 from cv_validator.analysis.source import SourceDocument
 from cv_validator.profile_builder_privacy import redact_national_ids_in_text
 from cv_validator.profile_builder import (
@@ -508,10 +510,53 @@ class ProfileTransformError(RuntimeError):
     """Safe Profile Builder transform failure without candidate content."""
 
 
+_ProfileResponse = TypeVar("_ProfileResponse", ProfileExtractionResponse, ProfileSummaryResponse, ProfileTransformResponse)
+
+
+def _meter_profile_attempt(
+    call: Callable[[], _ProfileResponse],
+    request: Any,
+    recorder: AnalysisRecorder | None,
+    operation: str,
+    attempt: int,
+) -> _ProfileResponse:
+    """Record every provider response before downstream validation can discard it."""
+    if recorder is None:
+        return call()
+    started_at, started = utc_now(), monotonic()
+    response = None
+    error_code = None
+    try:
+        response = call()
+        return response
+    except ProfileTransportTimeout:
+        error_code = "timeout"
+        raise
+    except ProfileTransportError:
+        error_code = "transport_error"
+        raise
+    finally:
+        payload = request.openai_payload
+        recorder.record_ai_attempt(
+            operation=operation, category="profile_builder", provider="openai",
+            configured_model=payload["model"],
+            response_model=response.response_model if response is not None else None,
+            reasoning_effort=payload.get("reasoning", {}).get("effort", "none"),
+            attempt=attempt,
+            outcome="completed" if response is not None and not response.refused else "failed",
+            error_code=error_code or ("refused" if response is not None and response.refused else None),
+            started_at=started_at, completed_at=utc_now(),
+            latency_ms=round((monotonic() - started) * 1000),
+            usage=response.usage if response is not None else None,
+        )
+
+
 def extract_candidate_profile(
     settings: ProfileAISettings,
     extractor: ProfileExtractor,
     document: SourceDocument,
+    *,
+    recorder: AnalysisRecorder | None = None,
 ) -> CandidateProfile:
     if not settings.enabled:
         raise ProfileExtractionError("profile_builder_ai_disabled")
@@ -522,7 +567,7 @@ def extract_candidate_profile(
     while attempts < settings.absolute_attempt_limit:
         attempts += 1
         try:
-            response = extractor.extract(request)
+            response = _meter_profile_attempt(lambda: extractor.extract(request), request, recorder, "profile_builder_extraction", attempts)
         except ProfileTransportTimeout as exc:
             if (
                 transport_retries < settings.transport_retry_limit
@@ -608,6 +653,8 @@ def generate_candidate_profile_summary(
     summarizer: ProfileSummarizer,
     profile: CandidateProfile,
     instruction: str | None = None,
+    *,
+    recorder: AnalysisRecorder | None = None,
 ) -> str:
     if not settings.enabled:
         raise ProfileSummaryError("profile_builder_ai_disabled")
@@ -617,7 +664,7 @@ def generate_candidate_profile_summary(
     while attempts < settings.absolute_attempt_limit:
         attempts += 1
         try:
-            response = summarizer.summarize(request)
+            response = _meter_profile_attempt(lambda: summarizer.summarize(request), request, recorder, "profile_builder_summary", attempts)
         except ProfileTransportTimeout as exc:
             if (
                 transport_retries < settings.transport_retry_limit
@@ -654,6 +701,7 @@ def generate_candidate_profile_transform(
     *,
     mode: str,
     target_language: str | None = None,
+    recorder: AnalysisRecorder | None = None,
 ) -> ProfessionalProfile:
     if not settings.enabled:
         raise ProfileTransformError("profile_builder_ai_disabled")
@@ -671,7 +719,8 @@ def generate_candidate_profile_transform(
     while attempts < settings.absolute_attempt_limit:
         attempts += 1
         try:
-            response = transformer.transform(request)
+            response = _meter_profile_attempt(lambda: transformer.transform(request), request, recorder,
+                "profile_builder_translation" if mode == "translation" else "profile_builder_ai_action", attempts)
         except ProfileTransportTimeout as exc:
             if transport_retries < settings.transport_retry_limit and attempts < settings.absolute_attempt_limit:
                 transport_retries += 1
