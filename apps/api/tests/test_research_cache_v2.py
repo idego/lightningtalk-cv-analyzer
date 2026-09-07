@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import valid_report
 from cv_validator.api.app import create_app
 from cv_validator.errors import PersistenceError
+from cv_validator.research.domain import (
+    CompanyResearchClientError, CompanyResearchInvalidResponse, CompanyResearchTimeout,
+    EducationResearchClientError, EducationResearchInvalidResponse, EducationResearchTimeout,
+)
 from cv_validator.openai_config import OpenAISettings
 
 
@@ -71,7 +76,7 @@ def company_result() -> dict:
 
 def education_result() -> dict:
     return {
-        "schema_version": "education-research-schema-v3",
+        "schema_version": "education-research-schema-v5",
         "outcome": "completed",
         "credentials": [{
             "institution": "Example University",
@@ -102,17 +107,26 @@ def education_result() -> dict:
     }
 
 
+def seed_report(app, report: dict) -> None:
+    app.state.store.persist_report(
+        report["source"]["sha256"],
+        report,
+        analysis_id=report["analysis_id"],
+        owner_user_id="test-owner",
+    )
+
+
 def seed_two_reports(app) -> None:
     for index in (1, 2):
         report = valid_report(sha256=str(index) * 64)
         report["analysis_id"] = f"analysis-{index}"
-        app.state.store.persist_analysis_payload_for_test(report)
+        seed_report(app, report)
 
 
 def client_for(app) -> TestClient:
     return TestClient(
         app,
-        headers={"X-Analysis-Access-Token": "test-access-token"},
+        headers={"X-Analysis-Owner-Id": "test-owner"},
     )
 
 
@@ -178,8 +192,8 @@ def test_company_research_combines_subject_hit_with_miss(tmp_path) -> None:
     extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
     second["base_analysis"]["employment"].append(extra)
     second["base_analysis"]["review"]["accepted_ids"].append("employment-2")
-    app.state.store.persist_analysis_payload_for_test(first)
-    app.state.store.persist_analysis_payload_for_test(second)
+    seed_report(app, first)
+    seed_report(app, second)
     client = client_for(app)
 
     assert client.post("/analyses/analysis-1/research/company").status_code == 200
@@ -202,7 +216,7 @@ def test_company_refresh_bypasses_and_replaces_cached_result(tmp_path) -> None:
     )
     report = valid_report()
     report["analysis_id"] = "analysis-refresh"
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
     client = client_for(app)
 
     assert client.post("/analyses/analysis-refresh/research/company").status_code == 200
@@ -226,7 +240,7 @@ def test_paid_research_is_ledgered_before_mutable_result_persistence(tmp_path) -
     )
     report = valid_report()
     report["analysis_id"] = "analysis-persistence-failure"
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
 
     def fail_persist(*_args, **_kwargs):
         raise PersistenceError("forced persistence failure")
@@ -257,7 +271,7 @@ def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
     extra["organization"]["evidence"][0]["excerpt"] = "Another Systems"
     report["base_analysis"]["employment"].append(extra)
     report["base_analysis"]["review"]["accepted_ids"].append("employment-2")
-    app.state.store.persist_analysis_payload_for_test(report)
+    seed_report(app, report)
 
     response = client_for(app).post("/analyses/analysis-multiple/research/company")
 
@@ -265,3 +279,74 @@ def test_multi_subject_research_usage_is_not_multiplied(tmp_path) -> None:
     usage = response.json()["company_research"]["usage"]
     assert usage["input_tokens"] == 10
     assert usage["output_tokens"] == 20
+
+
+@pytest.mark.parametrize(("category", "error_type", "status", "reason"), [
+    ("company", CompanyResearchTimeout, 504, "timeout"),
+    ("company", CompanyResearchInvalidResponse, 502, "invalid_response"),
+    ("company", CompanyResearchClientError, 502, "client_error"),
+    ("education", EducationResearchTimeout, 504, "timeout"),
+    ("education", EducationResearchInvalidResponse, 502, "invalid_response"),
+    ("education", EducationResearchClientError, 502, "client_error"),
+])
+def test_research_provider_failures_keep_category_specific_api_errors(
+    tmp_path, category, error_type, status, reason,
+) -> None:
+    class FailingResearcher:
+        def research(self, request):
+            raise error_type("synthetic provider failure")
+
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        **{f"{category}_researcher": FailingResearcher()},
+    )
+    seed_two_reports(app)
+    response = client_for(app).post(f"/analyses/analysis-1/research/{category}")
+
+    assert response.status_code == status
+    assert response.json()["detail"] == f"{category}_research_{reason}"
+    assert app.state.store.get_cache_audit("analysis-1") == []
+    assert app.state.store.get_analysis_payload("analysis-1")["base_analysis"] == valid_report()["base_analysis"]
+def test_per_subject_cache_payload_drops_batch_queries_and_splits_usage() -> None:
+    from cv_validator.research.cache import reusable_payload, single_subject_result
+
+    result = company_result()
+    second = deepcopy(result["organizations"][0])
+    second["query_subject"] = "Another Systems"
+    result["organizations"].append(second)
+    result.update({
+        "status": "completed",
+        "source": "openai_web_search",
+        "accessed_at": "2026-09-04T12:00:00+00:00",
+        "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+        "searches_performed": ["both subjects in one provider batch"],
+        "search_limitations": ["batch-level limitation"],
+    })
+
+    first = single_subject_result("company", result, 0)
+    second_result = single_subject_result("company", result, 1)
+    first_cache = reusable_payload("company", first)
+    second_cache = reusable_payload("company", second_result)
+
+    assert first["usage"] == {"input_tokens": 6, "output_tokens": 4, "total_tokens": 10}
+    assert second_result["usage"] == {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8}
+    assert first_cache["searches_performed"] == second_cache["searches_performed"] == []
+    assert first_cache["search_limitations"] == second_cache["search_limitations"] == []
+    assert first_cache["source_usage"] != second_cache["source_usage"]
+
+
+def test_education_cache_subject_encoding_avoids_delimiter_collisions() -> None:
+    from cv_validator.research.cache import education_subject_descriptors
+    from cv_validator.research.domain import EducationResearchRequest
+
+    first = education_subject_descriptors(EducationResearchRequest(({
+        "institution": "A",
+        "program": "B|C",
+    },)))
+    second = education_subject_descriptors(EducationResearchRequest(({
+        "institution": "A|B",
+        "program": "C",
+    },)))
+
+    assert first[0].cache_key != second[0].cache_key

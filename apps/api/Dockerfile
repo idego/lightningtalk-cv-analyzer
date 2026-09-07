@@ -11,21 +11,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml README.md ./
 COPY src ./src
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
 FROM base AS dev
 
 COPY tests ./tests
-COPY fixtures ./fixtures
-COPY scripts ./scripts
-COPY reference_data ./reference_data
 
-RUN pip install --no-cache-dir ".[dev]"
+RUN pip install --no-cache-dir ".[dev]" \
+    && addgroup --system --gid 10001 app \
+    && adduser --system --uid 10001 --ingroup app --home /home/app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app/data
 
+USER app
 CMD ["pytest", "-q"]
 
+FROM base AS geonames-init
+
+CMD ["cv-geonames-bootstrap"]
+
 FROM base AS runtime
+
+RUN addgroup --system --gid 10001 app \
+    && adduser --system --uid 10001 --ingroup app --home /home/app app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app/data
+USER app
 
 EXPOSE 8000
 

@@ -5,12 +5,11 @@ import hashlib
 import pytest
 
 from conftest import valid_report
-from cv_validator.analysis import AnalysisStrategyUnavailable
 from cv_validator.analysis.validation import (
     AnalysisReportValidationError,
     validate_analysis_report,
 )
-from cv_validator.pipeline import analyze_cv_bytes_result
+from cv_validator.pipeline import analyze_cv_bytes
 
 
 class FakeStrategy:
@@ -28,26 +27,21 @@ class FakeStrategy:
 
 def test_pipeline_delegates_original_upload_to_strategy() -> None:
     content = b"%PDF-1.7\ntext CV"
-    result = analyze_cv_bytes_result(
+    result = analyze_cv_bytes(
         content,
         "candidate.pdf",
         strategy=FakeStrategy(),
         report_language="pl",
     )
 
-    assert result.input_hash == hashlib.sha256(content).hexdigest()
-    assert result.report["strategy"]["name"] == "document-analysis"
-    assert result.report["source"]["format"] == "pdf"
+    assert result["source"]["sha256"] == hashlib.sha256(content).hexdigest()
+    assert result["strategy"]["name"] == "document-analysis"
+    assert result["source"]["format"] == "pdf"
 
 
 def test_pipeline_rejects_unsupported_file_type_before_strategy() -> None:
     with pytest.raises(Exception, match="unsupported_file_type"):
-        analyze_cv_bytes_result(b"text", "candidate.txt", strategy=FakeStrategy())
-
-
-def test_pipeline_has_no_silent_fallback_strategy() -> None:
-    with pytest.raises(AnalysisStrategyUnavailable, match="analysis_strategy_unavailable"):
-        analyze_cv_bytes_result(b"%PDF-1.7", "candidate.pdf")
+        analyze_cv_bytes(b"text", "candidate.txt", strategy=FakeStrategy())
 
 
 def test_reviewer_added_ids_must_match_accepted_reviewer_records() -> None:

@@ -26,7 +26,7 @@ from writing the same volume concurrently.
 Configure the release identity in the deployment environment:
 
 ```dotenv
-GEONAMES_SNAPSHOT_VERSION=2026-09-02
+GEONAMES_SNAPSHOT_VERSION=2026-08-21
 ```
 
 The source URLs default to:

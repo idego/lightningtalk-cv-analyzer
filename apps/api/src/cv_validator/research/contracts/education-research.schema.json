@@ -3,7 +3,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "outcome", "credentials", "searches_performed", "search_limitations"],
   "properties": {
-    "schema_version": {"type": "string", "const": "education-research-schema-v3"},
+    "schema_version": {"type": "string", "const": "education-research-schema-v5"},
     "outcome": {"type": "string", "enum": ["completed", "insufficient_evidence"]},
     "credentials": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/credential"}},
     "searches_performed": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}},

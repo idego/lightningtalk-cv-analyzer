@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, FileText, LoaderCircle, MessageSquareText, SlidersHorizontal, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ChevronDown, FileText, LoaderCircle, MessageSquareText, SlidersHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { feedbackContext } from "@/lib/feedback-context";
@@ -23,10 +24,10 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
   const { settings, t } = useCopy();
   const [data, setData] = useState<InboxData | null>(null);
   const [status, setStatus] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState("");
   const hasUnsavedNotes = Boolean(data?.items.some((item) => (notes[itemKey(item)] ?? "").trim() !== (item.triage_note ?? "")));
 
   function acceptData(next: InboxData) {
@@ -39,17 +40,34 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
   }
 
   async function load() {
-    const response = await fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" });
-    acceptData(response.ok ? await response.json() : { items: [], counts: {} });
+    setLoadError("");
+    try {
+      const response = await fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("feedback_inbox_unavailable");
+      acceptData(await response.json());
+    } catch {
+      setLoadError(t("feedbackLoadFailed"));
+    }
   }
 
   useEffect(() => {
     let active = true;
     fetch(`/api/feedback/inbox${status ? `?status=${status}` : ""}`, { cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() : { items: [], counts: {} })
-      .then((value: InboxData) => { if (active) acceptData(value); });
+      .then(async (response) => {
+        if (!response.ok) throw new Error("feedback_inbox_unavailable");
+        return response.json();
+      })
+      .then((value: InboxData) => { if (active) acceptData(value); })
+      .catch(() => { if (active) setLoadError(t("feedbackLoadFailed")); });
     return () => { active = false; };
-  }, [status]);
+  }, [status, t]);
+
+  function selectStatus(nextStatus: string) {
+    if (nextStatus === status) return;
+    setData(null);
+    setLoadError("");
+    setStatus(nextStatus);
+  }
 
   useEffect(() => {
     if (!hasUnsavedNotes) return;
@@ -78,23 +96,32 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
     const key = itemKey(item);
     setBusy(key);
     setErrors((current) => ({ ...current, [key]: "" }));
-    const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: nextStatus, note: note.trim() || null }),
-    });
-    if (response.ok) await load();
-    else setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
-    setBusy(null);
+    try {
+      const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus, note: note.trim() || null }),
+      });
+      if (response.ok) await load();
+      else setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
+    } catch {
+      setErrors((current) => ({ ...current, [key]: t("feedbackUpdateFailed") }));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function remove(item: InboxItem) {
     const key = itemKey(item);
-    if (confirmDelete !== key) { setConfirmDelete(key); return; }
     setBusy(key);
-    const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, { method: "DELETE" });
-    if (response.ok) { setConfirmDelete(null); await load(); }
-    else setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
-    setBusy(null);
+    try {
+      const response = await fetch(`/api/feedback/inbox/${encodeURIComponent(item.target_id)}/${encodeURIComponent(item.actor_hash)}`, { method: "DELETE" });
+      if (response.ok) { await load(); }
+      else setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
+    } catch {
+      setErrors((current) => ({ ...current, [key]: t("feedbackDeleteFailed") }));
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -107,7 +134,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
           </summary>
           <div className="absolute left-0 top-full z-30 mt-2 flex w-[min(32rem,calc(100vw-2rem))] flex-wrap gap-2 rounded-xl border bg-popover p-3 text-popover-foreground shadow-md" aria-label={t("feedbackStatusFilters")}>
             {["", ...statuses].map((value) => (
-              <Button key={value} variant={status === value ? "secondary" : "outline"} size="sm" className="rounded-full" onClick={() => setStatus(value)} aria-pressed={status === value}>
+              <Button key={value} variant={status === value ? "secondary" : "outline"} size="sm" className="rounded-full" onClick={() => selectStatus(value)} aria-pressed={status === value}>
                 {value ? t(statusLabelKeys[value]) : t("all")}<span className="tabular-nums text-muted-foreground">{value ? data?.counts[value] ?? 0 : Object.values(data?.counts ?? {}).reduce((sum, count) => sum + count, 0)}</span>
               </Button>
             ))}
@@ -117,13 +144,13 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
       </div>
 
       <div className="space-y-3">
-        {!data ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingFeedback")}</div> : null}
+        {!data && !loadError ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingFeedback")}</div> : null}
+        {loadError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void load()}>{t("retry")}</Button></div> : null}
         {data?.items.map((item) => {
-          const context = feedbackContext(item);
+          const context = feedbackContext(item, t);
           const moduleReport = isAnalysisReport(item.context_report) ? item.context_report : null;
           const moduleCategory = isReportModuleCategory(item.source_category) ? item.source_category : null;
           const key = itemKey(item);
-          const awaitingConfirmation = confirmDelete === key;
           const isBusy = busy === key;
           const date = item.updated_at ? new Date(item.updated_at).toLocaleString(settings.uiLanguage === "pl" ? "pl-PL" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) : null;
           return (
@@ -147,21 +174,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <div className="relative">
-                    <Button
-                      variant={awaitingConfirmation ? "destructive" : "outline"}
-                      size="icon-sm"
-                      className={awaitingConfirmation ? "" : "text-destructive hover:bg-destructive/10 hover:text-destructive"}
-                      disabled={isBusy}
-                      aria-label={t(awaitingConfirmation ? "confirmDeleteFeedback" : "deleteFeedback")}
-                      onBlur={() => { if (!isBusy) setConfirmDelete(null); }}
-                      onKeyDown={(event) => { if (event.key === "Escape") setConfirmDelete(null); }}
-                      onClick={() => void remove(item)}
-                    >
-                      {isBusy ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
-                    </Button>
-                    {awaitingConfirmation ? <span role="status" className="absolute right-0 top-full z-20 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md">{t("clickAgainToConfirm")}</span> : null}
-                  </div>
+                  <DeleteButton label={t("deleteFeedback")} disabled={isBusy} onDelete={() => remove(item)} />
                 </div>
               </header>
 
@@ -203,7 +216,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
             </article>
           );
         })}
-        {data && !data.items.length ? <p className="py-16 text-center text-sm text-muted-foreground">{t("noFeedbackForFilter")}</p> : null}
+        {data && !data.items.length ? <div className="rounded-xl border bg-card px-5 py-10 text-center"><p className="text-sm font-medium text-foreground">{t(status ? "noFeedbackForFilter" : "noFeedbackYet")}</p>{!status ? <p className="mt-1 text-xs text-muted-foreground">{t("noFeedbackYetDescription")}</p> : null}</div> : null}
       </div>
     </section>
   );

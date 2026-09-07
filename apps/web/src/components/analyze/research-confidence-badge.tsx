@@ -34,13 +34,7 @@ export function ResearchConfidenceBadge({ confidence }: { confidence: string }) 
             aria-label={label}
             className={`inline-flex h-6 items-center gap-1 rounded-full px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone.shell}`}
           >
-            {[1, 2, 3].map((dot) => (
-              <span
-                key={dot}
-                aria-hidden="true"
-                className={`size-1.5 rounded-full ${dot <= level ? tone.dot : "bg-muted-foreground/20"}`}
-              />
-            ))}
+            {[1, 2, 3].map((dot) => <span key={dot} aria-hidden="true" className={`size-1.5 rounded-full ${dot <= level ? tone.dot : "bg-muted-foreground/20"}`} />)}
           </span>
         }
       />

@@ -41,7 +41,7 @@ def _persist_completed_report(store: PersistenceStore, analysis_id: str) -> None
         "0" * 64,
         valid_report(),
         analysis_id=analysis_id,
-        access_token="owner-token",
+        owner_user_id="owner-token",
         source_filename="candidate.pdf",
     )
     store.complete_analysis_run(analysis_id, "completed")
@@ -52,7 +52,7 @@ def test_partial_report_counts_as_processed_and_is_backfilled(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(path))
     report = valid_report()
     report["base_analysis"]["status"] = "partial"
-    store.persist_report("1" * 64, report, analysis_id="partial-analysis")
+    store.persist_report("1" * 64, report, analysis_id="partial-analysis", owner_user_id="owner-token")
 
     assert store.get_usage_summary()["reports_processed"] == 1
 
@@ -231,11 +231,11 @@ def test_usage_endpoints_expose_only_aggregates_and_keep_report_scope(tmp_path) 
 
     forbidden = client.get(
         f"/analyses/{analysis_id}/usage",
-        headers={"X-Analysis-Access-Token": "wrong-token"},
+        headers={"X-Analysis-Owner-Id": "wrong-token"},
     )
     report_usage = client.get(
         f"/analyses/{analysis_id}/usage",
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     )
     deployment = client.get("/internal/usage/summary")
 

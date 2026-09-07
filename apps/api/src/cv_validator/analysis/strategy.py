@@ -66,21 +66,3 @@ class AnalysisStrategy(Protocol):
     def readiness_reason(self) -> str | None: ...
 
     def analyze(self, request: AnalysisInput) -> dict[str, Any]: ...
-
-
-@dataclass(frozen=True)
-class UnavailableAnalysisStrategy:
-    name: str = "unavailable"
-    version: str = "analysis-strategy-unavailable-v1"
-
-    @property
-    def ready(self) -> bool:
-        return False
-
-    @property
-    def readiness_reason(self) -> str:
-        return "analysis_strategy_unavailable"
-
-    def analyze(self, request: AnalysisInput) -> dict[str, Any]:
-        del request
-        raise AnalysisStrategyUnavailable("analysis_strategy_unavailable")

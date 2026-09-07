@@ -44,3 +44,14 @@ Report and research sections touched by this change SHALL reuse the existing hea
 #### Scenario: Multiple research cards are scanned
 - **WHEN** company, education, and LinkedIn research sections are displayed together
 - **THEN** equivalent headings, metadata, and actions use consistent visual hierarchy
+
+### Requirement: Per-report AI cost badge
+An owner-opened persisted report SHALL show a compact estimated AI cost badge backed by the owner-scoped usage endpoint. The badge SHALL use a cost-signaling icon, show USD and PLN rounded to two decimals in the compact view, and expose five-decimal detail in its tooltip. It is accounting context, not a quality or hiring signal.
+
+#### Scenario: Report usage is available
+- **WHEN** a recruiter opens their persisted analysis and usage has been ledgered
+- **THEN** the report header shows the compact two-decimal estimated cost and a five-decimal tooltip detail
+
+
+### Requirement: Compact overview and research controls
+Education and employment overview records SHALL use two columns at desktop widths and one at mobile widths, preserving their existing order. Certifications SHALL remain a separate full-width group with Google actions aligned to its right edge. Research confidence SHALL use three dots with a localized tooltip and accessible name, without a visible text badge. Back, Copy link, and Show/Hide CV SHALL have visible outlines. Existing preview visibility and workspace breakpoints remain unchanged.

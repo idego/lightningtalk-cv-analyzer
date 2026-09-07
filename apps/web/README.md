@@ -15,7 +15,7 @@ The root-level `make dev` command runs the complete Docker stack on
 
 ```bash
 pnpm typecheck
-pnpm test        # node --test on .mjs files importing .ts; needs Node 22
+pnpm test        # discovers all .test.mjs files; needs Node 22
 pnpm lint
 pnpm build
 ```
@@ -46,5 +46,6 @@ Unauthenticated access to `/analyze` redirects to `/sign-in`.
 
 `/feedback` (inbox) and `/feedback/access` (roles) are visible only to users
 with an active `owner` or `reviewer` role in `feedback_access_by_email`,
-seeded by `scripts/init-feedback-access.mjs` from the root
-`config/feedback-access.json`. See `openspec/specs/contextual-feedback/spec.md`.
+seeded by `scripts/init-feedback-access.mjs` from
+`apps/web/config/feedback-access.json`, embedded in the initializer image at
+build time. See `openspec/specs/contextual-feedback/spec.md`.

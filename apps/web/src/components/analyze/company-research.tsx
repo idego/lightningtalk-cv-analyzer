@@ -6,6 +6,7 @@ import type { AnalysisReport, CompanyResearch } from "@/lib/analyze-types";
 import { useAutoResearchState } from "@/lib/use-auto-research";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { ResearchSources } from "@/components/analyze/research-sources";
+import { ResearchErrorNotice } from "./research-error-notice";
 import { ResearchAction } from "@/components/analyze/research-action";
 import { ResearchCacheProvenanceView } from "@/components/analyze/research-cache-provenance";
 import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/analyze/research-confidence-badge";
@@ -45,11 +46,7 @@ export function CompanyResearchPanel({
   const busy = automatic?.status === "pending" || automatic?.status === "running";
   const completed = Boolean(report.company_research) || automatic?.status === "succeeded";
   const hasContent = Boolean(visibleResearch || automatic?.message);
-  const automaticMessage = automatic?.status === "manual-action"
-    ? t("automaticResearchAlreadyAttempted")
-    : automatic?.status === "failed"
-      ? t(automatic.httpStatus === 504 ? "researchTimedOut" : "automaticResearchFailed")
-      : null;
+
 
   useEffect(() => {
     onResearchChangeRef.current = onResearchChange;
@@ -67,6 +64,13 @@ export function CompanyResearchPanel({
   async function startResearch() {
     await getAutoResearchOrchestrator()?.runManual(report, settings, "company");
   }
+  const sectionFeedbackTarget = feedbackTarget(
+    feedbackManifest,
+    "company_research_result",
+    "company_research",
+    "section",
+  );
+
 
   return (
     <HoverDisclosure
@@ -87,10 +91,10 @@ export function CompanyResearchPanel({
             busyAriaLabel={t("companyResearchInProgress")}
             disabledReason={!enabled ? t("noCompaniesAvailable") : undefined}
           /> : null}
-        {!readOnly && hasContent && feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section") ? <FeedbackControl analysisId={report.analysis_id} report={report} target={feedbackTarget(feedbackManifest, "company_research_result", "company_research", "section")!} /> : null}
+        {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
       </div>}
     >
-      {automaticMessage ? <p className="text-sm text-destructive">{automaticMessage}</p> : null}
+      <ResearchErrorNotice state={automatic} />
       <ResearchCacheProvenanceView cache={visibleResearch?.cache} locale={settings.uiLanguage} />
 
       {visibleResearch ? (
@@ -150,7 +154,7 @@ function CompanyResult({ organization }: { organization: Organization }) {
       action={
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <ResearchConfidenceBadge confidence={organization.confidence} />
-          {searchHref ? <GoogleSearchAction href={searchHref} /> : null}
+          {searchHref ? <GoogleSearchAction href={searchHref} subject={organization.query_subject} /> : null}
         </div>
       }
       contentClassName="pt-3"

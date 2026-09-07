@@ -43,9 +43,10 @@ KiB. The inbox never stores the uploaded original, raw model output, raw
 exceptions, request bodies, or logs.
 
 Access is initialized automatically by the one-shot `feedback-init` Compose
-service from `config/feedback-access.json`. It seeds the initial owners only
-when the access table is empty; later deploys never restore access changed in
-the UI. Both `feedback-init` and `web` read `BETTER_AUTH_DB_PATH`, so an
+service from `apps/web/config/feedback-access.json`, which is included in the
+initializer image at build time. It seeds the initial owners only when the
+access table is empty; later deploys never restore access changed in the UI.
+Both `feedback-init` and `web` read `BETTER_AUTH_DB_PATH`, so an
 override applies to both. With `LOCAL_DEV_AUTH_BYPASS=true` (`make dev`), the
 service also grants `local-dev@localhost` an owner role on every run.
 Operations endpoints `GET /operations/metrics` and `GET /operations/status`
@@ -88,6 +89,9 @@ if you run with `COMPOSE_PROJECT_NAME=cv-analyzer-document-analysis` and pin
 `CV_VALIDATOR_DB_PATH` and `BETTER_AUTH_DB_PATH` to those paths in the env
 file, or copy the volumes to the new project once while the stack is stopped.
 
+
+Container resource limits are bounded in Compose and can be overridden with the documented `WEB_*`, `API_*`, and `GEONAMES_INIT_*` resource variables. Runtime images execute as non-root users. `GEONAMES_SNAPSHOT_VERSION` must match `config/geonames.lock`; changing the snapshot requires intentionally refreshing the lock and reference data together.
+
 Production deploys an exact reviewed SHA:
 
 ```bash
@@ -111,8 +115,12 @@ an idempotent repeat of the same event key is ignored. Reusable company and
 education cache hits make no new paid usage event; the original cache-miss
 provider request remains counted once.
 
-Costs are estimates. Each usage row stores the pricing catalog version and its
-computed USD cost, plus the fixed conversion rate/version and derived PLN cost.
+Costs are estimates. Input tokens are priced in three tiers as reported by the
+provider: uncached, cached reads (`cached_input_tokens`), and prompt-cache
+writes (`cache_write_input_tokens`, billed above the uncached rate on GPT-5.6
+models). Each request carries a per-pass `prompt_cache_key` so repeated
+prefixes route to the same cache; the key never changes model output. Each
+usage row stores the pricing catalog version and its computed USD cost, plus the fixed conversion rate/version and derived PLN cost.
 The current fixed conversion is `1 USD = 3.75 PLN`; no live exchange-rate fetch
 is used and historical rows are never repriced when code/config changes. The
 pricing catalog can be overridden with `CV_VALIDATOR_PRICING_PATH`; changing it
@@ -124,13 +132,13 @@ pseudonymous accounting correlation key; report/audit/research rows are still
 deleted according to normal lifecycle rules. The ledger must never contain CV
 text, evidence, prompts, model responses, candidate data, e-mail addresses, or
 other PII. The API is internal-only; browser access to deployment totals goes
-through the authenticated web route, and per-report totals additionally use the
-existing owner-scoped analysis access token.
+through the authenticated web route, and per-report totals additionally require the
+authenticated web user to own the analysis by stable Better Auth user id.
 
 ## Data and logs
 
-- Raw uploads are processed in memory and are not persisted.
-- Audit JSON contains the validated report, not the ownership token.
+- After a report is committed, its original PDF/DOCX is retained only for the configured analysis-retention window so the owner can reopen the preview; it is deleted with the analysis or retention purge.
+- Audit JSON contains the validated report and never contains ownership credentials or internal owner ids.
 - Logs may contain identifiers, status, duration, and safe error codes only.
 - Never log CV text, evidence excerpts, model output, secrets, or local paths.
 - Research cache audit records expose hit, partial-hit, miss, refresh, and
@@ -147,3 +155,71 @@ fall back to a different strategy or the removed deterministic pipeline.
 For application rollback, deploy the previously recorded reviewed SHA. Named
 volumes remain intact. The API uses `cv_analyzer.db` and does not migrate
 old pilot reports. Never delete an existing database implicitly.
+
+
+## Profile Builder runtime
+
+Rebuild the API image when enabling the restored Profile Builder; it installs
+`libreoffice-writer` and `fonts-liberation`. Non-container installs need a `soffice`
+or `libreoffice` executable on PATH for PDF output. Conversion uses a fresh
+LibreOffice user directory per request and a 30-second timeout. No external
+conversion service is used.
+
+`GET /health` exposes independent `profile_builder` and `profile_pdf_export`
+capabilities. AI conversion/edits need the existing configured provider key; PDF
+export needs LibreOffice. DOCX download and saved-profile editing remain available
+without AI. The API remains internal: browsers use `/api/profile-builder/*`.
+
+The web build uses Node 22.13 or newer and prepares a same-origin PDF.js worker and
+WASM assets from the pinned package via `scripts/prepare-pdf-worker.mjs`. They are
+copied into `public/pdfjs` during `pnpm dev` / `pnpm build`; generated vendor files
+are not committed. Include `public` when distributing standalone builds, as the
+existing Docker build already does. No CDN receives profile data.
+
+Profile retention follows the existing configured retention period, using the
+profile's last-updated timestamp. Deleting an analysis does not delete a separately
+saved editable profile. Back up the existing API database to include profiles,
+templates, custom fields, and preferences. No new database service is required.
+
+
+## Consolidated-branch upgrade
+
+Before the first upgrade from the token-owned `base-analysis-v2` database, stop
+writes and back up both application and authentication volumes. Deploy web and
+API together; their internal owner header changes as one contract. Do not rotate
+`BETTER_AUTH_SECRET` during this first upgrade. Existing hashes move into a
+transient `legacy_analysis_owners` mapping instead of being discarded. On an
+authenticated request, the private API derives that user's old HMAC and binds
+only matching reports/runs to the stable Better Auth user id. Original uploads,
+share links, feedback snapshots, authorship, triage and events are retained.
+Repeated or concurrent binding is safe. Normal retention also removes unclaimed
+migration mappings; it continues to retain feedback and the AI usage ledger.
+
+When rotating the authentication secret before every retained owner has returned,
+set `CV_VALIDATOR_LEGACY_OWNER_SECRET` to the original secret in the API environment.
+Already bound analysis ownership is independent of secret rotation. Profile Builder
+still uses its original server-only HMAC namespace for existing profiles, templates
+and preferences, so preserve its original auth secret until those records have a
+separately planned ownership migration. No owner token is returned to the browser.
+Databases already upgraded by dropping hashes without preserving a mapping need a
+pre-upgrade backup to recover ownership; this migration cannot reconstruct a lost
+secret or unknown user identity.
+
+The `volume-init` one-shot container fixes ownership of the two existing named
+application volumes before API and feedback initialization start. It runs as root
+only for this operation; API runs as UID/GID 10001 and the web/feedback initializer
+as UID/GID 1000. This covers existing root-owned SQLite databases, not just fresh
+empty volumes. It also marks existing GeoNames release files readable (`a+rX`):
+earlier bootstraps published them `0600 root`, which the non-root API cannot open,
+so `/health` reported `geonames_unavailable` and the container stayed unhealthy.
+Do not replace it with world-writable permissions or expose the API.
+Custom database paths must stay within their respective `/app/data` mounts.
+
+The GeoNames version must match `config/geonames.lock` (`2026-08-21` for this
+snapshot); update old environment files that still use `2026-09-02`, or intentionally
+refresh both the approved data and lock together. The web host port remains 3001
+by default and the container still listens on 3000.
+
+A code-only checkout of an older token-owned version is not a database rollback.
+Restore the backed-up volumes together with that version. Never delete volumes to
+make an upgrade pass.

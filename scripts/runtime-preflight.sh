@@ -21,9 +21,13 @@ validate_ai_configuration() {
 case "$reference_mode" in
   automatic)
     snapshot_version=$(value_of GEONAMES_SNAPSHOT_VERSION)
-    if [ -z "$snapshot_version" ] && [ "$mode" = dev ]; then snapshot_version=2026-09-02; fi
+    if [ -z "$snapshot_version" ] && [ "$mode" = dev ]; then snapshot_version=2026-08-21; fi
     [ -n "$snapshot_version" ] || fail "GEONAMES_SNAPSHOT_VERSION is required"
     echo "$snapshot_version" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || fail "GEONAMES_SNAPSHOT_VERSION must use YYYY-MM-DD"
+    lock_file=config/geonames.lock
+    [ -f "$lock_file" ] || fail "missing $lock_file"
+    locked_version=$(sed -n 's/^version=//p' "$lock_file")
+    [ "$snapshot_version" = "$locked_version" ] || fail "GEONAMES_SNAPSHOT_VERSION must match config/geonames.lock ($locked_version)"
     for key in GEONAMES_CITIES500_URL GEONAMES_COUNTRY_INFO_URL GEONAMES_ALTERNATE_NAMES_URL GEONAMES_POSTAL_CODES_URL; do
       if has_key "$key"; then
         case "$(value_of "$key")" in https://*) :;; *) fail "$key must use HTTPS";; esac
@@ -40,6 +44,10 @@ case "$reference_mode" in
     done
     lock_file=config/geonames.lock
     [ -f "$lock_file" ] || fail "missing $lock_file"
+    locked_version=$(sed -n 's/^version=//p' "$lock_file")
+    configured_version=$(value_of GEONAMES_SNAPSHOT_VERSION)
+    [ -n "$configured_version" ] || fail "GEONAMES_SNAPSHOT_VERSION is required in operator mode"
+    [ "$configured_version" = "$locked_version" ] || fail "GEONAMES_SNAPSHOT_VERSION must match config/geonames.lock ($locked_version)"
     expected_index=$(sed -n 's/^index_sha256=//p' "$lock_file")
     expected_manifest=$(sed -n 's/^manifest_sha256=//p' "$lock_file")
     actual_index=$(sha256sum "$reference_dir/locations.sqlite3" | awk '{print $1}')

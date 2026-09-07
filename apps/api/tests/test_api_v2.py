@@ -33,7 +33,7 @@ def test_health_and_analysis_fail_honestly_without_ai_client(tmp_path) -> None:
     response = client.post(
         "/analyze",
         files={"file": ("candidate.pdf", b"%PDF-1.7", "application/pdf")},
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     )
 
     assert health.json()["capabilities"]["base_analysis"] == {
@@ -47,13 +47,13 @@ def test_health_and_analysis_fail_honestly_without_ai_client(tmp_path) -> None:
     analysis_id = response.headers["X-Analysis-ID"]
     diagnostics = client.get(
         f"/analyses/{analysis_id}/diagnostics",
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     )
     assert diagnostics.status_code == 200
     assert diagnostics.json()["analysis"]["status"] == "unavailable"
     assert client.get(
         f"/analyses/{analysis_id}",
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     ).status_code == 404
 
 
@@ -67,7 +67,7 @@ def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
     response = client.post(
         "/analyze",
         files={"file": ("candidate.pdf", b"%PDF-1.7 text", "application/pdf")},
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     )
 
     assert response.status_code == 200
@@ -78,7 +78,7 @@ def test_analysis_round_trip_uses_new_contract(tmp_path) -> None:
     assert "document_understanding" not in payload
     loaded = client.get(
         f"/analyses/{payload['analysis_id']}",
-        headers={"X-Analysis-Access-Token": "owner-token"},
+        headers={"X-Analysis-Owner-Id": "owner-token"},
     )
     assert loaded.status_code == 200
     assert loaded.json()["base_analysis"]["education"][0]["added_by_reviewer"] is True
@@ -110,7 +110,7 @@ def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:
         analysis_strategy=FakeStrategy(),
     )
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     created = client.post(
         "/analyze",
         files={"file": ("candidate.pdf", b"%PDF-1.7 text", "application/pdf")},
@@ -133,7 +133,7 @@ def test_analysis_lifecycle_is_owner_scoped(tmp_path) -> None:
     assert purge_calls == 1
     assert client.get(
         f"/analyses/{analysis_id}",
-        headers={"X-Analysis-Access-Token": "another-owner"},
+        headers={"X-Analysis-Owner-Id": "another-owner"},
     ).status_code == 404
     assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 200
     assert client.get(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 404
@@ -165,7 +165,7 @@ def _count_source_documents(app) -> int:
 def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers, filename='Życiorys "2026".pdf')
 
     history = client.get("/analyses", headers=owner_headers).json()["analyses"]
@@ -184,7 +184,7 @@ def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
 
     assert client.get(
         f"/analyses/{analysis_id}/document",
-        headers={"X-Analysis-Access-Token": "another-owner"},
+        headers={"X-Analysis-Owner-Id": "another-owner"},
     ).status_code == 404
     assert client.get(f"/analyses/{analysis_id}/document").status_code == 404
     assert client.get("/analyses/missing/document", headers=owner_headers).status_code == 404
@@ -192,7 +192,7 @@ def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
 
 def test_docx_source_document_uses_docx_content_type(tmp_path) -> None:
     client = TestClient(_document_app(tmp_path))
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers, filename="candidate.docx")
     document = client.get(f"/analyses/{analysis_id}/document", headers=owner_headers)
     assert document.status_code == 200
@@ -205,11 +205,11 @@ def test_docx_source_document_uses_docx_content_type(tmp_path) -> None:
 def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers, filename="candidate.pdf")
     completed_company_research = {
         "versions": {
-            "research": "company-research-v2",
+            "research": "company-research-v3",
             "prompt": "test-prompt",
             "schema": "test-schema",
         },
@@ -225,7 +225,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
 
     assert client.post(
         f"/analyses/{analysis_id}/share",
-        headers={"X-Analysis-Access-Token": "another-owner"},
+        headers={"X-Analysis-Owner-Id": "another-owner"},
     ).status_code == 404
 
     share_response = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers)
@@ -256,7 +256,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
 
     assert client.get(
         f"/analyses/{analysis_id}",
-        headers={"X-Analysis-Access-Token": share_token},
+        headers={"X-Analysis-Owner-Id": share_token},
     ).status_code == 404
 
     assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 200
@@ -266,7 +266,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
 def test_source_document_storage_failure_does_not_fail_analysis(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
 
     def failing_persist(*_args, **_kwargs):
         raise PersistenceError("source document persistence failed")
@@ -288,7 +288,7 @@ def test_source_document_storage_failure_does_not_fail_analysis(tmp_path) -> Non
 def test_source_document_is_removed_with_analysis_deletion(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     first = _analyze(client, owner_headers)
     second = _analyze(client, owner_headers)
 
@@ -304,7 +304,7 @@ def test_source_document_is_removed_with_analysis_deletion(tmp_path) -> None:
 def test_source_document_is_purged_with_expired_analysis(tmp_path) -> None:
     app = _document_app(tmp_path)
     client = TestClient(app)
-    owner_headers = {"X-Analysis-Access-Token": "owner-token"}
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers)
     store = app.state.store
     stale = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
@@ -341,7 +341,7 @@ def test_history_is_served_while_an_analysis_is_running(tmp_path) -> None:
         openai_settings=OpenAISettings(enabled=False),
         analysis_strategy=BlockingStrategy(),
     )
-    headers = {"X-Analysis-Access-Token": "owner-token"}
+    headers = {"X-Analysis-Owner-Id": "owner-token"}
     outcome: dict[str, object] = {}
     # The context manager shares one event loop across requests, like uvicorn.
     with TestClient(app) as client:
@@ -395,7 +395,7 @@ def test_cancelled_analysis_is_discarded_before_persistence(tmp_path) -> None:
         openai_settings=OpenAISettings(enabled=False),
         analysis_strategy=BlockingStrategy(),
     )
-    headers = {"X-Analysis-Access-Token": "owner-token", "X-Analysis-Request-Id": "req-1"}
+    headers = {"X-Analysis-Owner-Id": "owner-token", "X-Analysis-Request-Id": "req-1"}
     outcome: dict[str, object] = {}
     with TestClient(app) as client:
         worker = threading.Thread(
@@ -426,12 +426,12 @@ def test_cancelled_analysis_is_discarded_before_persistence(tmp_path) -> None:
         # A cancel from another owner does not touch this request id.
         client.post(
             "/analyze/cancel",
-            headers={"X-Analysis-Access-Token": "other-token", "X-Analysis-Request-Id": "req-2"},
+            headers={"X-Analysis-Owner-Id": "other-token", "X-Analysis-Request-Id": "req-2"},
         )
         ok = client.post(
             "/analyze",
             files={"file": ("fast.pdf", b"%PDF-1.7 fast", "application/pdf")},
-            headers={"X-Analysis-Access-Token": "owner-token", "X-Analysis-Request-Id": "req-2"},
+            headers={"X-Analysis-Owner-Id": "owner-token", "X-Analysis-Request-Id": "req-2"},
         )
         assert ok.status_code == 200
 
@@ -440,5 +440,80 @@ def test_cancel_endpoint_requires_request_id(tmp_path) -> None:
     client = TestClient(
         create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
     )
-    response = client.post("/analyze/cancel", headers={"X-Analysis-Access-Token": "owner-token"})
+    response = client.post("/analyze/cancel", headers={"X-Analysis-Owner-Id": "owner-token"})
     assert response.status_code == 400
+
+
+def test_retention_write_requires_internal_owner_authorization(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            db_path=tmp_path / "reports.db",
+            openai_settings=OpenAISettings(enabled=False),
+            internal_admin_secret="internal-owner-secret-0123456789",
+        )
+    )
+
+    missing = client.put("/settings/retention", json={"days": 30})
+    wrong = client.put(
+        "/settings/retention",
+        json={"days": 30},
+        headers={"X-Internal-Admin-Secret": "wrong"},
+    )
+    allowed = client.put(
+        "/settings/retention",
+        json={"days": 30},
+        headers={"X-Internal-Admin-Secret": "internal-owner-secret-0123456789"},
+    )
+
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json() == {"days": 30}
+
+
+def test_retention_write_returns_422_for_invalid_days_after_authorization(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            db_path=tmp_path / "reports.db",
+            openai_settings=OpenAISettings(enabled=False),
+            internal_admin_secret="internal-owner-secret-0123456789",
+        )
+    )
+
+    response = client.put(
+        "/settings/retention",
+        json={"days": 0},
+        headers={"X-Internal-Admin-Secret": "internal-owner-secret-0123456789"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_sensitive_analysis_endpoints_hide_reports_from_non_owners(tmp_path) -> None:
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=False),
+        analysis_strategy=FakeStrategy(),
+    )
+    client = TestClient(app)
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
+    other_headers = {"X-Analysis-Owner-Id": "other-owner"}
+    analysis_id = _analyze(client, owner_headers)
+
+    for path in (
+        f"/analyses/{analysis_id}/diagnostics",
+        f"/analyses/{analysis_id}/feedback",
+    ):
+        assert client.get(path).status_code == 404
+        assert client.get(path, headers=other_headers).status_code == 404
+
+    for path in (
+        f"/analyses/{analysis_id}/research/company",
+        f"/analyses/{analysis_id}/research/education",
+        f"/analyses/{analysis_id}/research/linkedin/discovery",
+    ):
+        assert client.post(path).status_code == 404
+        assert client.post(path, headers=other_headers).status_code == 404
+
+    assert client.delete(f"/analyses/{analysis_id}", headers=other_headers).status_code == 404
+    assert client.get(f"/analyses/{analysis_id}/feedback", headers=owner_headers).status_code == 200

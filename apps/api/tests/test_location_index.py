@@ -235,6 +235,16 @@ def test_manifest_has_auditable_source_and_result_counts(tmp_path: Path) -> None
     assert manifest["license"]["warranty_notice"]
 
 
+def test_build_publishes_world_readable_artifacts(tmp_path: Path) -> None:
+    index_path = tmp_path / "locations.sqlite3"
+    manifest_path = tmp_path / "locations.manifest.json"
+    _build_fixture_index(index_path, manifest_path)
+
+    # geonames-init builds as root; the API reads as the non-root `app` user.
+    for path in (index_path, manifest_path):
+        assert path.stat().st_mode & 0o044 == 0o044, oct(path.stat().st_mode)
+
+
 def test_sqlite_resolver_reads_file_without_write_permission(
     tmp_path: Path,
 ) -> None:

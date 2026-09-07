@@ -18,12 +18,12 @@ export function PageBackToolbar({ href, onBack, detail, center, action }: PageBa
   const { t } = useCopy();
   const backButton = href ? (
     <Button
-      variant="outline"
+      variant="outline" className="border-foreground/25"
       nativeButton={false}
       render={<Link href={href}><ArrowLeft data-icon="inline-start" />{t("back")}</Link>}
     />
   ) : onBack ? (
-    <Button variant="outline" onClick={onBack}>
+    <Button variant="outline" className="border-foreground/25" onClick={onBack}>
       <ArrowLeft data-icon="inline-start" />
       {t("back")}
     </Button>

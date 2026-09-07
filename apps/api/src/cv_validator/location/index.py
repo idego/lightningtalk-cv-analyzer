@@ -16,6 +16,7 @@ from datetime import date
 from pathlib import Path
 from typing import BinaryIO, Iterable, Iterator, TextIO
 
+from cv_validator.location.checksum import sha256_file
 from cv_validator.location.resolver import normalize_location
 
 
@@ -112,6 +113,10 @@ def build_location_index(
     )
     os.close(manifest_fd)
     temporary_manifest = Path(manifest_name)
+    # mkstemp creates 0600 files; the bootstrap runs as a different user than
+    # the API, which only needs read access to the published artifacts.
+    os.chmod(temporary_index, 0o644)
+    os.chmod(temporary_manifest, 0o644)
     try:
         build_stats = _write_streaming_database(
             temporary_index,
@@ -120,7 +125,7 @@ def build_location_index(
             snapshot_date=snapshot_date,
             reference_data_version=reference_data_version,
         )
-        artifact_sha256 = _sha256(temporary_index)
+        artifact_sha256 = sha256_file(temporary_index)
         manifest: dict[str, object] = {
             "manifest_schema_version": 1,
             "reference_data_version": reference_data_version,
@@ -217,7 +222,7 @@ def _prepare_source(
         raise LocationIndexBuildError(f"source URL must not be empty: {role}")
     try:
         size_bytes = source.path.stat().st_size
-        source_sha256 = _sha256(source.path)
+        source_sha256 = sha256_file(source.path)
     except OSError as exc:
         raise LocationIndexBuildError(f"cannot read source {role}: {exc}") from exc
     archive_member = None
@@ -807,14 +812,6 @@ def _read_countries(content: Iterable[str]) -> dict[str, dict[str, object]]:
             "geoname_id": parsed_geoname_id,
         }
     return countries
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _fsync_file(path: Path) -> None:

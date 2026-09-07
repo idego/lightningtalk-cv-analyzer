@@ -5,13 +5,14 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import Iterator
 
 from cv_validator.location.index import SourceSpec, build_location_index
 from cv_validator.location.postal import SQLitePostalCodeResolver, build_postal_index
@@ -69,12 +70,12 @@ def bootstrap_reference_data(
         _remove_stale_staging(target)
         release = releases / snapshot_version
         if _valid_release(release, snapshot_version, source_urls):
+            _make_release_readable(release)
             _promote(target, release)
             return release
+        previous = _current_release(target)
         if release.exists():
             shutil.rmtree(release)
-
-        previous = _current_release(target)
         staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=target))
         try:
             inputs = staging / "inputs"
@@ -110,6 +111,7 @@ def bootstrap_reference_data(
                 + "\n",
                 encoding="utf-8",
             )
+            _make_release_readable(output)
             if not _valid_release(output, snapshot_version, source_urls):
                 raise ReferenceDataBootstrapError("built GeoNames release is invalid")
             os.replace(output, release)
@@ -187,7 +189,7 @@ def _valid_release(
         )
         postal.close()
         return True
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError, json.JSONDecodeError, sqlite3.DatabaseError):
         return False
 
 
@@ -196,6 +198,11 @@ def _promote(target: Path, release: Path) -> None:
     link.unlink(missing_ok=True)
     link.symlink_to(Path("releases") / release.name)
     os.replace(link, target / "current")
+
+
+def _make_release_readable(release: Path) -> None:
+    for name in _RELEASE_FILES:
+        (release / name).chmod(0o644)
 
 
 def _current_release(target: Path) -> Path | None:
