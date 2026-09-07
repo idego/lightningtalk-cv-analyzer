@@ -30,7 +30,6 @@ services:
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
     volumes:
       - web_auth_data:/app/data
-      - ./config/feedback-access.json:/config/feedback-access.json:ro
     cpus: ${FEEDBACK_INIT_CPUS:-0.50}
     mem_limit: ${FEEDBACK_INIT_MEMORY_LIMIT:-512m}
     pids_limit: 128

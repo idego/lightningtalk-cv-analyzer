@@ -19,6 +19,7 @@ RUN BETTER_AUTH_SECRET="$(head -c 32 /dev/urandom | base64)" pnpm build
 
 FROM deps AS feedback-init
 COPY --chown=node:node scripts/init-feedback-access.mjs ./scripts/init-feedback-access.mjs
+COPY --chown=node:node config/feedback-access.json /config/feedback-access.json
 RUN mkdir -p /app/data && chown -R node:node /app/data
 USER node
 CMD ["node", "scripts/init-feedback-access.mjs"]

@@ -43,9 +43,10 @@ KiB. The inbox never stores the uploaded original, raw model output, raw
 exceptions, request bodies, or logs.
 
 Access is initialized automatically by the one-shot `feedback-init` Compose
-service from `config/feedback-access.json`. It seeds the initial owners only
-when the access table is empty; later deploys never restore access changed in
-the UI. Both `feedback-init` and `web` read `BETTER_AUTH_DB_PATH`, so an
+service from `apps/web/config/feedback-access.json`, which is included in the
+initializer image at build time. It seeds the initial owners only when the
+access table is empty; later deploys never restore access changed in the UI.
+Both `feedback-init` and `web` read `BETTER_AUTH_DB_PATH`, so an
 override applies to both. With `LOCAL_DEV_AUTH_BYPASS=true` (`make dev`), the
 service also grants `local-dev@localhost` an owner role on every run.
 Operations endpoints `GET /operations/metrics` and `GET /operations/status`
