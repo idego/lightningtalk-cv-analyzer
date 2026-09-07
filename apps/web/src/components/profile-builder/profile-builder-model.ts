@@ -83,7 +83,7 @@ export type AnonymizationPolicy = {
   hide_github: boolean;
   hide_portfolio: boolean;
   hide_other_links: boolean;
-  employer_mode: "show" | "hide" | "genericize";
+  employer_mode: "show" | "hide";
   institution_mode: "show" | "hide";
 };
 
@@ -411,9 +411,7 @@ export function derivedPresentation(
       company:
         policy.employer_mode === "show"
           ? entry.company
-          : policy.employer_mode === "hide"
-            ? null
-            : entry.company_category || "Company",
+          : null,
     })),
     education: profile.education.map((entry) => ({
       ...entry,

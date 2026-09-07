@@ -203,8 +203,15 @@ class AnonymizationPolicy(_StrictModel):
     hide_github: bool = False
     hide_portfolio: bool = False
     hide_other_links: bool = False
-    employer_mode: Literal["show", "hide", "genericize"] = "show"
+    employer_mode: Literal["show", "hide"] = "show"
     institution_mode: Literal["show", "hide"] = "show"
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_company_category(cls, value):
+        if isinstance(value, dict) and value.get("employer_mode") == "genericize":
+            return {**value, "employer_mode": "hide"}
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -675,11 +682,7 @@ def apply_profile_anonymization(
         result.personal.links.other = []
     if policy.employer_mode != "show":
         for item in result.experience:
-            item.company = (
-                None
-                if policy.employer_mode == "hide"
-                else item.company_category or "Company"
-            )
+            item.company = None
     if policy.institution_mode == "hide":
         for item in result.education:
             item.institution = None

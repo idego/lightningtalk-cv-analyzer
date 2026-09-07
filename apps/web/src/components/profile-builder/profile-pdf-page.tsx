@@ -77,10 +77,10 @@ export function ProfilePdfPage({ url }: { url: string }) {
         <Button variant="ghost" size="icon-sm" disabled={zoom >= 2} aria-label="Zoom in PDF" onClick={() => setZoom((value) => Math.min(2, value + .25))}><Plus /></Button>
       </div>
     </div>
-    <div ref={hostRef} className="relative min-h-0 flex-1 overflow-auto p-3">
-      {failed ? <p role="alert" className="p-3 text-sm">The PDF could not be displayed. Download it using the PDF button above.</p> : <>
-        {rendered !== renderKey ? <div role="status" className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Rendering page…</div> : null}
-        <canvas ref={canvasRef} role="img" aria-label={`Profile document page ${page}`} className={`mx-auto block bg-white shadow-sm ${rendered === renderKey ? "" : "invisible absolute"}`} />
+    <div ref={hostRef} className="relative min-h-0 flex-1 overflow-auto p-3 [scrollbar-gutter:stable]">
+      {failed ? <p role="alert" className="p-3 text-sm">The PDF could not be displayed. Use Download → PDF to open it.</p> : <>
+        {rendered !== renderKey ? <div role="status" className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/80 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Rendering page…</div> : null}
+        <canvas ref={canvasRef} role="img" aria-label={`Profile document page ${page}`} className={`mx-auto block bg-white shadow-sm ${rendered === renderKey ? "" : "invisible"}`} />
         {rendered === renderKey ? <p className="sr-only">{pageText}</p> : null}
       </>}
     </div>

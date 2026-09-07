@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -15,13 +15,17 @@ import {
   LoaderCircle,
   Pencil,
   Plus,
-  RotateCcw,
   Sparkles,
   Languages,
   WandSparkles,
   Trash2,
   Upload,
+  UserRound, Mail, Phone, MapPin, Link as LinkIcon, BriefcaseBusiness,
+  Building2, CalendarDays, GraduationCap, Award, FileText, ListChecks,
+  Code2, FolderOpen, Shield, Settings2, type LucideIcon,
 } from "lucide-react";
+import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -86,18 +90,41 @@ import {
 const ACCEPT = ".pdf,.docx";
 const PROFILE_BUILDER_MAX_BYTES = 10 * 1024 * 1024;
 
-const EDITOR_SECTIONS = [
-  "personal",
-  "profile",
-  "anonymization",
-  "experience",
-  "education",
-  "languages",
-  "certifications",
-  "additional",
-  "custom_fields",
-] as const;
-type EditorSectionId = (typeof EDITOR_SECTIONS)[number];
+type EditorSectionId = "personal" | "profile" | "anonymization" | "experience" | "education"
+  | "languages" | "certifications" | "additional" | "custom_fields";
+
+const LABEL_ICONS: Record<string, LucideIcon> = {
+  "First name": UserRound, "Last name": UserRound, "Personal information": UserRound,
+  Email: Mail, Phone, Location: MapPin, LinkedIn: LinkIcon, GitHub: Code2,
+  Portfolio: FolderOpen, "Other links": LinkIcon, "Employer names": Building2,
+  "Institution names": GraduationCap, Headline: BriefcaseBusiness, Summary: FileText,
+  Profile: FileText, Skills: ListChecks, Technologies: Code2, Role: BriefcaseBusiness,
+  Company: Building2, Project: FolderOpen, Start: CalendarDays, End: CalendarDays,
+  Responsibilities: ListChecks, Achievements: Award, Institution: GraduationCap,
+  Degree: GraduationCap, Field: GraduationCap, Description: FileText, Items: ListChecks,
+  Anonymization: Shield, Experience: BriefcaseBusiness, Education: GraduationCap,
+  Languages, "Target language": Languages, Instruction: WandSparkles, Certifications: Award, "Additional sections": FolderOpen, "Custom fields": Settings2,
+};
+
+function LabelIcon({ label }: { label: string }) {
+  const Icon = LABEL_ICONS[label.replace(/^Hide /, "").replace(/^./, (letter) => letter.toUpperCase())] ?? FileText;
+  return <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />;
+}
+
+function EditorSectionHeader({ label, description, open, onToggle, action }: {
+  label: string; description?: string; open: boolean; onToggle: () => void; action?: ReactNode;
+}) {
+  return <CardHeader className="relative">
+    <CardTitle><button type="button" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${label}`} onClick={onToggle}
+      className="flex items-center gap-2 text-left outline-none after:absolute after:inset-0 after:rounded-lg hover:text-primary focus-visible:after:ring-2 focus-visible:after:ring-ring">
+      <LabelIcon label={label} />{label}
+    </button></CardTitle>
+    {description ? <CardDescription className="pointer-events-none">{description}</CardDescription> : null}
+    <CardAction><div className="flex items-center gap-2"><div className="relative z-10">{action}</div>
+      {open ? <ChevronUp className="pointer-events-none size-4" aria-hidden /> : <ChevronDown className="pointer-events-none size-4" aria-hidden />}
+    </div></CardAction>
+  </CardHeader>;
+}
 
 function nonEmptyLines(value: string) {
   return value
@@ -120,7 +147,7 @@ function Field({
   const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}><LabelIcon label={label} />{label}</Label>
       <Input
         id={id}
         value={value ?? ""}
@@ -151,7 +178,7 @@ function TextareaField({
   }, [value]);
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}><LabelIcon label={label} />{label}</Label>
       <textarea
         id={id}
         rows={rows}
@@ -176,7 +203,7 @@ function Toggle({
 }) {
   return (
     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
-      <span>{label}</span>
+      <span className="flex items-center gap-2"><LabelIcon label={label} />{label}</span>
       <input
         type="checkbox"
         checked={checked}
@@ -569,21 +596,6 @@ export function ProfileBuilderWorkspace() {
     });
   }
 
-  function sectionToggle(section: EditorSectionId, label: string) {
-    const open = sectionIsOpen(section);
-    return (
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`${open ? "Collapse" : "Expand"} ${label}`}
-        aria-expanded={open}
-        onClick={() => toggleSection(section)}
-      >
-        {open ? <ChevronUp /> : <ChevronDown />}
-      </Button>
-    );
-  }
-
   function mutate(mutator: (draft: CandidateProfile) => void) {
     setProfile((current) => {
       if (!current) return current;
@@ -963,7 +975,6 @@ export function ProfileBuilderWorkspace() {
     return (
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Profile Builder</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Turn CVs into editable, client-ready profiles. Review details, choose what to hide, then download DOCX or PDF.
           </p>
@@ -1051,7 +1062,7 @@ export function ProfileBuilderWorkspace() {
                 <h2 className="font-medium">Recent profiles</h2>
                 <p className="text-xs text-muted-foreground">Continue editing a saved profile.</p>
               </div>
-              <Button variant="ghost" size="sm" render={<Link href="/profiles" />}>View all</Button>
+              <Button variant="outline" className="border-foreground/25" size="sm" nativeButton={false} render={<Link href="/profiles" />}>View all</Button>
             </div>
             {historyLoading ? <div className="flex items-center justify-center py-9"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
             {!historyLoading && !recentProfiles.length ? <p className="px-5 py-8 text-sm text-muted-foreground">No recent profiles yet.</p> : null}
@@ -1110,6 +1121,7 @@ export function ProfileBuilderWorkspace() {
 
   return (
     <div className="profile-builder-shell mx-auto w-full max-w-[1800px] space-y-4" data-workspace-view={workspaceView}>
+      <PageBackToolbar onBack={() => void reset()} />
       <div className="sticky top-14 z-20 flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-3 shadow-sm">
         <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
           <h1 className="text-base font-semibold">{candidateName || "Candidate profile"}</h1>
@@ -1128,16 +1140,16 @@ export function ProfileBuilderWorkspace() {
         <Button variant="outline" onClick={() => openTransform("translation")} disabled={!aiAvailable}>
           <Languages />Translate
         </Button>
-        <Button variant="outline" onClick={() => void reset()}>
-          <RotateCcw data-icon="inline-start" />New CV
-        </Button>
-        <Button variant="outline" onClick={() => void exportPdf()} disabled={exporting || !pdfAvailable} title={!pdfAvailable ? "PDF export is unavailable. Download DOCX instead." : undefined}>
-          <Download />PDF
-        </Button>
-        <Button onClick={() => void exportDocx()} disabled={exporting}>
-          {exporting ? <LoaderCircle className="animate-spin" data-icon="inline-start" /> : <Download data-icon="inline-start" />}
-          {exporting ? "Exporting…" : "DOCX"}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button disabled={exporting} />}>
+            {exporting ? <LoaderCircle className="animate-spin" /> : <Download />}
+            {exporting ? "Exporting…" : "Download"}<ChevronDown />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!pdfAvailable} onClick={() => void exportPdf()}><FileText />PDF{!pdfAvailable ? " (unavailable)" : ""}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void exportDocx()}><FileText />DOCX</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {saveStatus === "error" ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm"><span>Your latest edits have not been saved. Keep this page open and retry.</span><Button variant="outline" size="sm" onClick={() => void flushAutosave()}>Retry save</Button></div> : null}
       {error ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
@@ -1172,12 +1184,12 @@ export function ProfileBuilderWorkspace() {
           </DialogHeader>
           {!transformProposal ? <div className="space-y-4">
             {transformMode === "translation" ? <div className="space-y-1.5">
-              <Label htmlFor="profile-transform-language">Target language</Label>
+              <Label htmlFor="profile-transform-language"><LabelIcon label="Target language" />Target language</Label>
               <select id="profile-transform-language" value={transformLanguage} onChange={(event) => setTransformLanguage(event.target.value as typeof transformLanguage)} className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm">
                 <option value="en">English</option><option value="pl">Polish</option><option value="de">German</option><option value="fr">French</option><option value="es">Spanish</option>
               </select>
             </div> : <div className="space-y-1.5">
-              <Label htmlFor="profile-transform-instruction">Instruction</Label>
+              <Label htmlFor="profile-transform-instruction"><LabelIcon label="Instruction" />Instruction</Label>
               <textarea id="profile-transform-instruction" rows={4} maxLength={12000} value={transformInstruction} onChange={(event) => setTransformInstruction(event.target.value)} placeholder="Example: Make the profile more concise and emphasize backend ownership for the pasted job description…" className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm" />
             </div>}
             <div>
@@ -1225,23 +1237,59 @@ export function ProfileBuilderWorkspace() {
 
       <div className="profile-builder-columns">
         <div className="profile-builder-editor min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-3 py-2">
-            <p className="text-sm font-medium">Profile sections</p>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" onClick={() => setExpandedSections(new Set(EDITOR_SECTIONS))}>
-                <ChevronDown />Expand all
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setExpandedSections(new Set())}>
-                <ChevronUp />Collapse all
-              </Button>
-            </div>
-          </div>
           <Card>
-            <CardHeader>
-              <CardTitle>Personal information</CardTitle>
-              <CardDescription>Original contact details. Use Anonymization to choose what appears in the document.</CardDescription>
-              <CardAction>{sectionToggle("personal", "Personal information")}</CardAction>
-            </CardHeader>
+            <EditorSectionHeader label="Anonymization" open={sectionIsOpen("anonymization")} onToggle={() => toggleSection("anonymization")} description="Choose which identifying fields appear in the document. Your original details stay saved." />
+            {sectionIsOpen("anonymization") ? <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/45 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">Visibility preset</p>
+                  <p className="text-xs text-muted-foreground">Review descriptions and custom fields too: these controls hide selected fields, not every mention of a name.</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="sm" onClick={() => setAnonymization(DEFAULT_ANONYMIZATION)}>
+                    <EyeOff />Hide all
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setAnonymization(REVEALED_ANONYMIZATION)}>
+                    <Eye />Show all
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {([
+                  ["Hide first name", "hide_first_name"],
+                  ["Hide last name", "hide_last_name"],
+                  ["Hide email", "hide_email"],
+                  ["Hide phone", "hide_phone"],
+                  ["Hide location", "hide_location"],
+                  ["Hide LinkedIn", "hide_linkedin"],
+                  ["Hide GitHub", "hide_github"],
+                  ["Hide portfolio", "hide_portfolio"],
+                  ["Hide other links", "hide_other_links"],
+                ] as const).map(([label, key]) => (
+                  <Toggle key={key} label={label} checked={anonymization[key]} onChange={(checked) => setAnonymization((current) => ({ ...current, [key]: checked }))} />
+                ))}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="profile-builder-employer-mode"><LabelIcon label="Employer names" />Employer names</Label>
+                  <select id="profile-builder-employer-mode" value={anonymization.employer_mode} onChange={(event) => setAnonymization((current) => ({ ...current, employer_mode: event.target.value as AnonymizationPolicy["employer_mode"] }))} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                    <option value="show">Show</option>
+                    <option value="hide">Hide</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="profile-builder-institution-mode"><LabelIcon label="Institution names" />Institution names</Label>
+                  <select id="profile-builder-institution-mode" value={anonymization.institution_mode} onChange={(event) => setAnonymization((current) => ({ ...current, institution_mode: event.target.value as AnonymizationPolicy["institution_mode"] }))} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                    <option value="show">Show</option>
+                    <option value="hide">Hide</option>
+                  </select>
+                </div>
+              </div>
+            </CardContent> : null}
+          </Card>
+
+          <Card>
+            <EditorSectionHeader label="Personal information" open={sectionIsOpen("personal")} onToggle={() => toggleSection("personal")} description="Original contact details. Use Anonymization to choose what appears in the document." />
             {sectionIsOpen("personal") ? <CardContent className="grid gap-3 sm:grid-cols-2">
               <Field label="First name" value={profile.personal.first_name} onChange={(value) => mutate((draft) => { draft.personal.first_name = value; })} />
               <Field label="Last name" value={profile.personal.last_name} onChange={(value) => mutate((draft) => { draft.personal.last_name = value; })} />
@@ -1253,7 +1301,7 @@ export function ProfileBuilderWorkspace() {
               <Field label="Portfolio" value={profile.personal.links.portfolio} onChange={(value) => mutate((draft) => { draft.personal.links.portfolio = value; })} />
               <div className="space-y-2 sm:col-span-2">
                 <div className="flex items-center justify-between">
-                  <Label>Other links</Label>
+                  <Label><LabelIcon label="Other links" />Other links</Label>
                   <Button variant="ghost" size="sm" onClick={() => mutate((draft) => { draft.personal.links.other.push({ label: "", url: "" }); })}>
                     <Plus />Add link
                   </Button>
@@ -1270,7 +1318,7 @@ export function ProfileBuilderWorkspace() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Profile</CardTitle><CardAction>{sectionToggle("profile", "Profile")}</CardAction></CardHeader>
+            <EditorSectionHeader label="Profile" open={sectionIsOpen("profile")} onToggle={() => toggleSection("profile")} />
             {sectionIsOpen("profile") ? <CardContent className="space-y-3">
               <Field label="Headline" value={profile.headline} onChange={(value) => mutate((draft) => { draft.headline = value; })} />
               <TextareaField label="Summary" value={profile.summary ?? ""} rows={5} onChange={(value) => mutate((draft) => { draft.summary = value || null; })} />
@@ -1292,7 +1340,7 @@ export function ProfileBuilderWorkspace() {
                   </Button>
                 </div>
                 <div className="mt-3 space-y-1.5">
-                  <Label htmlFor="profile-summary-instruction">Instruction or job description (optional)</Label>
+                  <Label htmlFor="profile-summary-instruction"><LabelIcon label="Instruction" />Instruction or job description (optional)</Label>
                   <textarea
                     id="profile-summary-instruction"
                     rows={3}
@@ -1312,67 +1360,10 @@ export function ProfileBuilderWorkspace() {
             </CardContent> : null}
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Anonymization</CardTitle>
-              <CardDescription>Choose which identifying fields appear in the document. Your original details stay saved.</CardDescription>
-              <CardAction>{sectionToggle("anonymization", "Anonymization")}</CardAction>
-            </CardHeader>
-            {sectionIsOpen("anonymization") ? <CardContent className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/45 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium">Visibility preset</p>
-                  <p className="text-xs text-muted-foreground">Review descriptions and custom fields too: these controls hide selected fields, not every mention of a name.</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="outline" size="sm" onClick={() => setAnonymization(DEFAULT_ANONYMIZATION)}>
-                    <EyeOff />Hide identifying fields
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setAnonymization(REVEALED_ANONYMIZATION)}>
-                    <Eye />Show identifying fields
-                  </Button>
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {([
-                  ["Hide first name", "hide_first_name"],
-                  ["Hide last name", "hide_last_name"],
-                  ["Hide email", "hide_email"],
-                  ["Hide phone", "hide_phone"],
-                  ["Hide location", "hide_location"],
-                  ["Hide LinkedIn", "hide_linkedin"],
-                  ["Hide GitHub", "hide_github"],
-                  ["Hide portfolio", "hide_portfolio"],
-                  ["Hide other links", "hide_other_links"],
-                ] as const).map(([label, key]) => (
-                  <Toggle key={key} label={label} checked={anonymization[key]} onChange={(checked) => setAnonymization((current) => ({ ...current, [key]: checked }))} />
-                ))}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="profile-builder-employer-mode">Employer names</Label>
-                  <select id="profile-builder-employer-mode" value={anonymization.employer_mode} onChange={(event) => setAnonymization((current) => ({ ...current, employer_mode: event.target.value as AnonymizationPolicy["employer_mode"] }))} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
-                    <option value="show">Show</option>
-                    <option value="hide">Hide</option>
-                    <option value="genericize">Company category</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="profile-builder-institution-mode">Institution names</Label>
-                  <select id="profile-builder-institution-mode" value={anonymization.institution_mode} onChange={(event) => setAnonymization((current) => ({ ...current, institution_mode: event.target.value as AnonymizationPolicy["institution_mode"] }))} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
-                    <option value="show">Show</option>
-                    <option value="hide">Hide</option>
-                  </select>
-                </div>
-              </div>
-            </CardContent> : null}
-          </Card>
+
 
           <Card>
-            <CardHeader>
-              <CardTitle>Experience</CardTitle>
-              <CardAction><div className="flex items-center gap-1"><Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "experience"])); mutate((draft) => { draft.experience.push({ id: newProfileBuilderId("experience"), company: null, company_category: null, role: null, project: null, location: null, start_date: null, end_date: null, current: false, responsibilities: [], achievements: [], technologies: [] }); }); }}><Plus />Add</Button>{sectionToggle("experience", "Experience")}</div></CardAction>
-            </CardHeader>
+            <EditorSectionHeader label="Experience" open={sectionIsOpen("experience")} onToggle={() => toggleSection("experience")} action={<Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "experience"])); mutate((draft) => { draft.experience.push({ id: newProfileBuilderId("experience"), company: null, company_category: null, role: null, project: null, location: null, start_date: null, end_date: null, current: false, responsibilities: [], achievements: [], technologies: [] }); }); }}><Plus />Add</Button>} />
             {sectionIsOpen("experience") ? <CardContent className="space-y-3">
               {profile.experience.length ? profile.experience.map((entry, index) => (
                 <div key={entry.id} className="space-y-3 rounded-xl border p-3">
@@ -1383,15 +1374,15 @@ export function ProfileBuilderWorkspace() {
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field label="Role" value={entry.role} onChange={(value) => mutate((draft) => { draft.experience[index].role = value; })} />
                     <Field label="Company" value={entry.company} onChange={(value) => mutate((draft) => { draft.experience[index].company = value; })} />
-                    <Field label="Company category" value={entry.company_category} placeholder="Optional generic label" onChange={(value) => mutate((draft) => { draft.experience[index].company_category = value; })} />
+
                     <Field label="Project" value={entry.project} onChange={(value) => mutate((draft) => { draft.experience[index].project = value; })} />
                     <Field label="Location" value={entry.location} onChange={(value) => mutate((draft) => { draft.experience[index].location = value; })} />
                     <div className="grid grid-cols-2 gap-2">
                       <Field label="Start" value={entry.start_date} onChange={(value) => mutate((draft) => { draft.experience[index].start_date = value; })} />
-                      <Field label="End" value={entry.end_date} onChange={(value) => mutate((draft) => { draft.experience[index].end_date = value; })} />
+                      <Field label="End" value={entry.current ? "Present" : entry.end_date} placeholder="Date or Present" onChange={(value) => mutate((draft) => { draft.experience[index].end_date = value; draft.experience[index].current = value?.trim().toLowerCase() === "present"; })} />
                     </div>
                   </div>
-                  <Toggle label="Current role" checked={entry.current} onChange={(checked) => mutate((draft) => { draft.experience[index].current = checked; })} />
+
                   <TextareaField label="Responsibilities" value={entry.responsibilities.join("\n")} rows={4} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.experience[index].responsibilities = nonEmptyLines(value); })} />
                   <TextareaField label="Achievements" value={entry.achievements.join("\n")} rows={3} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.experience[index].achievements = nonEmptyLines(value); })} />
                   <TextareaField label="Technologies" value={entry.technologies.join("\n")} rows={3} placeholder="One per line" onChange={(value) => mutate((draft) => { draft.experience[index].technologies = nonEmptyLines(value); })} />
@@ -1401,10 +1392,7 @@ export function ProfileBuilderWorkspace() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Education</CardTitle>
-              <CardAction><div className="flex items-center gap-1"><Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "education"])); mutate((draft) => { draft.education.push({ id: newProfileBuilderId("education"), institution: null, degree: null, field: null, start_date: null, end_date: null, location: null, description: null }); }); }}><Plus />Add</Button>{sectionToggle("education", "Education")}</div></CardAction>
-            </CardHeader>
+            <EditorSectionHeader label="Education" open={sectionIsOpen("education")} onToggle={() => toggleSection("education")} action={<Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "education"])); mutate((draft) => { draft.education.push({ id: newProfileBuilderId("education"), institution: null, degree: null, field: null, start_date: null, end_date: null, location: null, description: null }); }); }}><Plus />Add</Button>} />
             {sectionIsOpen("education") ? <CardContent className="space-y-3">
               {profile.education.length ? profile.education.map((entry, index) => (
                 <div key={entry.id} className="space-y-3 rounded-xl border p-3">
@@ -1426,12 +1414,9 @@ export function ProfileBuilderWorkspace() {
             </CardContent> : null}
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4">
             <Card>
-              <CardHeader>
-                <CardTitle>Languages</CardTitle>
-                <CardAction><div className="flex items-center gap-1"><Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "languages"])); mutate((draft) => { draft.languages.push({ id: newProfileBuilderId("language"), language: "", level: null }); }); }}><Plus />Add</Button>{sectionToggle("languages", "Languages")}</div></CardAction>
-              </CardHeader>
+              <EditorSectionHeader label="Languages" open={sectionIsOpen("languages")} onToggle={() => toggleSection("languages")} action={<Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "languages"])); mutate((draft) => { draft.languages.push({ id: newProfileBuilderId("language"), language: "", level: null }); }); }}><Plus />Add</Button>} />
               {sectionIsOpen("languages") ? <CardContent className="space-y-2">
                 {profile.languages.map((entry, index) => (
                   <div key={entry.id} className="grid grid-cols-[1fr_0.7fr_auto] gap-2">
@@ -1444,10 +1429,7 @@ export function ProfileBuilderWorkspace() {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Certifications</CardTitle>
-                <CardAction><div className="flex items-center gap-1"><Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "certifications"])); mutate((draft) => { draft.certifications.push({ id: newProfileBuilderId("certification"), name: "", issuer: null, date: null, url: null }); }); }}><Plus />Add</Button>{sectionToggle("certifications", "Certifications")}</div></CardAction>
-              </CardHeader>
+              <EditorSectionHeader label="Certifications" open={sectionIsOpen("certifications")} onToggle={() => toggleSection("certifications")} action={<Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "certifications"])); mutate((draft) => { draft.certifications.push({ id: newProfileBuilderId("certification"), name: "", issuer: null, date: null, url: null }); }); }}><Plus />Add</Button>} />
               {sectionIsOpen("certifications") ? <CardContent className="space-y-3">
                 {profile.certifications.map((entry, index) => (
                   <div key={entry.id} className="space-y-2 rounded-lg border p-3">
@@ -1461,10 +1443,7 @@ export function ProfileBuilderWorkspace() {
           </div>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Additional sections</CardTitle>
-              <CardAction><div className="flex items-center gap-1"><Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "additional"])); mutate((draft) => { draft.additional_sections.push({ id: newProfileBuilderId("additional"), title: "New section", items: [] }); }); }}><Plus />Add</Button>{sectionToggle("additional", "Additional sections")}</div></CardAction>
-            </CardHeader>
+            <EditorSectionHeader label="Additional sections" open={sectionIsOpen("additional")} onToggle={() => toggleSection("additional")} action={<Button variant="outline" size="sm" onClick={() => { setExpandedSections((current) => new Set([...current, "additional"])); mutate((draft) => { draft.additional_sections.push({ id: newProfileBuilderId("additional"), title: "New section", items: [] }); }); }}><Plus />Add</Button>} />
             {sectionIsOpen("additional") ? <CardContent className="space-y-3">
               {profile.additional_sections.map((section, index) => (
                 <div key={section.id} className="space-y-2 rounded-lg border p-3">
@@ -1477,15 +1456,11 @@ export function ProfileBuilderWorkspace() {
 
 
           <Card>
-            <CardHeader>
-              <CardTitle>Custom fields</CardTitle>
-              <CardDescription>Organization-defined profile metadata. Definitions and defaults are managed in Settings.</CardDescription>
-              <CardAction>{sectionToggle("custom_fields", "Custom fields")}</CardAction>
-            </CardHeader>
+            <EditorSectionHeader label="Custom fields" open={sectionIsOpen("custom_fields")} onToggle={() => toggleSection("custom_fields")} description="Configure custom fields in Settings." />
             {sectionIsOpen("custom_fields") ? <CardContent className="grid gap-3 sm:grid-cols-2">
               {profile.custom_fields.length ? profile.custom_fields.map((field, index) => (
                 <div key={field.id} className="space-y-1.5">
-                  <Label htmlFor={`profile-custom-${field.id}`}>{field.label}</Label>
+                  <Label htmlFor={`profile-custom-${field.id}`}><Settings2 className="size-3.5 text-muted-foreground" aria-hidden />{field.label}</Label>
                   {field.kind === "boolean" ? <label className="flex h-9 items-center gap-2 rounded-lg border px-3 text-sm">
                     <input id={`profile-custom-${field.id}`} type="checkbox" checked={field.value === true} onChange={(event) => mutate((draft) => { draft.custom_fields[index].value = event.target.checked; })} />
                     {field.value === true ? "Yes" : "No"}

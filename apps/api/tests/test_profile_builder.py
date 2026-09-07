@@ -1596,3 +1596,11 @@ def test_profile_builder_startup_sanitizes_legacy_profile_builder_rows(
     raw_after = db_path.read_bytes()
     assert b"123-45-6789" not in raw_after
     assert b"44051401458" not in raw_after
+
+
+def test_legacy_company_category_policy_becomes_hidden():
+    from cv_validator.profile_builder import AnonymizationPolicy
+
+    policy = AnonymizationPolicy.model_validate({"employer_mode": "genericize"})
+    assert policy.employer_mode == "hide"
+    assert AnonymizationPolicy.model_validate({"employer_mode": "show"}).employer_mode == "show"

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { LoaderCircle, Search, Trash2, UserRoundPen, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageBackToolbar } from "@/components/layout/page-back-toolbar";
 import { Input } from "@/components/ui/input";
 import type { RecentProfileItem } from "@/components/profile-builder/profile-builder-model";
 import { deleteProfile as apiDeleteProfile, listProfiles } from "@/components/profile-builder/profile-builder-client";
@@ -58,8 +59,9 @@ export function ProfilesCatalog() {
 
   return (
     <section className="@container/profiles mx-auto w-full max-w-6xl space-y-5">
+      <PageBackToolbar href="/profile-builder" />
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div><h1 className="text-xl font-semibold">Profiles</h1><p className="mt-1 text-sm text-muted-foreground">Your saved candidate profiles, ready to edit or export.</p></div>
+        <p className="text-sm text-muted-foreground">Your saved candidate profiles, ready to edit or export.</p>
         <Button nativeButton={false} render={<Link href="/profile-builder" />}><UserRoundPen />Convert CV</Button>
       </div>
       <div className="relative max-w-xl">

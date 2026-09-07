@@ -141,7 +141,7 @@ Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose que
 The system SHALL translate selected professional profile sections to a supported target language with GPT-5.6 Luna, preserve names/URLs/technology identifiers, and require preview plus selective acceptance before changing canonical state.
 
 ### Requirement: Profiles catalog
-The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository.
+The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository. The catalog SHALL be reached through the outlined View all action, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
 
 
 ### Requirement: Latency-bounded AI profile transforms
@@ -176,7 +176,7 @@ Every Profile Builder API action SHALL require the authenticated user's derived 
 The browser SHALL preserve the latest canonical profile edit when the recruiter leaves the current profile before the normal autosave debounce expires.
 
 #### Scenario: Recruiter edits and immediately leaves
-- **WHEN** HR changes a field and immediately chooses New CV, another profile flow, Template Creator, or another application destination
+- **WHEN** HR changes a field and immediately chooses Back, another profile flow, Template Creator, or another application destination
 - **THEN** the latest snapshot is persisted or the navigation is blocked when an explicit pre-navigation save fails; full browser unload warns while unsaved state exists
 
 ### Requirement: Authoritative default template preference
@@ -211,7 +211,7 @@ Multiline skills/responsibility/technology fields SHALL preserve the recruiter's
 in-progress newline/separator while normalizing the canonical array. Adding a
 record to a collapsed section SHALL reveal its editor. A failed save SHALL remain
 visible with Retry and prevent explicit in-app navigation from discarding edits.
-Saved profiles SHALL have stable `?profile=` URLs; New CV SHALL clear that URL.
+Saved profiles SHALL have stable `?profile=` URLs; Back to the upload workflow SHALL clear that URL.
 
 ### Requirement: Readable and race-safe AI review
 AI Actions and Translation SHALL display human-readable before/proposed sections,
@@ -225,3 +225,16 @@ The web proxy SHALL enforce file/JSON byte limits before parsing, including
 requests with no or understated Content-Length. Profile content and export
 responses SHALL use `Cache-Control: private, no-store`. Provider/network errors
 SHALL present actionable recruiter-facing messages, not internal error codes.
+
+
+### Requirement: Clear profile editor controls
+Anonymization SHALL be the first editor section. Each section header, including its whitespace, SHALL toggle that section; separate Add actions SHALL not toggle it. Section titles and field labels SHALL include small decorative icons. There SHALL be no global expand/collapse toolbar. Languages and Certifications SHALL occupy separate rows.
+
+The visibility presets SHALL be labeled Hide all and Show all within Anonymization, preserving their selected-identifying-field scope and the free-text review explanation. Employer names SHALL offer Show or Hide only; legacy company-category policies SHALL migrate to Hide without removing canonical employer data. Company category SHALL not be an editor field. Current employment SHALL be edited through the End field using Present, with preview and exports preserving that state.
+
+Back SHALL use the same toolbar position and control as Analyze, flush pending saves, and return to the upload workflow. Download SHALL offer PDF and DOCX in a menu, disabling only unavailable formats. Custom fields SHALL state that they are configurable in Settings.
+
+### Requirement: Stable PDF and template panels
+PDF page rendering SHALL reserve stable layout space and scrollbar width while loading or resizing, so completing a render cannot trigger an endless resize/render cycle. Changing the profile or output visibility SHALL still hide the stale PDF immediately.
+
+Template Creator panels SHALL have continuous visible borders within their clipping bounds and scrollable properties. When every supported block type is present, the add area SHALL show a plain explanatory message instead of disabled add controls. Removing a block SHALL make its type available in the Add block selector again.

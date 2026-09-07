@@ -10,7 +10,6 @@ import {
   ImagePlus,
   LayoutTemplate,
   LoaderCircle,
-  Plus,
   Save,
   Trash2,
 } from "lucide-react";
@@ -432,7 +431,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
         {(["blocks", "preview", "properties"] as const).map((pane) => <Button key={pane} variant={workspacePane === pane ? "secondary" : "ghost"} className="flex-1 capitalize" aria-pressed={workspacePane === pane} onClick={() => setWorkspacePane(pane)}>{pane}</Button>)}
       </div>
       <div className="profile-creator-columns grid min-h-0 flex-1 gap-3">
-        <Card className="profile-creator-blocks min-h-0 overflow-hidden">
+        <Card className="profile-creator-blocks min-h-0 overflow-hidden border ring-0">
           <CardHeader className="shrink-0 py-3">
             <CardTitle className="flex items-center gap-2 text-sm"><LayoutTemplate className="size-4" />Blocks</CardTitle>
             <CardDescription className="text-[11px]">Drag here or directly on the A4 canvas. Eye toggles visibility.</CardDescription>
@@ -486,20 +485,20 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
                 );
               })}
             </div>
-            <div className="grid shrink-0 grid-cols-[1fr_auto] gap-2 border-t pt-2">
+            <div className="shrink-0 border-t pt-2">
+              {missingKinds.length ? <>
               <select
                 aria-label="Add block"
                 value=""
-                disabled={!missingKinds.length}
                 onChange={(event) => {
                   if (event.target.value) addSection(event.target.value as TemplateSectionKind);
                 }}
-                className="h-8 min-w-0 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <option value="">{missingKinds.length ? "Add block…" : "All blocks added"}</option>
+                <option value="">Add block…</option>
                 {missingKinds.map((kind) => <option key={kind} value={kind}>{SECTION_DEFAULTS[kind].title}</option>)}
               </select>
-              <Button variant="outline" size="icon-sm" disabled={!missingKinds.length} aria-label="Add first available block" onClick={() => missingKinds[0] && addSection(missingKinds[0])}><Plus /></Button>
+              </> : <p className="text-xs text-muted-foreground">All section types are already in the template.</p>}
             </div>
           </CardContent>
         </Card>
@@ -519,7 +518,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
           />
         </div>
 
-        <Card className="profile-creator-properties min-h-0 overflow-hidden">
+        <Card className="profile-creator-properties min-h-0 overflow-hidden border ring-0">
           <CardHeader className="shrink-0 py-3">
             <CardTitle className="text-sm">Properties</CardTitle>
             <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted p-1">
@@ -535,7 +534,7 @@ export function ProfileTemplateCreator({ templateId, returnProfileId }: { templa
               ))}
             </div>
           </CardHeader>
-          <CardContent className="h-[calc(100%-5.75rem)] min-h-0 pb-3">
+          <CardContent className="min-h-0 flex-1 overflow-y-auto pb-3">
             {inspectorTab === "template" ? (
               <div className="space-y-2">
                 <div className="grid gap-2"><div className="min-w-0 space-y-1"><Label htmlFor="template-visibility" className="text-xs">Access</Label><select id="template-visibility" disabled={template.id === "idego-default"} value={template.id === "idego-default" ? "shared" : template.visibility} onChange={(event) => mutate((draft) => { draft.visibility = event.target.value as ProfileTemplate["visibility"]; })} className="h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2 text-xs disabled:opacity-60"><option value="private">Private</option><option value="shared">Shared</option></select></div></div>
