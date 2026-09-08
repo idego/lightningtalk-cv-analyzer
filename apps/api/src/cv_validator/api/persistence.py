@@ -24,7 +24,7 @@ from cv_validator.research.versions import (
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
-REST_GROUP_ID = "rest"
+UNASSIGNED_GROUP_ID = "unassigned"
 
 
 @dataclass
@@ -675,8 +675,8 @@ class PersistenceStore:
     def list_analysis_groups(self, owner_user_id: str | None) -> list[dict[str, Any]]:
         """Return owner groups, oldest first, each with its analyses newest first.
 
-        Analyses without a group are reported under the synthetic ``rest`` group,
-        which is always present and listed last.
+        Analyses without a group are reported under the synthetic ``unassigned``
+        group, which is always present and listed last.
         """
         if not owner_user_id:
             return []
@@ -691,17 +691,17 @@ class PersistenceStore:
                 "group_id": row["group_id"],
                 "name": row["name"],
                 "created_at": row["created_at"],
-                "is_rest": False,
+                "is_unassigned": False,
                 "analyses": [],
             }
             for row in rows
         ]
         by_id = {group["group_id"]: group for group in groups}
         rest: dict[str, Any] = {
-            "group_id": REST_GROUP_ID,
-            "name": "Rest",
+            "group_id": UNASSIGNED_GROUP_ID,
+            "name": "Unassigned",
             "created_at": None,
-            "is_rest": True,
+            "is_unassigned": True,
             "analyses": [],
         }
         for item in self.list_analyses(owner_user_id):
@@ -710,12 +710,30 @@ class PersistenceStore:
         groups.append(rest)
         return groups
 
-    def delete_analysis_group(self, group_id: str, owner_user_id: str | None) -> bool:
-        """Delete a group with every analysis in it. ``rest`` deletes ungrouped analyses."""
+    def set_analysis_group(
+        self, analysis_id: str, owner_user_id: str | None, group_id: str | None
+    ) -> bool:
+        """Move one owned analysis into a group (``None`` means unassigned).
+
+        Returns False when the analysis or the target group is not owned by the caller.
+        """
         if not owner_user_id:
             return False
         with self._connect() as conn:
-            if group_id == REST_GROUP_ID:
+            if group_id is not None and not _group_owned_by(conn, group_id, owner_user_id):
+                return False
+            updated = conn.execute(
+                "UPDATE reports SET group_id = ? WHERE analysis_id = ? AND owner_user_id = ?",
+                (group_id, analysis_id, owner_user_id),
+            ).rowcount
+        return updated > 0
+
+    def delete_analysis_group(self, group_id: str, owner_user_id: str | None) -> bool:
+        """Delete a group with every analysis in it. ``unassigned`` deletes ungrouped analyses."""
+        if not owner_user_id:
+            return False
+        with self._connect() as conn:
+            if group_id == UNASSIGNED_GROUP_ID:
                 analysis_ids = [
                     row[0]
                     for row in conn.execute(
@@ -734,7 +752,7 @@ class PersistenceStore:
                     ).fetchall()
                 ]
         self._delete_analysis_ids(analysis_ids)
-        if group_id != REST_GROUP_ID:
+        if group_id != UNASSIGNED_GROUP_ID:
             with self._connect() as conn:
                 conn.execute(
                     "DELETE FROM analysis_groups WHERE group_id = ? AND owner_user_id = ?",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
@@ -92,19 +92,21 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
   </section>;
 }
 
-/** One saved analysis. Deletion is only offered where the caller passes `onRemove` (the Analyses page). */
+/** One saved analysis. Deletion and extra `actions` are only offered where the caller passes them (the Analyses page). */
 export function AnalysisHistoryRow({
   item,
   isNew = false,
   openingId,
   onOpen,
   onRemove,
+  actions,
 }: {
   item: AnalysisHistoryItem;
   isNew?: boolean;
   openingId: string | null;
   onOpen: (item: AnalysisHistoryItem) => Promise<void> | void;
   onRemove?: (item: AnalysisHistoryItem) => Promise<void>;
+  actions?: ReactNode;
 }) {
   const { settings, t } = useCopy();
   const [removing, setRemoving] = useState(false);
@@ -122,6 +124,7 @@ export function AnalysisHistoryRow({
       <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
+    {actions}
     {onRemove ? <DeleteButton label={t("deleteAnalysis")} disabled={openingId !== null || removing} onDelete={requestRemove} /> : null}
   </li>;
 }

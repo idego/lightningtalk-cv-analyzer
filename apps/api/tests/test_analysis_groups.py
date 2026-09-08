@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from conftest import valid_report
 from cv_validator.api.app import create_app
-from cv_validator.api.persistence import REST_GROUP_ID, PersistenceConfig, PersistenceStore
+from cv_validator.api.persistence import UNASSIGNED_GROUP_ID, PersistenceConfig, PersistenceStore
 from cv_validator.openai_config import OpenAISettings
 from test_api_v2 import FakeStrategy
 
@@ -22,7 +22,7 @@ def _persist(store: PersistenceStore, analysis_id: str, owner: str, group_id: st
     )
 
 
-def test_analyses_without_group_land_in_rest_and_groups_are_owner_scoped(tmp_path) -> None:
+def test_analyses_without_group_land_in_unassigned_and_groups_are_owner_scoped(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     group = store.create_analysis_group("owner-1", "Junior backend engineer")
     _persist(store, "grouped", "owner-1", group["group_id"])
@@ -30,33 +30,47 @@ def test_analyses_without_group_land_in_rest_and_groups_are_owner_scoped(tmp_pat
     _persist(store, "foreign", "owner-2", group["group_id"])
 
     groups = store.list_analysis_groups("owner-1")
-    assert [g["name"] for g in groups] == ["Junior backend engineer", "Rest"]
+    assert [g["name"] for g in groups] == ["Junior backend engineer", "Unassigned"]
     assert [a["analysis_id"] for a in groups[0]["analyses"]] == ["grouped"]
-    assert groups[1]["group_id"] == REST_GROUP_ID and groups[1]["is_rest"] is True
+    assert groups[1]["group_id"] == UNASSIGNED_GROUP_ID and groups[1]["is_unassigned"] is True
     assert [a["analysis_id"] for a in groups[1]["analyses"]] == ["loose"]
 
-    # a foreign owner's group id is not honoured; the analysis falls back to Rest
+    # a foreign owner's group id is not honoured; the analysis falls back to Unassigned
     foreign = store.list_analysis_groups("owner-2")
-    assert [g["name"] for g in foreign] == ["Rest"]
+    assert [g["name"] for g in foreign] == ["Unassigned"]
     assert [a["analysis_id"] for a in foreign[0]["analyses"]] == ["foreign"]
     assert store.list_analysis_groups(None) == []
 
 
-def test_delete_group_removes_its_analyses_and_rest_deletes_only_ungrouped(tmp_path) -> None:
+def test_delete_group_removes_its_analyses_and_unassigned_deletes_only_ungrouped(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     group = store.create_analysis_group("owner-1", "Offer")
     _persist(store, "grouped", "owner-1", group["group_id"])
     _persist(store, "loose", "owner-1")
 
     assert store.delete_analysis_group(group["group_id"], "owner-2") is False
-    assert store.delete_analysis_group(REST_GROUP_ID, "owner-1") is True
+    assert store.delete_analysis_group(UNASSIGNED_GROUP_ID, "owner-1") is True
     assert store.get_analysis_payload("loose") is None
     assert store.get_analysis_payload("grouped") is not None
 
     assert store.delete_analysis_group(group["group_id"], "owner-1") is True
     assert store.get_analysis_payload("grouped") is None
     assert store.analysis_group_owned_by(group["group_id"], "owner-1") is False
-    assert store.list_analysis_groups("owner-1")[0]["group_id"] == REST_GROUP_ID
+    assert store.list_analysis_groups("owner-1")[0]["group_id"] == UNASSIGNED_GROUP_ID
+
+
+def test_move_analysis_between_groups_is_owner_scoped(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    group = store.create_analysis_group("owner-1", "Offer")
+    other = store.create_analysis_group("owner-2", "Foreign")
+    _persist(store, "a1", "owner-1")
+
+    assert store.set_analysis_group("a1", "owner-1", group["group_id"]) is True
+    assert store.list_analyses("owner-1")[0]["group_id"] == group["group_id"]
+    assert store.set_analysis_group("a1", "owner-1", other["group_id"]) is False
+    assert store.set_analysis_group("a1", "owner-2", None) is False
+    assert store.set_analysis_group("a1", "owner-1", None) is True
+    assert store.list_analyses("owner-1")[0]["group_id"] is None
 
 
 def test_existing_reports_table_gains_group_column(tmp_path) -> None:
@@ -101,14 +115,25 @@ def test_group_endpoints_and_analyze_header_assign_batch_to_group(tmp_path) -> N
     loose = client.post(
         "/analyze",
         files={"file": ("other.pdf", b"%PDF-1.7 other", "application/pdf")},
-        headers={**owner, "X-Analysis-Group-Id": REST_GROUP_ID},
+        headers={**owner, "X-Analysis-Group-Id": UNASSIGNED_GROUP_ID},
     )
     assert loose.status_code == 200
 
     groups = client.get("/analysis-groups", headers=owner).json()["groups"]
-    assert [g["name"] for g in groups] == ["Junior backend", "Rest"]
+    assert [g["name"] for g in groups] == ["Junior backend", "Unassigned"]
     assert groups[0]["analyses"][0]["analysis_id"] == analyzed.json()["analysis_id"]
     assert groups[1]["analyses"][0]["analysis_id"] == loose.json()["analysis_id"]
+
+    analysis_id = analyzed.json()["analysis_id"]
+    moved = client.put(f"/analyses/{analysis_id}/group", json={"group_id": UNASSIGNED_GROUP_ID}, headers=owner)
+    assert moved.status_code == 200 and moved.json()["group_id"] is None
+    assert client.put(f"/analyses/{analysis_id}/group", json={"group_id": "missing"}, headers=owner).status_code == 404
+    assert client.put(
+        f"/analyses/{analysis_id}/group", json={"group_id": group_id}, headers={"X-Analysis-Owner-Id": "someone-else"}
+    ).status_code == 404
+    assert client.put(f"/analyses/{analysis_id}/group", json={"group_id": group_id}, headers=owner).status_code == 200
+    groups = client.get("/analysis-groups", headers=owner).json()["groups"]
+    assert groups[0]["analyses"][0]["analysis_id"] == analysis_id
 
     assert client.delete("/analysis-groups/nope", headers=owner).status_code == 404
     assert client.delete(
@@ -118,4 +143,4 @@ def test_group_endpoints_and_analyze_header_assign_batch_to_group(tmp_path) -> N
     assert client.get(
         f"/analyses/{analyzed.json()['analysis_id']}", headers=owner
     ).status_code == 404
-    assert [g["name"] for g in client.get("/analysis-groups", headers=owner).json()["groups"]] == ["Rest"]
+    assert [g["name"] for g in client.get("/analysis-groups", headers=owner).json()["groups"]] == ["Unassigned"]

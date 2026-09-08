@@ -14,15 +14,19 @@ Every analysis SHALL be persisted in the API SQLite volume with the authenticate
 - **THEN** the API responds 404 `analysis_not_found`
 
 ### Requirement: Analysis groups
-Every persisted analysis SHALL belong to exactly one owner-scoped analysis group. Named groups (for example one job offer) live in an `analysis_groups` table keyed by `group_id` and `owner_user_id`; `reports.group_id` is nullable and a NULL value means the analysis belongs to the synthetic `rest` group, which always exists, is listed last, and cannot be created or removed. `GET /analysis-groups` returns the caller's groups oldest first, each with its analyses newest first, followed by `rest`. `POST /analysis-groups` creates a named group (whitespace-normalized, 1-120 characters, otherwise 400 `invalid_group_name`). `DELETE /analysis-groups/{id}` deletes the group together with every analysis in it using the same deletion semantics as `DELETE /analyses/{id}`; `DELETE /analysis-groups/rest` deletes only the caller's ungrouped analyses and keeps the `rest` group. `POST /analyze` accepts an optional `X-Analysis-Group-Id` header; a value of `rest` or an absent header stores the analysis ungrouped, and a group id the caller does not own is rejected with 404 `analysis_group_not_found`. Existing databases gain the `group_id` column additively and their analyses appear under `rest`.
+Every persisted analysis SHALL belong to exactly one owner-scoped analysis group. Named groups (for example one job offer) live in an `analysis_groups` table keyed by `group_id` and `owner_user_id`; `reports.group_id` is nullable and a NULL value means the analysis belongs to the synthetic `unassigned` group, which always exists, is listed last, and cannot be created or removed. `GET /analysis-groups` returns the caller's groups oldest first, each with its analyses newest first, followed by `unassigned`. `POST /analysis-groups` creates a named group (whitespace-normalized, 1-120 characters, otherwise 400 `invalid_group_name`). `DELETE /analysis-groups/{id}` deletes the group together with every analysis in it using the same deletion semantics as `DELETE /analyses/{id}`; `DELETE /analysis-groups/unassigned` deletes only the caller's ungrouped analyses and keeps the `unassigned` group. `POST /analyze` accepts an optional `X-Analysis-Group-Id` header; a value of `unassigned` or an absent header stores the analysis ungrouped, and a group id the caller does not own is rejected with 404 `analysis_group_not_found`. `PUT /analyses/{id}/group` with `{"group_id": <id or "unassigned" or null>}` moves one owned analysis into another owned group (404 `analysis_not_found` or `analysis_group_not_found` otherwise). Existing databases gain the `group_id` column additively and their analyses appear under `unassigned`.
 
 #### Scenario: Batch assigned to an offer group
 - **WHEN** the owner uploads a batch with `X-Analysis-Group-Id` set to one of their groups
-- **THEN** each resulting analysis is listed under that group and not under `rest`
+- **THEN** each resulting analysis is listed under that group and not under `unassigned`
 
 #### Scenario: Foreign group
 - **WHEN** the caller supplies a group id owned by another user
 - **THEN** the API responds 404 `analysis_group_not_found` and no analysis is stored
+
+#### Scenario: Move analysis to another group
+- **WHEN** the owner moves an analysis from `unassigned` into one of their groups
+- **THEN** the analysis is listed under that group and no longer under `unassigned`, without changing the stored report
 
 #### Scenario: Delete group
 - **WHEN** the owner deletes a named group

@@ -38,10 +38,22 @@ export function withoutAnalysis(groups: readonly AnalysisGroup[], analysisId: st
   }));
 }
 
-/** Delete a group. The synthetic "Rest" group stays but loses its analyses. */
+/** Delete a group. The synthetic "Unassigned" group stays but loses its analyses. */
 export function withoutGroup(groups: readonly AnalysisGroup[], groupId: string): AnalysisGroup[] {
   return groups.flatMap((group) => {
     if (group.group_id !== groupId) return [group];
-    return group.is_rest ? [{ ...group, analyses: [] }] : [];
+    return group.is_unassigned ? [{ ...group, analyses: [] }] : [];
+  });
+}
+
+/** Move one analysis into another group, keeping newest-first order inside the target. */
+export function withMovedAnalysis(groups: readonly AnalysisGroup[], analysisId: string, targetGroupId: string): AnalysisGroup[] {
+  const moved = groups.flatMap((group) => group.analyses).find((item) => item.analysis_id === analysisId);
+  if (!moved) return [...groups];
+  return groups.map((group) => {
+    const analyses = group.analyses.filter((item) => item.analysis_id !== analysisId);
+    if (group.group_id !== targetGroupId) return { ...group, analyses };
+    const updated = { ...moved, group_id: group.is_unassigned ? null : group.group_id };
+    return { ...group, analyses: [...analyses, updated].sort((a, b) => b.created_at.localeCompare(a.created_at)) };
   });
 }

@@ -77,7 +77,7 @@ alongside it so the recruiter can preview it again; the copy is served only to
 the authenticated owning user and is deleted with the analysis or by retention purge.
 Each report carries an optional `group_id` pointing at an owner-scoped row in
 `analysis_groups` (one group per job offer); a NULL group means the synthetic
-`rest` group. `/analysis-groups` lists, creates, and deletes groups; deleting a
+`unassigned` group. `/analysis-groups` lists, creates, and deletes groups; deleting a
 group deletes its analyses with the normal per-analysis semantics, and the web
 `/analyses` page is the only place that offers deletion.
 GeoNames locality and postal indexes are prepared by a one-shot Compose service

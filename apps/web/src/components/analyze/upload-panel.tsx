@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import { type AnalysisGroup, type AnalysisHistoryItem, type AnalysisReport, type AnalyzeItemResult, type DocumentSource, REST_GROUP_ID } from "@/lib/analyze-types";
+import { type AnalysisGroup, type AnalysisHistoryItem, type AnalysisReport, type AnalyzeItemResult, type DocumentSource, UNASSIGNED_GROUP_ID } from "@/lib/analyze-types";
 import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,7 +60,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
   const [groups, setGroups] = useState<AnalysisGroup[]>([]);
-  const [groupId, setGroupId] = useState<string>(REST_GROUP_ID);
+  const [groupId, setGroupId] = useState<string>(UNASSIGNED_GROUP_ID);
   const [newGroupName, setNewGroupName] = useState("");
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
@@ -78,7 +78,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     const controller = new AbortController();
     void fetch("/api/analysis-groups", { cache: "no-store", signal: controller.signal })
       .then(async (response) => (response.ok ? await response.json() as { groups?: AnalysisGroup[] } : null))
-      .then((body) => { if (body) setGroups((body.groups ?? []).filter((group) => !group.is_rest)); })
+      .then((body) => { if (body) setGroups((body.groups ?? []).filter((group) => !group.is_unassigned)); })
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
@@ -185,7 +185,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
     if (!response?.ok) { setError(t("groupCouldNotCreate")); return null; }
     const created = await response.json() as { group_id: string; name: string; created_at: string };
-    setGroups((current) => [...current, { ...created, is_rest: false, analyses: [] }]);
+    setGroups((current) => [...current, { ...created, is_unassigned: false, analyses: [] }]);
     setGroupId(created.group_id);
     setNewGroupName("");
     return created.group_id;
@@ -266,7 +266,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
           <div className="grid gap-1.5">
             <Label htmlFor="analysis-group">{t("analysisGroup")}</Label>
             <select id="analysis-group" value={groupId} onChange={(event) => setGroupId(event.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
-              <option value={REST_GROUP_ID}>{t("restGroup")}</option>
+              <option value={UNASSIGNED_GROUP_ID}>{t("unassignedGroup")}</option>
               {groups.map((group) => <option key={group.group_id} value={group.group_id}>{group.name}</option>)}
               <option value={NEW_GROUP_OPTION}>{t("newGroupOption")}</option>
             </select>

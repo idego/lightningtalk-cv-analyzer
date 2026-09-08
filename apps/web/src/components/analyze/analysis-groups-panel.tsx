@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FolderInput, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
 import type { AnalysisGroup, AnalysisHistoryItem } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useConfirmation } from "@/components/ui/use-confirmation";
 import { AnalysisHistoryRow } from "@/components/analyze/recent-analyses";
-import { countAnalyses, searchAnalysisGroups, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
+import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
 
 /** Analyses page: every saved analysis grouped by job offer, with search and per-row / per-group deletion. */
@@ -76,9 +77,9 @@ export function AnalysisGroupsPanel() {
       if (!response.ok) throw new Error("group_create_failed");
       const created = await response.json() as { group_id: string; name: string; created_at: string };
       setGroups((current) => {
-        const rest = current.filter((group) => group.is_rest);
-        const named = current.filter((group) => !group.is_rest);
-        return [...named, { ...created, is_rest: false, analyses: [] }, ...rest];
+        const rest = current.filter((group) => group.is_unassigned);
+        const named = current.filter((group) => !group.is_unassigned);
+        return [...named, { ...created, is_unassigned: false, analyses: [] }, ...rest];
       });
       setNewGroupName("");
     } catch {
@@ -98,10 +99,21 @@ export function AnalysisGroupsPanel() {
     }
   }
 
+  async function moveAnalysis(item: AnalysisHistoryItem, target: AnalysisGroup) {
+    const groupId = target.is_unassigned ? null : target.group_id;
+    try {
+      const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}/group`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group_id: groupId }) });
+      if (response.ok) setGroups((current) => withMovedAnalysis(current, item.analysis_id, target.group_id));
+      else setError(t("analysisCouldNotMove"));
+    } catch {
+      setError(t("analysisCouldNotMove"));
+    }
+  }
+
   async function removeGroup(group: AnalysisGroup) {
     const count = group.analyses.length;
-    const description = group.is_rest
-      ? t("clearRestGroupDescription", { count })
+    const description = group.is_unassigned
+      ? t("clearUnassignedGroupDescription", { count })
       : t("deleteGroupDescription", { name: group.name, count });
     if (!(await confirm(description, { title: t("deleteGroupTitle"), action: t("deleteGroup") }))) return;
     try {
@@ -141,23 +153,25 @@ export function AnalysisGroupsPanel() {
     {loading && !groups.length ? <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingGroups")}</div> : null}
     {searching && !matchCount && !loading && !error ? <p className="py-6 text-center text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
     {visibleGroups.map((group) => (
-      <GroupSection key={group.group_id} group={group} expanded={!collapsed.has(group.group_id) || searching} openingId={openingId} onToggle={() => toggle(group.group_id)} onOpen={open} onRemoveAnalysis={removeAnalysis} onRemoveGroup={removeGroup} />
+      <GroupSection key={group.group_id} group={group} allGroups={groups} expanded={!collapsed.has(group.group_id) || searching} openingId={openingId} onToggle={() => toggle(group.group_id)} onOpen={open} onRemoveAnalysis={removeAnalysis} onRemoveGroup={removeGroup} onMoveAnalysis={moveAnalysis} />
     ))}
   </div>;
 }
 
-function GroupSection({ group, expanded, openingId, onToggle, onOpen, onRemoveAnalysis, onRemoveGroup }: {
+function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen, onRemoveAnalysis, onRemoveGroup, onMoveAnalysis }: {
   group: AnalysisGroup;
+  allGroups: AnalysisGroup[];
   expanded: boolean;
   openingId: string | null;
   onToggle: () => void;
   onOpen: (item: AnalysisHistoryItem) => void;
   onRemoveAnalysis: (item: AnalysisHistoryItem) => Promise<void>;
   onRemoveGroup: (group: AnalysisGroup) => Promise<void>;
+  onMoveAnalysis: (item: AnalysisHistoryItem, target: AnalysisGroup) => Promise<void>;
 }) {
   const { t } = useCopy();
   const [removing, setRemoving] = useState(false);
-  const name = group.is_rest ? t("restGroup") : group.name;
+  const name = group.is_unassigned ? t("unassignedGroup") : group.name;
   const headingId = `analysis-group-${group.group_id}`;
   const contentId = `analysis-group-${group.group_id}-content`;
   async function requestRemoveGroup() {
@@ -170,17 +184,48 @@ function GroupSection({ group, expanded, openingId, onToggle, onOpen, onRemoveAn
         {expanded ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
         <h2 id={headingId} className="truncate font-medium">{name}</h2>
         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t("analysesInGroup", { count: group.analyses.length })}</span>
-        {group.is_rest ? <span className="hidden truncate text-xs text-muted-foreground sm:inline">{t("restGroupDescription")}</span> : null}
+        {group.is_unassigned ? <span className="hidden truncate text-xs text-muted-foreground sm:inline">{t("unassignedGroupDescription")}</span> : null}
       </button>
-      <Button variant="ghost" size="sm" className="shrink-0 text-foreground hover:bg-destructive/10 hover:text-destructive" disabled={removing || (group.is_rest && !group.analyses.length)} aria-label={t("deleteGroup")} onClick={() => void requestRemoveGroup()}>
+      <Button variant="ghost" size="sm" className="shrink-0 text-foreground hover:bg-destructive/10 hover:text-destructive" disabled={removing || (group.is_unassigned && !group.analyses.length)} aria-label={t("deleteGroup")} onClick={() => void requestRemoveGroup()}>
         {removing ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
         <span className="hidden sm:inline">{t("deleteGroup")}</span>
       </Button>
     </div>
     {expanded ? <div id={contentId}>
       {group.analyses.length ? <ul className="divide-y">{group.analyses.map((item) => (
-        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} />
+        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} actions={<MoveToGroupMenu item={item} current={group} groups={allGroups} disabled={openingId !== null} onMove={onMoveAnalysis} />} />
       ))}</ul> : <p className="px-5 py-4 text-sm text-muted-foreground">{t("noAnalysesInGroup")}</p>}
     </div> : null}
   </section>;
+}
+
+/** Per-row "Move to group" menu listing every group, with the current one checked and disabled. */
+function MoveToGroupMenu({ item, current, groups, disabled, onMove }: {
+  item: AnalysisHistoryItem;
+  current: AnalysisGroup;
+  groups: AnalysisGroup[];
+  disabled: boolean;
+  onMove: (item: AnalysisHistoryItem, target: AnalysisGroup) => Promise<void>;
+}) {
+  const { t } = useCopy();
+  const [moving, setMoving] = useState(false);
+  async function move(target: AnalysisGroup) {
+    if (target.group_id === current.group_id) return;
+    setMoving(true);
+    try { await onMove(item, target); } finally { setMoving(false); }
+  }
+  return <DropdownMenu>
+    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={disabled || moving} aria-label={moving ? t("movingToGroup") : t("moveToGroup")} />}>
+      {moving ? <LoaderCircle className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      {groups.map((group) => {
+        const isCurrent = group.group_id === current.group_id;
+        return <DropdownMenuItem key={group.group_id} disabled={isCurrent} onClick={() => void move(group)}>
+          <span className="flex size-4 items-center justify-center">{isCurrent ? <Check className="size-4" aria-hidden /> : null}</span>
+          <span className="truncate">{group.is_unassigned ? t("unassignedGroup") : group.name}</span>
+        </DropdownMenuItem>;
+      })}
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }

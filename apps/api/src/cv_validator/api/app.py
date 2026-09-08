@@ -29,7 +29,7 @@ from cv_validator.analysis import (
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import REST_GROUP_ID, PersistenceConfig, PersistenceStore
+from cv_validator.api.persistence import UNASSIGNED_GROUP_ID, PersistenceConfig, PersistenceStore
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import (
@@ -112,6 +112,10 @@ class _AnalysisGroupCreate(BaseModel):
     name: str
 
 
+class _AnalysisGroupAssignment(BaseModel):
+    group_id: str | None = None
+
+
 def _group_name(value: str) -> str:
     normalized = " ".join(value.split())
     if not normalized or len(normalized) > 120:
@@ -123,7 +127,7 @@ def _optional_group_id(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip()
-    if not normalized or normalized == REST_GROUP_ID:
+    if not normalized or normalized == UNASSIGNED_GROUP_ID:
         return None
     if len(normalized) > 64 or not all(c.isalnum() or c == "-" for c in normalized):
         raise HTTPException(status_code=400, detail="invalid_group_id")
@@ -803,6 +807,20 @@ def create_app(
         if not store.delete_analysis_group(group_id, _optional_owner_user_id(x_analysis_owner_id)):
             raise HTTPException(status_code=404, detail="analysis_group_not_found")
         return JSONResponse({"deleted": True})
+
+    @app.put("/analyses/{analysis_id}/group")
+    def set_analysis_group(
+        analysis_id: str,
+        payload: _AnalysisGroupAssignment,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        owner_user_id = _owner_user_id(x_analysis_owner_id)
+        group_id = _optional_group_id(payload.group_id)
+        if not store.analysis_owned_by(analysis_id, owner_user_id):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        if not store.set_analysis_group(analysis_id, owner_user_id, group_id):
+            raise HTTPException(status_code=404, detail="analysis_group_not_found")
+        return JSONResponse({"analysis_id": analysis_id, "group_id": group_id})
 
     @app.get("/analyses/{analysis_id}")
     def get_analysis(
