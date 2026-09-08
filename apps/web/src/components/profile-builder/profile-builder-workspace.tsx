@@ -25,6 +25,7 @@ import {
   Building2, CalendarDays, GraduationCap, Award, FileText, ListChecks,
   Code2, FolderOpen, Shield, Settings2, type LucideIcon,
 } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
 import { RecentProfiles } from "@/components/profile-builder/recent-profiles";
 import { profileFilename } from "@/components/profile-builder/profile-filename";
@@ -110,7 +111,7 @@ function ConversionProgress({ batch, elapsedSeconds, onCancel }: { batch: Profil
   const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
   return <Card aria-live="polite" className="analysis-flow-enter"><CardContent className="py-8">
     <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">
-      {complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <span className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"><LoaderCircle className="size-7 animate-spin" aria-hidden /></span>}
+      {complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={`Converting ${currentIndex + 1} of ${total}`} />}
       <div><h2 className="text-lg font-semibold">{complete ? "Conversion complete" : `Converting ${currentIndex + 1} of ${total}`}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? "Finished profiles are listed under Recent profiles." : current?.file.name}</p></div>
       {!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {estimatedRemaining > 0 ? `Estimated remaining about ${formatElapsed(estimatedRemaining)}` : "Taking longer than usual"}</div> : null}
     </div>
