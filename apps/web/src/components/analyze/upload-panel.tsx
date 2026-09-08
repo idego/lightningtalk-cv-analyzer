@@ -268,7 +268,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
         <CvUploadDropzone label={t("drop")} hint={t("accepted")} onFilesSelected={(files) => store.enqueue(files)} />
         {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
         {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid items-start gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="analysis-group">{t("analysisGroup")}</Label>
             <select id="analysis-group" value={groupId} onChange={(event) => setGroupId(event.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
