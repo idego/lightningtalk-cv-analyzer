@@ -164,7 +164,7 @@ export function AnalysisGroupsPanel() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><FolderKanban className="size-5" aria-hidden />{t("analysesTitle")}</CardTitle>
-        <CardDescription>{t("analysesDescription")}</CardDescription>
+        <CardDescription className="whitespace-pre-line">{t("analysesDescription")}</CardDescription>
         <CardAction><Button onClick={openCreate}><FolderPlus className="size-4" data-icon="inline-start" />{t("createGroup")}</Button></CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
