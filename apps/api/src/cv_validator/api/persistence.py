@@ -24,6 +24,9 @@ from cv_validator.research.versions import (
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
+REST_GROUP_ID = "rest"
+
+
 @dataclass
 class PersistenceConfig:
     db_path: Path
@@ -88,7 +91,14 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     analysis_id TEXT NOT NULL,
                     owner_user_id TEXT NOT NULL,
-                    source_filename TEXT
+                    source_filename TEXT,
+                    group_id TEXT
+                );
+                CREATE TABLE IF NOT EXISTS analysis_groups (
+                    group_id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,8 +245,12 @@ class PersistenceStore:
                    FROM reports WHERE status IN ('completed', 'partial')"""
             )
             init_feedback_schema(conn)
+            _ensure_group_schema(conn)
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS reports_analysis_id ON reports(analysis_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS analysis_groups_owner ON analysis_groups(owner_user_id, created_at)"
             )
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS audit_log_analysis_id ON audit_log(analysis_id)"
@@ -479,6 +493,7 @@ class PersistenceStore:
         analysis_id: str | None = None,
         owner_user_id: str,
         source_filename: str | None = None,
+        group_id: str | None = None,
     ) -> str:
         selected_analysis_id = analysis_id or str(uuid4())
         candidate_payload = dict(report_payload)
@@ -491,14 +506,19 @@ class PersistenceStore:
         try:
             self.purge_expired()
             with self._connect() as conn:
+                stored_group_id = (
+                    group_id
+                    if group_id and _group_owned_by(conn, group_id, owner_user_id)
+                    else None
+                )
                 conn.execute(
                     """
                     INSERT INTO reports (
                         input_hash, contract_version, strategy_name,
                         strategy_version, status, created_at, analysis_id,
-                        owner_user_id, source_filename
+                        owner_user_id, source_filename, group_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -510,6 +530,7 @@ class PersistenceStore:
                         selected_analysis_id,
                         owner_user_id,
                         source_filename,
+                        stored_group_id,
                     ),
                 )
                 conn.execute(
@@ -599,7 +620,8 @@ class PersistenceStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT reports.analysis_id, reports.source_filename,
-                          reports.status, reports.created_at, audit_log.output_json,
+                          reports.status, reports.created_at, reports.group_id,
+                          audit_log.output_json,
                           EXISTS (
                             SELECT 1 FROM source_documents
                             WHERE source_documents.analysis_id = reports.analysis_id
@@ -622,9 +644,103 @@ class PersistenceStore:
                     "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
                     "has_document": bool(row["has_document"]),
+                    "group_id": row["group_id"],
                 }
             )
         return history
+
+    def create_analysis_group(self, owner_user_id: str, name: str) -> dict[str, Any]:
+        group = {
+            "group_id": str(uuid4()),
+            "name": name,
+            "created_at": _utc_now(),
+        }
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """INSERT INTO analysis_groups (group_id, owner_user_id, name, created_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (group["group_id"], owner_user_id, name, group["created_at"]),
+                )
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("analysis group persistence failed") from exc
+        return group
+
+    def analysis_group_owned_by(self, group_id: str, owner_user_id: str | None) -> bool:
+        if not owner_user_id:
+            return False
+        with self._connect() as conn:
+            return _group_owned_by(conn, group_id, owner_user_id)
+
+    def list_analysis_groups(self, owner_user_id: str | None) -> list[dict[str, Any]]:
+        """Return owner groups, oldest first, each with its analyses newest first.
+
+        Analyses without a group are reported under the synthetic ``rest`` group,
+        which is always present and listed last.
+        """
+        if not owner_user_id:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT group_id, name, created_at FROM analysis_groups
+                   WHERE owner_user_id = ? ORDER BY created_at ASC""",
+                (owner_user_id,),
+            ).fetchall()
+        groups: list[dict[str, Any]] = [
+            {
+                "group_id": row["group_id"],
+                "name": row["name"],
+                "created_at": row["created_at"],
+                "is_rest": False,
+                "analyses": [],
+            }
+            for row in rows
+        ]
+        by_id = {group["group_id"]: group for group in groups}
+        rest: dict[str, Any] = {
+            "group_id": REST_GROUP_ID,
+            "name": "Rest",
+            "created_at": None,
+            "is_rest": True,
+            "analyses": [],
+        }
+        for item in self.list_analyses(owner_user_id):
+            target = by_id.get(item["group_id"]) if item["group_id"] else None
+            (target if target is not None else rest)["analyses"].append(item)
+        groups.append(rest)
+        return groups
+
+    def delete_analysis_group(self, group_id: str, owner_user_id: str | None) -> bool:
+        """Delete a group with every analysis in it. ``rest`` deletes ungrouped analyses."""
+        if not owner_user_id:
+            return False
+        with self._connect() as conn:
+            if group_id == REST_GROUP_ID:
+                analysis_ids = [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT analysis_id FROM reports WHERE owner_user_id = ? AND group_id IS NULL",
+                        (owner_user_id,),
+                    ).fetchall()
+                ]
+            else:
+                if not _group_owned_by(conn, group_id, owner_user_id):
+                    return False
+                analysis_ids = [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT analysis_id FROM reports WHERE owner_user_id = ? AND group_id = ?",
+                        (owner_user_id, group_id),
+                    ).fetchall()
+                ]
+        self._delete_analysis_ids(analysis_ids)
+        if group_id != REST_GROUP_ID:
+            with self._connect() as conn:
+                conn.execute(
+                    "DELETE FROM analysis_groups WHERE group_id = ? AND owner_user_id = ?",
+                    (group_id, owner_user_id),
+                )
+        return True
 
     def analysis_owned_by(self, analysis_id: str, owner_user_id: str | None) -> bool:
         if not owner_user_id:
@@ -1175,6 +1291,20 @@ def _ensure_owner_schema(conn: sqlite3.Connection) -> None:
                 SELECT analysis_id, access_token_hash FROM {table}
                 WHERE owner_user_id IS NULL AND access_token_hash IS NOT NULL""")
             conn.execute(f"ALTER TABLE {table} DROP COLUMN access_token_hash")
+
+
+def _ensure_group_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(reports)").fetchall()}
+    if columns and "group_id" not in columns:
+        conn.execute("ALTER TABLE reports ADD COLUMN group_id TEXT")
+
+
+def _group_owned_by(conn: sqlite3.Connection, group_id: str, owner_user_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM analysis_groups WHERE group_id = ? AND owner_user_id = ?",
+        (group_id, owner_user_id),
+    ).fetchone()
+    return row is not None
 
 
 def _require_current_report_schema(conn: sqlite3.Connection) -> None:

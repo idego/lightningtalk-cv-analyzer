@@ -32,6 +32,7 @@ export async function POST(req: Request) {
   const payload = new FormData();
   payload.append("file", file, file.name);
   const requestId = req.headers.get("X-Analysis-Request-Id");
+  const groupId = req.headers.get("X-Analysis-Group-Id")?.trim() || null;
 
   let upstream: Response;
   try {
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
         ...analysisOwnerHeaders(user.id),
         "X-Report-Language": reportLanguage,
         ...(requestId ? { "X-Analysis-Request-Id": requestId } : {}),
+        ...(groupId ? { "X-Analysis-Group-Id": groupId } : {}),
       },
     });
   } catch {

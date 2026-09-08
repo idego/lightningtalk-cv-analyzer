@@ -73,11 +73,15 @@ An owner SHALL be able to copy a share link for an opened persisted analysis. Th
 - **THEN** the persisted report and stored document load read-only even though the colleague is not the analysis owner
 
 ### Requirement: Destructive analysis actions use scope-appropriate confirmation
-Deleting one analysis from Recent analyses SHALL use an inline click-again confirmation on the same delete control and SHALL NOT open a modal or native browser confirmation. Deleting all analyses from Settings SHALL instead open a destructive confirmation dialog explaining that all saved analyses and stored CVs are permanently removed, with separate cancel and confirm actions.
+Deleting one analysis from the Analyses page SHALL use an inline click-again confirmation on the same delete control and SHALL NOT open a modal or native browser confirmation. The Recent analyses module on the analyze page SHALL NOT offer a delete control. Deleting a whole group from the Analyses page and deleting all analyses from Settings SHALL instead open a destructive confirmation dialog explaining that the affected saved analyses and stored CVs are permanently removed, with separate cancel and confirm actions.
 
-#### Scenario: Delete one recent analysis
-- **WHEN** the recruiter clicks the delete icon for one Recent analyses row
+#### Scenario: Delete one analysis
+- **WHEN** the recruiter clicks the delete icon for one analysis row on the Analyses page
 - **THEN** the control enters a click-again confirmation state and deletion runs only after the second click
+
+#### Scenario: Delete a group
+- **WHEN** the recruiter clicks Delete group on the Analyses page
+- **THEN** a confirmation dialog names the group and its analysis count, and nothing is deleted until the destructive confirm action is chosen
 
 #### Scenario: Delete all analyses from Settings
 - **WHEN** the recruiter clicks Delete all analyses
@@ -176,3 +180,21 @@ Recent analyses SHALL provide a localized, keyboard-accessible candidate-name an
 #### Scenario: Return to filtered history
 - **WHEN** the recruiter opens a matching result and uses Back
 - **THEN** the query remains and the filtered results are restored
+
+### Requirement: Analyses page groups saved analyses
+The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Rest` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. The page SHALL allow creating a named group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}`.
+
+#### Scenario: Collapse a group
+- **WHEN** the recruiter collapses the `Junior backend engineer` module
+- **THEN** its rows are hidden while its name and count stay visible, and other groups are unaffected
+
+#### Scenario: Search across groups
+- **WHEN** the recruiter types a candidate name that only matches analyses in `Rest`
+- **THEN** only the `Rest` module is shown, expanded, with just the matching rows
+
+### Requirement: Upload batch is assigned to a group
+The Upload CV files card SHALL offer a group selector defaulting to `Rest`, listing the recruiter's named groups, and offering a `New group...` option with a name field. Every file in the submitted batch SHALL be analyzed with the selected group id so the whole batch lands in that group; choosing `New group...` SHALL create the group before the first file is sent and select it for subsequent batches.
+
+#### Scenario: Batch for a new offer
+- **WHEN** the recruiter selects `New group...`, types `Junior backend engineer`, and analyzes three files
+- **THEN** one group with that name is created and all three analyses are listed under it on the Analyses page

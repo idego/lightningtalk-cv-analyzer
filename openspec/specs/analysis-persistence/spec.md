@@ -13,6 +13,21 @@ Every analysis SHALL be persisted in the API SQLite volume with the authenticate
 - **WHEN** an authenticated user id does not own the analysis
 - **THEN** the API responds 404 `analysis_not_found`
 
+### Requirement: Analysis groups
+Every persisted analysis SHALL belong to exactly one owner-scoped analysis group. Named groups (for example one job offer) live in an `analysis_groups` table keyed by `group_id` and `owner_user_id`; `reports.group_id` is nullable and a NULL value means the analysis belongs to the synthetic `rest` group, which always exists, is listed last, and cannot be created or removed. `GET /analysis-groups` returns the caller's groups oldest first, each with its analyses newest first, followed by `rest`. `POST /analysis-groups` creates a named group (whitespace-normalized, 1-120 characters, otherwise 400 `invalid_group_name`). `DELETE /analysis-groups/{id}` deletes the group together with every analysis in it using the same deletion semantics as `DELETE /analyses/{id}`; `DELETE /analysis-groups/rest` deletes only the caller's ungrouped analyses and keeps the `rest` group. `POST /analyze` accepts an optional `X-Analysis-Group-Id` header; a value of `rest` or an absent header stores the analysis ungrouped, and a group id the caller does not own is rejected with 404 `analysis_group_not_found`. Existing databases gain the `group_id` column additively and their analyses appear under `rest`.
+
+#### Scenario: Batch assigned to an offer group
+- **WHEN** the owner uploads a batch with `X-Analysis-Group-Id` set to one of their groups
+- **THEN** each resulting analysis is listed under that group and not under `rest`
+
+#### Scenario: Foreign group
+- **WHEN** the caller supplies a group id owned by another user
+- **THEN** the API responds 404 `analysis_group_not_found` and no analysis is stored
+
+#### Scenario: Delete group
+- **WHEN** the owner deletes a named group
+- **THEN** the group and all of its analyses, stored documents and share capabilities are removed, while feedback and AI usage ledger rows remain
+
 ### Requirement: Stored source documents
 After a report is persisted successfully, the API SHALL store the original uploaded bytes together with the upload filename and a content type derived from the extension (`application/pdf` or the DOCX media type) in a `source_documents` row keyed by `analysis_id`. A storage failure SHALL be recorded as a diagnostic event and SHALL NOT fail the analysis. `GET /analyses` items SHALL carry `has_document` reflecting whether a stored copy exists. `GET /analyses/{id}/document` SHALL return the stored bytes with the stored `Content-Type`, `Content-Disposition: inline` (header-safe `filename` plus RFC 5987 `filename*` when the name is not plain ASCII) and `Cache-Control: private, no-store`, using the same server-derived owner-id check as `GET /analyses/{id}`. Stored documents are deleted together with the analysis by `DELETE /analyses/{id}`, `DELETE /analyses`, and retention purge.
 
@@ -36,7 +51,7 @@ After a report is persisted successfully, the API SHALL store the original uploa
 - **THEN** those analyses and their stored documents disappear from the next list call
 
 ### Requirement: Recent analyses and document preview
-The analyze screen SHALL list the caller's recent analyses and allow reopening one. When `has_document` is true, the web app SHALL fetch the stored copy through `/api/analyses/{id}/document` (a proxy that authenticates the web user and forwards the server-derived owner id) and preview the PDF or DOCX exactly as it does for a fresh upload, without re-uploading. Deleting from the UI SHALL call the corresponding API delete through the web proxy.
+The analyze screen SHALL list the caller's recent analyses and allow reopening one. When `has_document` is true, the web app SHALL fetch the stored copy through `/api/analyses/{id}/document` (a proxy that authenticates the web user and forwards the server-derived owner id) and preview the PDF or DOCX exactly as it does for a fresh upload, without re-uploading. Deleting from the UI SHALL call the corresponding API delete through the web proxy; the Recent analyses module itself offers no delete control, deletion happens on the Analyses page.
 
 #### Scenario: Reopen recent analysis
 - **WHEN** the user selects a recent analysis

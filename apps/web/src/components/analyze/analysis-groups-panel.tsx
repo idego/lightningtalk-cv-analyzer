@@ -1,0 +1,186 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, ChevronRight, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
+import type { AnalysisGroup, AnalysisHistoryItem } from "@/lib/analyze-types";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { useConfirmation } from "@/components/ui/use-confirmation";
+import { AnalysisHistoryRow } from "@/components/analyze/recent-analyses";
+import { countAnalyses, searchAnalysisGroups, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
+import { useCopy } from "@/lib/app-settings";
+
+/** Analyses page: every saved analysis grouped by job offer, with search and per-row / per-group deletion. */
+export function AnalysisGroupsPanel() {
+  const { t } = useCopy();
+  const router = useRouter();
+  const { confirm, confirmationDialog } = useConfirmation();
+  const [groups, setGroups] = useState<AnalysisGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [newGroupName, setNewGroupName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searching = Boolean(query.trim());
+  const visibleGroups = searchAnalysisGroups(groups, query);
+  const total = countAnalyses(groups);
+  const matchCount = countAnalyses(visibleGroups);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/analysis-groups", { cache: "no-store" });
+      if (!response.ok) throw new Error("groups_unavailable");
+      const body = await response.json() as { groups?: AnalysisGroup[] };
+      setGroups(body.groups ?? []);
+    } catch {
+      setError(t("groupsUnavailable"));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refresh]);
+
+  function toggle(groupId: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  }
+
+  function clearSearch() { setQuery(""); searchRef.current?.focus(); }
+
+  function open(item: AnalysisHistoryItem) {
+    setOpeningId(item.analysis_id);
+    router.push(`/analyze?analysis=${encodeURIComponent(item.analysis_id)}`);
+  }
+
+  async function createGroup() {
+    const name = newGroupName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      if (!response.ok) throw new Error("group_create_failed");
+      const created = await response.json() as { group_id: string; name: string; created_at: string };
+      setGroups((current) => {
+        const rest = current.filter((group) => group.is_rest);
+        const named = current.filter((group) => !group.is_rest);
+        return [...named, { ...created, is_rest: false, analyses: [] }, ...rest];
+      });
+      setNewGroupName("");
+    } catch {
+      setError(t("groupCouldNotCreate"));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function removeAnalysis(item: AnalysisHistoryItem) {
+    try {
+      const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
+      if (response.ok) setGroups((current) => withoutAnalysis(current, item.analysis_id));
+      else setError(t("analysisCouldNotDelete"));
+    } catch {
+      setError(t("analysisCouldNotDelete"));
+    }
+  }
+
+  async function removeGroup(group: AnalysisGroup) {
+    const count = group.analyses.length;
+    const description = group.is_rest
+      ? t("clearRestGroupDescription", { count })
+      : t("deleteGroupDescription", { name: group.name, count });
+    if (!(await confirm(description, { title: t("deleteGroupTitle"), action: t("deleteGroup") }))) return;
+    try {
+      const response = await fetch(`/api/analysis-groups/${encodeURIComponent(group.group_id)}`, { method: "DELETE" });
+      if (response.ok) setGroups((current) => withoutGroup(current, group.group_id));
+      else setError(t("groupCouldNotDelete"));
+    } catch {
+      setError(t("groupCouldNotDelete"));
+    }
+  }
+
+  return <div className="mx-auto max-w-5xl space-y-6">
+    {confirmationDialog}
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><FolderKanban className="size-5" aria-hidden />{t("analysesTitle")}</CardTitle>
+        <CardDescription>{t("analysesDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" aria-hidden />
+          <input ref={searchRef} type="search" value={query} aria-label={t("searchAnalyses")} placeholder={t("searchAnalyses")} autoComplete="off" maxLength={200} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-9 w-full rounded-md border bg-background pl-9 pr-9 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
+          {query ? <button type="button" aria-label={t("clearSearch")} className="absolute right-0 top-0 flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={clearSearch}><X className="size-4" aria-hidden /></button> : null}
+        </div>
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
+          <Input value={newGroupName} maxLength={120} placeholder={t("newGroupName")} aria-label={t("newGroupName")} onChange={(event) => setNewGroupName(event.target.value)} disabled={creating} />
+          <Button type="submit" variant="outline" disabled={creating || !newGroupName.trim()}>
+            {creating ? <LoaderCircle className="size-4 animate-spin" data-icon="inline-start" /> : <FolderPlus className="size-4" data-icon="inline-start" />}
+            {creating ? t("creatingGroup") : t("createGroup")}
+          </Button>
+        </form>
+        {searching && !loading && !error ? <p role="status" className="text-xs text-muted-foreground">{t("analysisMatchCount", { count: matchCount, total })}</p> : null}
+        {error ? <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive"><span>{error}</span><Button variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
+      </CardContent>
+    </Card>
+
+    {loading && !groups.length ? <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingGroups")}</div> : null}
+    {searching && !matchCount && !loading && !error ? <p className="py-6 text-center text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
+    {visibleGroups.map((group) => (
+      <GroupSection key={group.group_id} group={group} expanded={!collapsed.has(group.group_id) || searching} openingId={openingId} onToggle={() => toggle(group.group_id)} onOpen={open} onRemoveAnalysis={removeAnalysis} onRemoveGroup={removeGroup} />
+    ))}
+  </div>;
+}
+
+function GroupSection({ group, expanded, openingId, onToggle, onOpen, onRemoveAnalysis, onRemoveGroup }: {
+  group: AnalysisGroup;
+  expanded: boolean;
+  openingId: string | null;
+  onToggle: () => void;
+  onOpen: (item: AnalysisHistoryItem) => void;
+  onRemoveAnalysis: (item: AnalysisHistoryItem) => Promise<void>;
+  onRemoveGroup: (group: AnalysisGroup) => Promise<void>;
+}) {
+  const { t } = useCopy();
+  const [removing, setRemoving] = useState(false);
+  const name = group.is_rest ? t("restGroup") : group.name;
+  const headingId = `analysis-group-${group.group_id}`;
+  const contentId = `analysis-group-${group.group_id}-content`;
+  async function requestRemoveGroup() {
+    setRemoving(true);
+    try { await onRemoveGroup(group); } finally { setRemoving(false); }
+  }
+  return <section className="rounded-xl border bg-card" aria-labelledby={headingId}>
+    <div className="flex items-center gap-2 border-b px-3 py-2">
+      <button type="button" aria-expanded={expanded} aria-controls={contentId} aria-label={expanded ? t("collapseGroup", { name }) : t("expandGroup", { name })} onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">
+        {expanded ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+        <h2 id={headingId} className="truncate font-medium">{name}</h2>
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{t("analysesInGroup", { count: group.analyses.length })}</span>
+        {group.is_rest ? <span className="hidden truncate text-xs text-muted-foreground sm:inline">{t("restGroupDescription")}</span> : null}
+      </button>
+      <Button variant="ghost" size="sm" className="shrink-0 text-foreground hover:bg-destructive/10 hover:text-destructive" disabled={removing || (group.is_rest && !group.analyses.length)} aria-label={t("deleteGroup")} onClick={() => void requestRemoveGroup()}>
+        {removing ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+        <span className="hidden sm:inline">{t("deleteGroup")}</span>
+      </Button>
+    </div>
+    {expanded ? <div id={contentId}>
+      {group.analyses.length ? <ul className="divide-y">{group.analyses.map((item) => (
+        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} />
+      ))}</ul> : <p className="px-5 py-4 text-sm text-muted-foreground">{t("noAnalysesInGroup")}</p>}
+    </div> : null}
+  </section>;
+}

@@ -254,7 +254,21 @@ export type AnalysisHistoryItem = {
   created_at: string;
   /** True when the original uploaded document is still stored and can be fetched from `/api/analyses/{analysis_id}/document`. */
   has_document?: boolean;
+  /** Owning analysis group, or null when the analysis belongs to the synthetic "Rest" group. */
+  group_id?: string | null;
 };
+
+/** A named collection of analyses (for example one job offer). The synthetic "Rest" group holds ungrouped analyses. */
+export type AnalysisGroup = {
+  group_id: string;
+  name: string;
+  created_at: string | null;
+  is_rest: boolean;
+  analyses: AnalysisHistoryItem[];
+};
+
+/** Group id the API reserves for ungrouped analyses. */
+export const REST_GROUP_ID = "rest";
 
 /** A document the preview can render: the in-memory upload for this session, or a stored copy served by the API. */
 export type StoredDocument = { url: string; name: string; headers?: Record<string, string> };

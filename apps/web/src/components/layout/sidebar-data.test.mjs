@@ -8,6 +8,7 @@ test("includes builder alongside analyzer and feedback for feedback members", ()
     buildSidebarNav(true)[0].items.map(({ title, url }) => ({ title, url })),
     [
       { title: "Analyze", url: "/analyze" },
+      { title: "Analyses", url: "/analyses" },
       { title: "Profile Builder", url: "/profile-builder" },
       { title: "Dashboard", url: "/dashboard" },
       { title: "Feedback", url: "/feedback" },
@@ -19,7 +20,7 @@ test("includes builder alongside analyzer and feedback for feedback members", ()
 test("does not expose Feedback to users without feedback access", () => {
   assert.deepEqual(
     buildSidebarNav(false)[0].items.map(({ title }) => title),
-    ["Analyze", "Profile Builder", "Dashboard", "Settings"],
+    ["Analyze", "Analyses", "Profile Builder", "Dashboard", "Settings"],
   );
 });
 

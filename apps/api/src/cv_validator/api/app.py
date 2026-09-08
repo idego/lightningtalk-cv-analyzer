@@ -29,7 +29,7 @@ from cv_validator.analysis import (
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.persistence import REST_GROUP_ID, PersistenceConfig, PersistenceStore
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import (
@@ -106,6 +106,28 @@ DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
 
 class _RetentionUpdate(BaseModel):
     days: int
+
+
+class _AnalysisGroupCreate(BaseModel):
+    name: str
+
+
+def _group_name(value: str) -> str:
+    normalized = " ".join(value.split())
+    if not normalized or len(normalized) > 120:
+        raise HTTPException(status_code=400, detail="invalid_group_name")
+    return normalized
+
+
+def _optional_group_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized or normalized == REST_GROUP_ID:
+        return None
+    if len(normalized) > 64 or not all(c.isalnum() or c == "-" for c in normalized):
+        raise HTTPException(status_code=400, detail="invalid_group_id")
+    return normalized
 
 
 def _db_path_from_env() -> Path:
@@ -491,11 +513,18 @@ def create_app(
         owner_user_id: str,
         correlation_id: str,
         request_id: str | None = None,
+        group_id: str | None = None,
     ) -> dict:
         with analysis_lock:
             try:
                 return _analyze_upload(
-                    content, filename, report_language, owner_user_id, correlation_id, request_id
+                    content,
+                    filename,
+                    report_language,
+                    owner_user_id,
+                    correlation_id,
+                    request_id,
+                    group_id,
                 )
             finally:
                 cancellations.discard(owner_user_id, request_id)
@@ -507,6 +536,7 @@ def create_app(
         owner_user_id: str,
         correlation_id: str,
         request_id: str | None,
+        group_id: str | None = None,
     ) -> dict:
         if cancellations.is_cancelled(owner_user_id, request_id):
             raise HTTPException(status_code=409, detail="analysis_cancelled")
@@ -580,6 +610,7 @@ def create_app(
                 analysis_id=analysis_id,
                 owner_user_id=owner_user_id,
                 source_filename=filename,
+                group_id=group_id,
             )
             try:
                 feedback_store.materialize(
@@ -691,6 +722,7 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
         x_report_language: str = Header(default="en"),
         x_analysis_request_id: str | None = Header(default=None),
+        x_analysis_group_id: str | None = Header(default=None),
     ) -> JSONResponse:
         filename = file.filename or "upload.pdf"
         try:
@@ -698,6 +730,9 @@ def create_app(
         except UploadReadError as exc:
             raise HTTPException(status_code=500, detail="upload_read_error") from exc
         owner_user_id = _owner_user_id(x_analysis_owner_id)
+        group_id = _optional_group_id(x_analysis_group_id)
+        if group_id is not None and not store.analysis_group_owned_by(group_id, owner_user_id):
+            raise HTTPException(status_code=404, detail="analysis_group_not_found")
         return JSONResponse(
             await run_in_threadpool(
                 analyze_upload,
@@ -707,6 +742,7 @@ def create_app(
                 owner_user_id,
                 request.state.correlation_id,
                 x_analysis_request_id,
+                group_id,
             )
         )
 
@@ -736,6 +772,37 @@ def create_app(
         return JSONResponse(
             {"deleted": store.delete_all_analyses(_optional_owner_user_id(x_analysis_owner_id))}
         )
+
+    @app.get("/analysis-groups")
+    def list_analysis_groups(
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        store.purge_expired()
+        return JSONResponse(
+            {"groups": store.list_analysis_groups(_optional_owner_user_id(x_analysis_owner_id))}
+        )
+
+    @app.post("/analysis-groups", status_code=201)
+    def create_analysis_group(
+        payload: _AnalysisGroupCreate,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        try:
+            group = store.create_analysis_group(
+                _owner_user_id(x_analysis_owner_id), _group_name(payload.name)
+            )
+        except PersistenceError as exc:
+            raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
+        return JSONResponse(group, status_code=201)
+
+    @app.delete("/analysis-groups/{group_id}")
+    def delete_analysis_group(
+        group_id: str,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        if not store.delete_analysis_group(group_id, _optional_owner_user_id(x_analysis_owner_id)):
+            raise HTTPException(status_code=404, detail="analysis_group_not_found")
+        return JSONResponse({"deleted": True})
 
     @app.get("/analyses/{analysis_id}")
     def get_analysis(

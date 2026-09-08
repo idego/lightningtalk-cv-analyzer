@@ -39,12 +39,16 @@ The frontend SHALL support light/dark mode with early theme bootstrap to prevent
 
 ### Requirement: Admin shell layout baseline
 The frontend SHALL provide a reusable admin shell with sidebar, sticky header,
-centered content container, and footer, including the `Analyze` navigation
-target.
+centered content container, and footer, including the `Analyze` and
+`Analyses` navigation targets.
 
 #### Scenario: Analyze route
 - **WHEN** a user opens the app shell
 - **THEN** an `Analyze` navigation item and corresponding analysis screen are present
+
+#### Scenario: Analyses route
+- **WHEN** a user opens the app shell
+- **THEN** an `Analyses` navigation item pointing at `/analyses` lists saved analyses grouped by analysis group
 
 #### Scenario: Role-gated Feedback route
 - **WHEN** the signed-in user holds an active feedback `owner` or `reviewer` role

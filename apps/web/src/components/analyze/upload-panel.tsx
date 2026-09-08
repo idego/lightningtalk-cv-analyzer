@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
+import { type AnalysisGroup, type AnalysisHistoryItem, type AnalysisReport, type AnalyzeItemResult, type DocumentSource, REST_GROUP_ID } from "@/lib/analyze-types";
 import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analysis-workspace";
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
@@ -17,6 +19,7 @@ import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRou
 const ESTIMATED_SECONDS_PER_CV = 35;
 const COMPLETE_CARD_MS = 1200;
 const CANCELLED_STATUS = 409;
+const NEW_GROUP_OPTION = "__new__";
 
 function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -56,6 +59,9 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
+  const [groups, setGroups] = useState<AnalysisGroup[]>([]);
+  const [groupId, setGroupId] = useState<string>(REST_GROUP_ID);
+  const [newGroupName, setNewGroupName] = useState("");
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
   const [routeLoading, setRouteLoading] = useState(Boolean(initialAnalysisId));
@@ -67,6 +73,15 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
   const historyVersion = sessionIds.size;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/analysis-groups", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => (response.ok ? await response.json() as { groups?: AnalysisGroup[] } : null))
+      .then((body) => { if (body) setGroups((body.groups ?? []).filter((group) => !group.is_rest)); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!running || startedAt === undefined) return;
@@ -147,12 +162,13 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     if (detail === "unsupported_file_type") return t("cvUnsupportedType");
     if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");
     if (detail === "upload_read_error") return t("uploadCouldNotRead");
+    if (detail === "analysis_group_not_found") return t("groupsUnavailable");
     return t("analysisFailed");
   }
 
-  async function analyzeFile(file: File, requestId: string): Promise<AnalyzeItemResult> {
+  async function analyzeFile(file: File, requestId: string, batchGroupId: string): Promise<AnalyzeItemResult> {
     const form = new FormData(); form.append("file", file, file.name);
-    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId } });
+    const response = await fetch("/api/analyze", { method: "POST", body: form, headers: { "X-Report-Language": settings.reportLanguage, "X-Analysis-Request-Id": requestId, "X-Analysis-Group-Id": batchGroupId } });
     const payload = await response.json().catch(() => null) as AnalysisReport | { detail?: string } | null;
     if (response.status === CANCELLED_STATUS) return { filename: file.name, status: "error", error: t("analysisCancelled") };
     if (!response.ok) throw new Error(analysisErrorMessage(payload && "detail" in payload ? payload.detail : null));
@@ -161,9 +177,25 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     return { filename: file.name, status: report.base_analysis?.status === "partial" ? "partial" : "ok", report: report };
   }
 
+  /** Resolve the batch group: an existing group id, or a freshly created one when "New group..." is selected. */
+  async function resolveBatchGroup(): Promise<string | null> {
+    if (groupId !== NEW_GROUP_OPTION) return groupId;
+    const name = newGroupName.trim();
+    if (!name) { setError(t("newGroupName")); return null; }
+    const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
+    if (!response?.ok) { setError(t("groupCouldNotCreate")); return null; }
+    const created = await response.json() as { group_id: string; name: string; created_at: string };
+    setGroups((current) => [...current, { ...created, is_rest: false, analyses: [] }]);
+    setGroupId(created.group_id);
+    setNewGroupName("");
+    return created.group_id;
+  }
+
   async function submit() {
     setError(null); setNotice(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     if (running) return;
+    const batchGroupId = await resolveBatchGroup();
+    if (batchGroupId === null) return;
     const queue = acceptedFiles;
     const failedFiles: File[] = [];
     const failureMessages: string[] = [];
@@ -173,7 +205,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
       const requestId = crypto.randomUUID();
       store.beginFile(token, file, requestId);
       let result: AnalyzeItemResult;
-      try { result = await analyzeFile(file, requestId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
+      try { result = await analyzeFile(file, requestId, batchGroupId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
       if (result.status === "error") {
         failedFiles.push(file);
         failureMessages.push(`${file.name}: ${result.error}`);
@@ -230,6 +262,21 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
         <CvUploadDropzone label={t("drop")} hint={t("accepted")} onFilesSelected={(files) => store.enqueue(files)} />
         {files.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">{t("queued")} ({files.length})</p><ul className="space-y-1 text-muted-foreground">{files.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={t("removeFile", { name: file.name })} onClick={() => store.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
         {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">{t("unsupportedFiles", { names: unsupportedFiles.map((file) => file.name).join(", ") })}</p> : null}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="analysis-group">{t("analysisGroup")}</Label>
+            <select id="analysis-group" value={groupId} onChange={(event) => setGroupId(event.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <option value={REST_GROUP_ID}>{t("restGroup")}</option>
+              {groups.map((group) => <option key={group.group_id} value={group.group_id}>{group.name}</option>)}
+              <option value={NEW_GROUP_OPTION}>{t("newGroupOption")}</option>
+            </select>
+            <p className="text-xs text-muted-foreground">{t("analysisGroupHint")}</p>
+          </div>
+          {groupId === NEW_GROUP_OPTION ? <div className="grid gap-1.5">
+            <Label htmlFor="analysis-group-name">{t("createGroup")}</Label>
+            <Input id="analysis-group-name" value={newGroupName} maxLength={120} placeholder={t("newGroupName")} onChange={(event) => setNewGroupName(event.target.value)} />
+          </div> : null}
+        </div>
         <div className="flex items-center gap-3"><Button onClick={submit} disabled={!acceptedFiles.length}>{t("analyzeFiles")}</Button><Button variant="outline" onClick={reset} disabled={!files.length}>{t("reset")}</Button></div>
         {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
         {error ? <p role="alert" className="whitespace-pre-line text-sm text-destructive">{error}</p> : null}

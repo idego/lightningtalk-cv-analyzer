@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, MessageSquareText, Search, Settings, UserRoundPen } from "lucide-react";
+import { FolderKanban, LayoutDashboard, MessageSquareText, Search, Settings, UserRoundPen } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -18,6 +18,7 @@ export function buildSidebarNav(showFeedback = false): NavGroup[] {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
+        { title: "Analyses", url: "/analyses", icon: FolderKanban },
         { title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen },
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         ...(showFeedback ? [{ title: "Feedback", url: "/feedback", icon: MessageSquareText }] : []),
@@ -37,6 +38,7 @@ export function isSidebarItemActive(pathname: string, itemUrl: string): boolean 
 export function titleFromPathname(pathname: string): string {
   const normalized = pathname.replace(/\/+$/, "") || "/";
   if (normalized === "/analyze") return "Analyze";
+  if (normalized === "/analyses") return "Analyses";
   if (normalized === "/dashboard") return "Dashboard";
   if (normalized.startsWith("/profile-builder/templates/")) return "Template Creator";
   if (normalized === "/profile-builder") return "Profile Builder";

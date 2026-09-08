@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from "lucide-react";
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
-import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { searchAnalysisHistory } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
 
@@ -68,16 +68,6 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
     }
   }
 
-  async function remove(item: AnalysisHistoryItem) {
-    try {
-      const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
-      if (response.ok) setItems((current) => current.filter(({ analysis_id }) => analysis_id !== item.analysis_id));
-      else setError(t("analysisCouldNotDelete"));
-    } catch {
-      setError(t("analysisCouldNotDelete"));
-    }
-  }
-
   return <section className="rounded-xl border bg-card" aria-labelledby="recent-analyses-heading">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
       <h2 id="recent-analyses-heading" className="flex items-center gap-2 font-medium"><History className="size-4" aria-hidden />{t("recentAnalyses")}</h2>
@@ -92,7 +82,7 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
     {searching && !loading && !error ? <p role="status" className="px-5 pt-3 text-xs text-muted-foreground">{t("analysisMatchCount", { count: matches.length, total: items.length })}</p> : null}
     {searching && !matches.length && !loading && !error ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
     {visibleItems.length ? <ul className={`divide-y ${expanded || searching ? "max-h-[32rem] overflow-y-auto" : ""}`}>{visibleItems.map((item) => (
-      <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onRemove={remove} />
+      <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} />
     ))}</ul> : null}
     {!searching && items.length > 5 ? <div className="flex justify-center border-t px-5 py-3"><Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
       {expanded ? t("showFewerAnalyses") : t("showMoreAnalyses", { count: items.length - 5 })}
@@ -102,22 +92,24 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
   </section>;
 }
 
-function AnalysisHistoryRow({
+/** One saved analysis. Deletion is only offered where the caller passes `onRemove` (the Analyses page). */
+export function AnalysisHistoryRow({
   item,
-  isNew,
+  isNew = false,
   openingId,
   onOpen,
   onRemove,
 }: {
   item: AnalysisHistoryItem;
-  isNew: boolean;
+  isNew?: boolean;
   openingId: string | null;
-  onOpen: (item: AnalysisHistoryItem) => Promise<void>;
-  onRemove: (item: AnalysisHistoryItem) => Promise<void>;
+  onOpen: (item: AnalysisHistoryItem) => Promise<void> | void;
+  onRemove?: (item: AnalysisHistoryItem) => Promise<void>;
 }) {
   const { settings, t } = useCopy();
   const [removing, setRemoving] = useState(false);
   async function requestRemove() {
+    if (!onRemove) return;
     setRemoving(true);
     try {
       await onRemove(item);
@@ -130,6 +122,6 @@ function AnalysisHistoryRow({
       <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
-    <DeleteButton label={t("deleteAnalysis")} disabled={openingId !== null || removing} onDelete={requestRemove} />
+    {onRemove ? <DeleteButton label={t("deleteAnalysis")} disabled={openingId !== null || removing} onDelete={requestRemove} /> : null}
   </li>;
 }
