@@ -27,6 +27,10 @@ from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 UNASSIGNED_GROUP_ID = "unassigned"
 
 
+class AnalysisGroupNameTakenError(PersistenceError):
+    """Raised when an owner already has a group with the same name."""
+
+
 @dataclass
 class PersistenceConfig:
     db_path: Path
@@ -650,6 +654,7 @@ class PersistenceStore:
         return history
 
     def create_analysis_group(self, owner_user_id: str, name: str) -> dict[str, Any]:
+        """Create a named group. Names are unique per owner, ignoring case."""
         group = {
             "group_id": str(uuid4()),
             "name": name,
@@ -657,6 +662,13 @@ class PersistenceStore:
         }
         try:
             with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute(
+                    """SELECT 1 FROM analysis_groups
+                       WHERE owner_user_id = ? AND lower(name) = lower(?)""",
+                    (owner_user_id, name),
+                ).fetchone() is not None:
+                    raise AnalysisGroupNameTakenError("analysis group name taken")
                 conn.execute(
                     """INSERT INTO analysis_groups (group_id, owner_user_id, name, created_at)
                        VALUES (?, ?, ?, ?)""",

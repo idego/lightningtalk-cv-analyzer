@@ -81,7 +81,7 @@ Deleting one analysis from the Analyses page SHALL use an inline click-again con
 
 #### Scenario: Delete a group
 - **WHEN** the recruiter clicks Delete group on the Analyses page
-- **THEN** a confirmation dialog names the group and its analysis count, and nothing is deleted until the destructive confirm action is chosen
+- **THEN** a confirmation dialog names the group, states that all analyses assigned to it and their stored CVs are permanently deleted and that this is irreversible, and nothing is deleted until the destructive confirm action is chosen
 
 #### Scenario: Delete all analyses from Settings
 - **WHEN** the recruiter clicks Delete all analyses
@@ -182,7 +182,7 @@ Recent analyses SHALL provide a localized, keyboard-accessible candidate-name an
 - **THEN** the query remains and the filtered results are restored
 
 ### Requirement: Analyses page groups saved analyses
-The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. A `Create group` action in the top-right of the page header SHALL open a modal dialog with a group-name field; the page SHALL allow creating a named group there, moving one analysis to any other group (including `Unassigned`) from a per-row menu that marks the current group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}`.
+The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. A `Create group` action in the top-right of the page header SHALL open a modal dialog with a group-name field; the page SHALL allow creating a named group there, moving one analysis to any other group (including `Unassigned`) from a per-row menu that marks the current group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}&from=analyses`, and the report's Back action SHALL then return to `/analyses` instead of the empty analyze form.
 
 #### Scenario: Collapse a group
 - **WHEN** the recruiter collapses the `Junior backend engineer` module

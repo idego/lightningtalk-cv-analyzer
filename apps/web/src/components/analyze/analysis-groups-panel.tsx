@@ -14,6 +14,9 @@ import { useConfirmation } from "@/components/ui/use-confirmation";
 import { AnalysisHistoryRow } from "@/components/analyze/recent-analyses";
 import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
+import { analyzeHrefFromAnalyses } from "@/lib/analysis-route";
+
+const NAME_TAKEN_STATUS = 409;
 
 /** Analyses page: every saved analysis grouped by job offer, with search and per-row / per-group deletion. */
 export function AnalysisGroupsPanel() {
@@ -68,7 +71,7 @@ export function AnalysisGroupsPanel() {
 
   function open(item: AnalysisHistoryItem) {
     setOpeningId(item.analysis_id);
-    router.push(`/analyze?analysis=${encodeURIComponent(item.analysis_id)}`);
+    router.push(analyzeHrefFromAnalyses(item.analysis_id));
   }
 
   function openCreate() { setCreateError(null); setNewGroupName(""); setCreateOpen(true); }
@@ -80,6 +83,7 @@ export function AnalysisGroupsPanel() {
     setCreateError(null);
     try {
       const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      if (response.status === NAME_TAKEN_STATUS) { setCreateError(t("groupNameTaken")); return; }
       if (!response.ok) throw new Error("group_create_failed");
       const created = await response.json() as { group_id: string; name: string; created_at: string };
       setGroups((current) => {
@@ -122,7 +126,8 @@ export function AnalysisGroupsPanel() {
     const description = group.is_unassigned
       ? t("clearUnassignedGroupDescription", { count })
       : t("deleteGroupDescription", { name: group.name, count });
-    if (!(await confirm(description, { title: t("deleteGroupTitle"), action: t("deleteGroup") }))) return;
+    const title = group.is_unassigned ? t("clearUnassignedGroupTitle") : t("deleteGroupTitle", { name: group.name });
+    if (!(await confirm(description, { title, action: t("deleteGroup") }))) return;
     try {
       const response = await fetch(`/api/analysis-groups/${encodeURIComponent(group.group_id)}`, { method: "DELETE" });
       if (response.ok) setGroups((current) => withoutGroup(current, group.group_id));

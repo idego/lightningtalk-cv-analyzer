@@ -14,12 +14,14 @@ import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
 import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
-import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
+import { useRouter } from "next/navigation";
+import { analysisReturnPath, parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ESTIMATED_SECONDS_PER_CV = 35;
 const COMPLETE_CARD_MS = 1200;
 const CANCELLED_STATUS = 409;
 const NEW_GROUP_OPTION = "__new__";
+const NAME_TAKEN_STATUS = 409;
 
 function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -56,6 +58,7 @@ function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchPro
 
 export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: string | null }) {
   const { settings, t } = useCopy();
+  const router = useRouter();
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -183,6 +186,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     const name = newGroupName.trim();
     if (!name) { setError(t("newGroupName")); return null; }
     const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
+    if (response?.status === NAME_TAKEN_STATUS) { setError(t("groupNameTaken")); return null; }
     if (!response?.ok) { setError(t("groupCouldNotCreate")); return null; }
     const created = await response.json() as { group_id: string; name: string; created_at: string };
     setGroups((current) => [...current, { ...created, is_unassigned: false, analyses: [] }]);
@@ -244,6 +248,8 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
       window.history.back();
       return;
     }
+    const returnPath = analysisReturnPath(window.location.href);
+    if (returnPath) { router.push(returnPath); return; }
     routeRequest.current += 1;
     window.history.replaceState(null, "", relativeHref(withoutAnalysisRoute(window.location.href)));
     setOpened(null);

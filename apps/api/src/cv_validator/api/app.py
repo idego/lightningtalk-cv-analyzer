@@ -29,7 +29,12 @@ from cv_validator.analysis import (
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import UNASSIGNED_GROUP_ID, PersistenceConfig, PersistenceStore
+from cv_validator.api.persistence import (
+    UNASSIGNED_GROUP_ID,
+    AnalysisGroupNameTakenError,
+    PersistenceConfig,
+    PersistenceStore,
+)
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.config import (
@@ -795,6 +800,8 @@ def create_app(
             group = store.create_analysis_group(
                 _owner_user_id(x_analysis_owner_id), _group_name(payload.name)
             )
+        except AnalysisGroupNameTakenError as exc:
+            raise HTTPException(status_code=409, detail="analysis_group_name_taken") from exc
         except PersistenceError as exc:
             raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
         return JSONResponse(group, status_code=201)

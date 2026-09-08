@@ -6,6 +6,8 @@ import {
   relativeHref,
   withAnalysisRoute,
   withoutAnalysisRoute,
+  analyzeHrefFromAnalyses,
+  analysisReturnPath,
 } from "./analysis-route.ts";
 
 test("parses owner and shared analysis routes", () => {
@@ -31,4 +33,13 @@ test("builds share capability in the fragment instead of the query string", () =
 test("clearing a report route preserves unrelated query parameters", () => {
   const cleared = withoutAnalysisRoute("https://example.test/analyze?mode=compact&analysis=abc#share=secret");
   assert.equal(relativeHref(cleared), "/analyze?mode=compact");
+});
+
+test("reports opened from the Analyses page return there on Back", () => {
+  const href = `https://app.test${analyzeHrefFromAnalyses("a 1")}`;
+  assert.equal(analyzeHrefFromAnalyses("a 1"), "/analyze?analysis=a%201&from=analyses");
+  assert.equal(parseAnalysisRoute(href).analysisId, "a 1");
+  assert.equal(analysisReturnPath(href), "/analyses");
+  assert.equal(analysisReturnPath("https://app.test/analyze?analysis=a1"), null);
+  assert.equal(withoutAnalysisRoute(href), "https://app.test/analyze");
 });

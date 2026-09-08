@@ -98,6 +98,12 @@ def test_group_endpoints_and_analyze_header_assign_batch_to_group(tmp_path) -> N
     assert created.status_code == 201
     group_id = created.json()["group_id"]
     assert created.json()["name"] == "Junior backend"
+    duplicate = client.post("/analysis-groups", json={"name": "junior BACKEND"}, headers=owner)
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "analysis_group_name_taken"
+    assert client.post(
+        "/analysis-groups", json={"name": "Junior backend"}, headers={"X-Analysis-Owner-Id": "someone-else"}
+    ).status_code == 201
 
     analyzed = client.post(
         "/analyze",
