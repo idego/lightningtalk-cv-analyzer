@@ -121,6 +121,22 @@ class _AnalysisGroupAssignment(BaseModel):
     group_id: str | None = None
 
 
+ANALYSIS_NOTE_MAX_CHARS = 2000
+
+
+class _AnalysisNoteUpdate(BaseModel):
+    content: str
+
+
+def _note_content(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="empty_note")
+    if len(normalized) > ANALYSIS_NOTE_MAX_CHARS:
+        raise HTTPException(status_code=413, detail="note_too_long")
+    return normalized
+
+
 def _group_name(value: str) -> str:
     normalized = " ".join(value.split())
     if not normalized or len(normalized) > 120:
@@ -814,6 +830,44 @@ def create_app(
         if not store.delete_analysis_group(group_id, _optional_owner_user_id(x_analysis_owner_id)):
             raise HTTPException(status_code=404, detail="analysis_group_not_found")
         return JSONResponse({"deleted": True})
+
+    @app.get("/analyses/{analysis_id}/note")
+    def get_analysis_note(
+        analysis_id: str,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        owner_user_id = _optional_owner_user_id(x_analysis_owner_id)
+        if not store.analysis_owned_by(analysis_id, owner_user_id):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return JSONResponse(
+            {"note": store.get_analysis_note(analysis_id, owner_user_id), "max_chars": ANALYSIS_NOTE_MAX_CHARS}
+        )
+
+    @app.put("/analyses/{analysis_id}/note")
+    def put_analysis_note(
+        analysis_id: str,
+        payload: _AnalysisNoteUpdate,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        owner_user_id = _owner_user_id(x_analysis_owner_id)
+        content = _note_content(payload.content)
+        try:
+            note = store.set_analysis_note(analysis_id, owner_user_id, content)
+        except AnalysisNotFoundPersistenceError as exc:
+            raise HTTPException(status_code=404, detail="analysis_not_found") from exc
+        except PersistenceError as exc:
+            raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
+        return JSONResponse({"note": note, "max_chars": ANALYSIS_NOTE_MAX_CHARS})
+
+    @app.delete("/analyses/{analysis_id}/note")
+    def delete_analysis_note(
+        analysis_id: str,
+        x_analysis_owner_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        owner_user_id = _optional_owner_user_id(x_analysis_owner_id)
+        if not store.analysis_owned_by(analysis_id, owner_user_id):
+            raise HTTPException(status_code=404, detail="analysis_not_found")
+        return JSONResponse({"deleted": store.delete_analysis_note(analysis_id, owner_user_id)})
 
     @app.put("/analyses/{analysis_id}/group")
     def set_analysis_group(

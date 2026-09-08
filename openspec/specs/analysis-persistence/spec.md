@@ -13,6 +13,17 @@ Every analysis SHALL be persisted in the API SQLite volume with the authenticate
 - **WHEN** an authenticated user id does not own the analysis
 - **THEN** the API responds 404 `analysis_not_found`
 
+### Requirement: Private analysis notes
+An analysis owner SHALL be able to keep one free-text note per analysis in an `analysis_notes` row keyed by `analysis_id` with the owner's user id. `GET /analyses/{id}/note` returns the note (or `null`) and the character limit, `PUT /analyses/{id}/note` creates or replaces it, and `DELETE /analyses/{id}/note` removes it; all three use the same owner check as `GET /analyses/{id}` (404 `analysis_not_found` for foreign or missing analyses). Content is trimmed, CRLF-normalized, rejected when empty (400 `empty_note`) and limited to 2000 characters (413 `note_too_long`). Notes are private CV-related content: they MUST NOT be logged and SHALL be deleted with the analysis by `DELETE /analyses/{id}`, `DELETE /analyses`, group deletion, and retention purge. `GET /analyses` items SHALL carry `has_note`.
+
+#### Scenario: Owner saves and reopens a note
+- **WHEN** the owner saves a note for one analysis and later fetches it
+- **THEN** the trimmed content and its last-saved timestamp come back, and the history item reports `has_note: true`
+
+#### Scenario: Note removed with analysis
+- **WHEN** the analysis is deleted or purged
+- **THEN** its note no longer exists
+
 ### Requirement: Analysis groups
 Every persisted analysis SHALL belong to exactly one owner-scoped analysis group. Named groups (for example one job offer) live in an `analysis_groups` table keyed by `group_id` and `owner_user_id`; `reports.group_id` is nullable and a NULL value means the analysis belongs to the synthetic `unassigned` group, which always exists, is listed last, and cannot be created or removed. `GET /analysis-groups` returns the caller's groups oldest first, each with its analyses newest first, followed by `unassigned`. `POST /analysis-groups` creates a named group (whitespace-normalized, 1-120 characters, otherwise 400 `invalid_group_name`); names are unique per owner ignoring case, and a duplicate is rejected with 409 `analysis_group_name_taken`. `DELETE /analysis-groups/{id}` deletes the group together with every analysis in it using the same deletion semantics as `DELETE /analyses/{id}`; `DELETE /analysis-groups/unassigned` deletes only the caller's ungrouped analyses and keeps the `unassigned` group. `POST /analyze` accepts an optional `X-Analysis-Group-Id` header; a value of `unassigned` or an absent header stores the analysis ungrouped, and a group id the caller does not own is rejected with 404 `analysis_group_not_found`. `PUT /analyses/{id}/group` with `{"group_id": <id or "unassigned" or null>}` moves one owned analysis into another owned group (404 `analysis_not_found` or `analysis_group_not_found` otherwise). Existing databases gain the `group_id` column additively and their analyses appear under `unassigned`.
 

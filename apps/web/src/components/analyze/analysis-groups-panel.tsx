@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useConfirmation } from "@/components/ui/use-confirmation";
 import { AnalysisHistoryRow } from "@/components/analyze/recent-analyses";
-import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
+import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withNoteState, withoutAnalysis, withoutGroup } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
 import { analyzeHrefFromAnalyses } from "@/lib/analysis-route";
 
@@ -100,6 +100,10 @@ export function AnalysisGroupsPanel() {
     }
   }
 
+  function noteChanged(analysisId: string, hasNote: boolean) {
+    setGroups((current) => withNoteState(current, analysisId, hasNote));
+  }
+
   async function removeAnalysis(item: AnalysisHistoryItem) {
     try {
       const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
@@ -181,12 +185,12 @@ export function AnalysisGroupsPanel() {
     {loading && !groups.length ? <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("loadingGroups")}</div> : null}
     {searching && !matchCount && !loading && !error ? <p className="py-6 text-center text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
     {visibleGroups.map((group) => (
-      <GroupSection key={group.group_id} group={group} allGroups={groups} expanded={!collapsed.has(group.group_id) || searching} openingId={openingId} onToggle={() => toggle(group.group_id)} onOpen={open} onRemoveAnalysis={removeAnalysis} onRemoveGroup={removeGroup} onMoveAnalysis={moveAnalysis} />
+      <GroupSection key={group.group_id} group={group} allGroups={groups} expanded={!collapsed.has(group.group_id) || searching} openingId={openingId} onToggle={() => toggle(group.group_id)} onOpen={open} onRemoveAnalysis={removeAnalysis} onRemoveGroup={removeGroup} onMoveAnalysis={moveAnalysis} onNoteChange={noteChanged} />
     ))}
   </div>;
 }
 
-function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen, onRemoveAnalysis, onRemoveGroup, onMoveAnalysis }: {
+function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen, onRemoveAnalysis, onRemoveGroup, onMoveAnalysis, onNoteChange }: {
   group: AnalysisGroup;
   allGroups: AnalysisGroup[];
   expanded: boolean;
@@ -196,6 +200,7 @@ function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen,
   onRemoveAnalysis: (item: AnalysisHistoryItem) => Promise<void>;
   onRemoveGroup: (group: AnalysisGroup) => Promise<void>;
   onMoveAnalysis: (item: AnalysisHistoryItem, target: AnalysisGroup) => Promise<void>;
+  onNoteChange: (analysisId: string, hasNote: boolean) => void;
 }) {
   const { t } = useCopy();
   const [removing, setRemoving] = useState(false);
@@ -221,7 +226,7 @@ function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen,
     </div>
     {expanded ? <div id={contentId}>
       {group.analyses.length ? <ul className="divide-y">{group.analyses.map((item) => (
-        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} actions={<MoveToGroupMenu item={item} current={group} groups={allGroups} disabled={openingId !== null} onMove={onMoveAnalysis} />} />
+        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} onNoteChange={onNoteChange} actions={<MoveToGroupMenu item={item} current={group} groups={allGroups} disabled={openingId !== null} onMove={onMoveAnalysis} />} />
       ))}</ul> : <p className="px-5 py-4 text-sm text-muted-foreground">{t("noAnalysesInGroup")}</p>}
     </div> : null}
   </section>;

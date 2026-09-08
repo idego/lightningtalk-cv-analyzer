@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withoutAnalysis, withoutGroup } from "./analysis-history-search.ts";
+import { countAnalyses, searchAnalysisGroups, withMovedAnalysis, withNoteState, withoutAnalysis, withoutGroup } from "./analysis-history-search.ts";
 
 const item = (analysis_id, candidate_name, filename) => ({
   analysis_id, candidate_name, filename, status: "completed", strategy: "document-analysis", created_at: "2026-09-08T10:00:00Z",
@@ -45,4 +45,11 @@ test("moving an analysis changes its group and clears group_id for Unassigned", 
   assert.deepEqual(toUnassigned[0].analyses.map((a) => a.analysis_id), ["a2"]);
   assert.deepEqual(toUnassigned[2].analyses.map((a) => [a.analysis_id, a.group_id]), [["a3", undefined], ["a1", null]]);
   assert.deepEqual(withMovedAnalysis(groups, "missing", "g1"), groups);
+});
+
+test("note state updates only the matching analysis", () => {
+  const next = withNoteState(groups, "a3", true);
+  assert.equal(next[2].analyses[0].has_note, true);
+  assert.equal(next[0].analyses[0].has_note, undefined);
+  assert.equal(withNoteState(next, "a3", false)[2].analyses[0].has_note, false);
 });

@@ -202,3 +202,14 @@ The Upload CV files card SHALL offer a group selector that starts on a neutral `
 #### Scenario: Batch for a new offer
 - **WHEN** the recruiter selects `New group...`, types `Junior backend engineer`, and analyzes three files
 - **THEN** one group with that name is created and all three analyses are listed under it on the Analyses page
+
+### Requirement: Per-analysis notes
+Every analysis row in Recent analyses and on the Analyses page SHALL offer a note button that opens a modal editor for that analysis's private note, with a live character counter against the API limit, save, cancel, and (when a note exists) delete actions. The button SHALL be visibly marked when a note exists. Saving or deleting SHALL update the row marker without reloading the list.
+
+#### Scenario: Add a note
+- **WHEN** the recruiter opens the note dialog for an analysis without a note, types remarks within the limit, and saves
+- **THEN** the note is stored for that analysis only and the row's note button switches to the "has note" state
+
+#### Scenario: Over the limit
+- **WHEN** the typed note exceeds the character limit
+- **THEN** the counter turns into an error, the save action is disabled, and nothing is sent

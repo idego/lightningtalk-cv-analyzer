@@ -79,7 +79,7 @@ Each report carries an optional `group_id` pointing at an owner-scoped row in
 `analysis_groups` (one group per job offer); a NULL group means the synthetic
 `unassigned` group. `/analysis-groups` lists, creates, and deletes groups; deleting a
 group deletes its analyses with the normal per-analysis semantics, and the web
-`/analyses` page is the only place that offers deletion.
+`/analyses` page is the only place that offers deletion. Owners may attach one private note per analysis (`analysis_notes`, 2000 characters); notes are never logged and are removed with the analysis.
 GeoNames locality and postal indexes are prepared by a one-shot Compose service
 and mounted read-only by the API. Operational setup, recovery, retention,
 feedback rollout, and backups are documented in `docs/operations.md` and

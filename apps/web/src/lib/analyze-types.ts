@@ -254,6 +254,8 @@ export type AnalysisHistoryItem = {
   created_at: string;
   /** True when the original uploaded document is still stored and can be fetched from `/api/analyses/{analysis_id}/document`. */
   has_document?: boolean;
+  /** True when the owner has saved a private note for this analysis. */
+  has_note?: boolean;
   /** Owning analysis group, or null when the analysis belongs to the synthetic "Unassigned" group. */
   group_id?: string | null;
 };

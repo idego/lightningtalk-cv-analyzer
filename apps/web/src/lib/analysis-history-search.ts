@@ -57,3 +57,11 @@ export function withMovedAnalysis(groups: readonly AnalysisGroup[], analysisId: 
     return { ...group, analyses: [...analyses, updated].sort((a, b) => b.created_at.localeCompare(a.created_at)) };
   });
 }
+
+/** Update the has-note indicator of one analysis wherever it sits. */
+export function withNoteState(groups: readonly AnalysisGroup[], analysisId: string, hasNote: boolean): AnalysisGroup[] {
+  return groups.map((group) => ({
+    ...group,
+    analyses: group.analyses.map((item) => (item.analysis_id === analysisId ? { ...item, has_note: hasNote } : item)),
+  }));
+}

@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from "lucide
 import type { AnalysisHistoryItem, AnalysisReport } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { AnalysisNoteButton } from "@/components/analyze/analysis-note-dialog";
 import { searchAnalysisHistory } from "@/lib/analysis-history-search";
 import { useCopy } from "@/lib/app-settings";
 
@@ -51,6 +52,10 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
     return () => window.clearTimeout(timer);
   }, [refresh, refreshKey]);
 
+  function noteChanged(analysisId: string, hasNote: boolean) {
+    setItems((current) => current.map((item) => (item.analysis_id === analysisId ? { ...item, has_note: hasNote } : item)));
+  }
+
   async function open(item: AnalysisHistoryItem) {
     if (opening.current) return;
     opening.current = true;
@@ -82,7 +87,7 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
     {searching && !loading && !error ? <p role="status" className="px-5 pt-3 text-xs text-muted-foreground">{t("analysisMatchCount", { count: matches.length, total: items.length })}</p> : null}
     {searching && !matches.length && !loading && !error ? <p className="px-5 py-6 text-sm text-muted-foreground">{t("noAnalysisMatches")}</p> : null}
     {visibleItems.length ? <ul className={`divide-y ${expanded || searching ? "max-h-[32rem] overflow-y-auto" : ""}`}>{visibleItems.map((item) => (
-      <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} />
+      <AnalysisHistoryRow key={item.analysis_id} item={item} isNew={highlightIds?.has(item.analysis_id) ?? false} openingId={openingId} onOpen={open} onNoteChange={noteChanged} />
     ))}</ul> : null}
     {!searching && items.length > 5 ? <div className="flex justify-center border-t px-5 py-3"><Button variant="ghost" size="sm" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
       {expanded ? t("showFewerAnalyses") : t("showMoreAnalyses", { count: items.length - 5 })}
@@ -100,6 +105,7 @@ export function AnalysisHistoryRow({
   onOpen,
   onRemove,
   actions,
+  onNoteChange,
 }: {
   item: AnalysisHistoryItem;
   isNew?: boolean;
@@ -107,6 +113,7 @@ export function AnalysisHistoryRow({
   onOpen: (item: AnalysisHistoryItem) => Promise<void> | void;
   onRemove?: (item: AnalysisHistoryItem) => Promise<void>;
   actions?: ReactNode;
+  onNoteChange?: (analysisId: string, hasNote: boolean) => void;
 }) {
   const { settings, t } = useCopy();
   const [removing, setRemoving] = useState(false);
@@ -124,6 +131,7 @@ export function AnalysisHistoryRow({
       <span className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"><span className="flex min-w-0 items-center gap-2"><span className="truncate text-sm font-medium">{item.candidate_name ?? item.filename}</span>{isNew ? <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">{t("newAnalysis")}</span> : null}{openingId === item.analysis_id ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden /> : null}</span><time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_at))}</time></span>
       <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">{item.candidate_name ? <span className="truncate">{item.filename}</span> : null}{item.status === "partial" ? <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t("partialAnalysis")}</span> : null}</span>
     </button>
+    <AnalysisNoteButton item={item} disabled={openingId !== null || removing} onChange={onNoteChange} />
     {actions}
     {onRemove ? <DeleteButton label={t("deleteAnalysis")} disabled={openingId !== null || removing} onDelete={requestRemove} /> : null}
   </li>;

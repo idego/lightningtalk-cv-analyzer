@@ -167,6 +167,13 @@ class PersistenceStore:
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
+                CREATE TABLE IF NOT EXISTS analysis_notes (
+                    analysis_id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
+                );
                 CREATE TABLE IF NOT EXISTS analysis_share_tokens (
                     analysis_id TEXT NOT NULL,
                     token_hash TEXT PRIMARY KEY,
@@ -629,7 +636,11 @@ class PersistenceStore:
                           EXISTS (
                             SELECT 1 FROM source_documents
                             WHERE source_documents.analysis_id = reports.analysis_id
-                          ) AS has_document
+                          ) AS has_document,
+                          EXISTS (
+                            SELECT 1 FROM analysis_notes
+                            WHERE analysis_notes.analysis_id = reports.analysis_id
+                          ) AS has_note
                    FROM reports
                    JOIN audit_log USING (analysis_id)
                    WHERE reports.owner_user_id = ?
@@ -648,10 +659,59 @@ class PersistenceStore:
                     "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
                     "has_document": bool(row["has_document"]),
+                    "has_note": bool(row["has_note"]),
                     "group_id": row["group_id"],
                 }
             )
         return history
+
+    def get_analysis_note(self, analysis_id: str, owner_user_id: str | None) -> dict[str, Any] | None:
+        """Return the owner's note for an analysis, or None when there is none."""
+        if not owner_user_id:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT content, updated_at FROM analysis_notes
+                   WHERE analysis_id = ? AND owner_user_id = ?""",
+                (analysis_id, owner_user_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"content": row["content"], "updated_at": row["updated_at"]}
+
+    def set_analysis_note(self, analysis_id: str, owner_user_id: str, content: str) -> dict[str, Any]:
+        """Create or replace the owner's note. Requires an owned, persisted report."""
+        now = _utc_now()
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute(
+                    "SELECT 1 FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
+                    (analysis_id, owner_user_id),
+                ).fetchone() is None:
+                    raise AnalysisNotFoundPersistenceError("analysis not found")
+                conn.execute(
+                    """INSERT INTO analysis_notes (analysis_id, owner_user_id, content, updated_at)
+                       VALUES (?, ?, ?, ?)
+                       ON CONFLICT(analysis_id) DO UPDATE SET
+                         content = excluded.content, updated_at = excluded.updated_at""",
+                    (analysis_id, owner_user_id, content, now),
+                )
+        except AnalysisNotFoundPersistenceError:
+            raise
+        except (OSError, sqlite3.Error) as exc:
+            raise PersistenceError("analysis note persistence failed") from exc
+        return {"content": content, "updated_at": now}
+
+    def delete_analysis_note(self, analysis_id: str, owner_user_id: str | None) -> bool:
+        if not owner_user_id:
+            return False
+        with self._connect() as conn:
+            deleted = conn.execute(
+                "DELETE FROM analysis_notes WHERE analysis_id = ? AND owner_user_id = ?",
+                (analysis_id, owner_user_id),
+            ).rowcount
+        return deleted > 0
 
     def create_analysis_group(self, owner_user_id: str, name: str) -> dict[str, Any]:
         """Create a named group. Names are unique per owner, ignoring case."""
@@ -871,6 +931,7 @@ class PersistenceStore:
                 "education_research",
                 "linkedin_discovery",
                 "analysis_share_tokens",
+                "analysis_notes",
                 "source_documents",
                 "audit_log",
             ):
@@ -1112,6 +1173,7 @@ class PersistenceStore:
                     "education_research",
                     "linkedin_discovery",
                     "analysis_share_tokens",
+                    "analysis_notes",
                     "source_documents",
                     "audit_log",
                     "diagnostic_events",
