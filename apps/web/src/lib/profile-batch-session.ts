@@ -49,6 +49,7 @@ export class ProfileBatchSessionStore {
   private state: ProfileBatchSession = { queue: [], batch: null, sessionIds: new Set(), failures: [] };
   private listeners = new Set<Listener>();
   private generation = 0;
+  private inFlightRequestId: string | null = null;
 
   getSnapshot = (): ProfileBatchSession => this.state;
 
@@ -72,6 +73,7 @@ export class ProfileBatchSessionStore {
   /** Begin a batch; the returned token identifies it so a cancelled batch cannot record into a later one. */
   start(files: readonly File[], startedAt = Date.now(), makeId: () => string = () => globalThis.crypto.randomUUID()): number {
     this.generation += 1;
+    this.inFlightRequestId = null;
     const items = files.map((file): ProfileBatchItem => ({
       id: makeId(), file, status: "queued", profile_id: null, candidate_name: null, error: null,
     }));
@@ -84,7 +86,9 @@ export class ProfileBatchSessionStore {
     return token === this.generation && this.state.batch?.phase === "running";
   }
 
-  beginItem(token: number, itemId: string) {
+  /** Mark the item whose request is about to be sent, so a cancel can name it to the API. */
+  beginItem(token: number, itemId: string, requestId: string | null = null) {
+    if (this.isCurrent(token)) this.inFlightRequestId = requestId;
     this.patchItem(token, itemId, { status: "processing", error: null });
   }
 
@@ -102,13 +106,20 @@ export class ProfileBatchSessionStore {
     this.patchItem(token, itemId, { status: "failed", error });
   }
 
-  /** Stop the running batch; unfinished files return to the queue in upload order. */
-  cancel() {
+  /**
+   * Stop the running batch; unfinished files return to the queue in upload
+   * order. Returns the in-flight request id so the caller can ask the API to
+   * discard that extraction.
+   */
+  cancel(): { requestId: string | null } {
     const { batch, queue } = this.state;
-    if (!batch || batch.phase !== "running") return;
+    if (!batch || batch.phase !== "running") return { requestId: null };
+    const requestId = this.inFlightRequestId;
     this.generation += 1;
+    this.inFlightRequestId = null;
     const remaining = batch.items.filter((item) => item.status !== "completed").map((item) => item.file);
     this.update({ batch: null, queue: [...remaining, ...queue] });
+    return { requestId };
   }
 
   complete(token: number) {

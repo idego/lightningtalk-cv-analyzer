@@ -77,6 +77,7 @@ import {
 import { ProfileExportPreview } from "@/components/profile-builder/profile-export-preview";
 import {
   ProfileBuilderApiError,
+  cancelExtraction as apiCancelExtraction,
   createProfile as apiCreateProfile,
   deleteProfile as apiDeleteProfile,
   deleteTemplate as apiDeleteTemplate,
@@ -91,6 +92,8 @@ import {
   transformProfile as apiTransformProfile,
   updateProfile as apiUpdateProfile,
 } from "@/components/profile-builder/profile-builder-client";
+
+class ExtractionCancelled extends Error {}
 
 const ESTIMATED_SECONDS_PER_CV = 40;
 const COMPLETE_CARD_MS = 1200;
@@ -667,15 +670,16 @@ export function ProfileBuilderWorkspace() {
     });
   }
 
-  async function requestProfileExtraction(file: File): Promise<{ filename: string; profile: CandidateProfile }> {
+  async function requestProfileExtraction(file: File, requestId?: string): Promise<{ filename: string; profile: CandidateProfile }> {
     if (!aiAvailable) throw new Error("CV conversion is unavailable. Check System health in Settings and try again.");
     if (!/\.(pdf|docx)$/i.test(file.name)) throw new Error("Choose PDF or DOCX files only.");
     if (isProfileBatchFileTooLarge(file)) throw new Error("CV files must be 10 MB or smaller.");
     try {
-      const payload = await apiExtractProfile(file, aiAvailable);
+      const payload = await apiExtractProfile(file, aiAvailable, requestId);
       return { filename: payload.filename ?? file.name, profile: payload.profile };
     } catch (cause) {
       if (cause instanceof ProfileBuilderApiError) {
+        if (cause.detail === "profile_extraction_cancelled") throw new ExtractionCancelled("Conversion cancelled.");
         if (cause.detail === "profile_builder_ai_disabled_for_request") throw new Error("CV conversion is unavailable. Check System health in Settings and try again.");
         if (cause.detail === "profile_builder_ai_disabled") throw new Error("CV conversion is unavailable. Contact your administrator.");
         if (cause.detail === "profile_builder_file_size_limit_exceeded") throw new Error("CV files must be 10 MB or smaller.");
@@ -718,9 +722,10 @@ export function ProfileBuilderWorkspace() {
   }
 
   function cancelConversion() {
-    batchStore.cancel();
+    const { requestId } = batchStore.cancel();
     setElapsedSeconds(0);
     setConversionNotice("Conversion cancelled. Unfinished files are back in the queue.");
+    if (requestId) void apiCancelExtraction(requestId);
   }
 
   function openConvertedProfile(convertedProfileId: string) {
@@ -739,13 +744,17 @@ export function ProfileBuilderWorkspace() {
     const items = batchStore.getSnapshot().batch?.items ?? [];
     for (const item of items) {
       if (!batchStore.isCurrent(token)) return;
-      batchStore.beginItem(token, item.id);
+      const requestId = globalThis.crypto.randomUUID();
+      batchStore.beginItem(token, item.id, requestId);
       try {
-        const extracted = await requestProfileExtraction(item.file);
+        const extracted = await requestProfileExtraction(item.file, requestId);
+        // Cancelled meanwhile: the API discarded the extraction, so never persist it.
+        if (!batchStore.isCurrent(token)) return;
         const persisted = await persistExtractedProfile(extracted.filename, extracted.profile);
         const candidateName = [persisted.snapshot.profile.personal.first_name, persisted.snapshot.profile.personal.last_name].filter(Boolean).join(" ") || null;
         batchStore.completeItem(token, item.id, persisted.profileId, candidateName);
       } catch (cause) {
+        if (cause instanceof ExtractionCancelled) return;
         batchStore.failItem(token, item.id, cause instanceof Error ? cause.message : "Conversion failed.");
       }
     }

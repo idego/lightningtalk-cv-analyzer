@@ -145,6 +145,10 @@ Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose que
 - **WHEN** the recruiter navigates elsewhere inside the app while a batch runs
 - **THEN** navigation is allowed, the batch continues, and its progress is shown again on return
 
+#### Scenario: Recruiter cancels a running batch
+- **WHEN** the recruiter presses Cancel while a file is converting
+- **THEN** the card closes at once, every unfinished file returns to the queue in upload order, and the API is asked to discard the in-flight extraction by its client request id; the API honors the cancel at the latest before returning the extracted profile, answers 409 `profile_extraction_cancelled`, and no profile is saved for that file
+
 #### Scenario: Batch finishes
 - **WHEN** every file has completed or failed
 - **THEN** the progress card briefly confirms completion and disappears, successful profiles appear in Recent profiles marked New, and failed files return to the queue with their errors

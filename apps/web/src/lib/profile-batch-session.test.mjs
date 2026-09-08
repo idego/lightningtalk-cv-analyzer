@@ -62,8 +62,9 @@ test("cancel returns unfinished files to the queue and ignores stale records", (
   const token = startBatch(store, ["a.pdf", "b.pdf", "c.pdf"]);
   assert.deepEqual(store.getSnapshot().queue, []);
   store.completeItem(token, "item-1", "profile-a", null);
-  store.beginItem(token, "item-2");
-  store.cancel();
+  store.beginItem(token, "item-2", "req-2");
+  assert.deepEqual(store.cancel(), { requestId: "req-2" });
+  assert.deepEqual(store.cancel(), { requestId: null });
   const afterCancel = store.getSnapshot();
   assert.equal(afterCancel.batch, null);
   assert.deepEqual(afterCancel.queue.map((queued) => queued.name), ["b.pdf", "c.pdf"]);
