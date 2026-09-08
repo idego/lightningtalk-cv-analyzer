@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Link from "next/link";
 import { ChevronDown, ChevronUp, History, LoaderCircle, Search, X } from "lucide-react";
 import type { RecentProfileItem } from "@/components/profile-builder/profile-builder-model";
 import { DeleteButton } from "@/components/ui/delete-button";
@@ -48,13 +47,10 @@ export function RecentProfiles({ items, loading, error, openingId, highlightIds,
   return <section className="rounded-xl border bg-card" aria-labelledby="recent-profiles-heading">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
       <h2 id="recent-profiles-heading" className="flex items-center gap-2 font-medium"><History className="size-4" aria-hidden />Recent profiles</h2>
-      <div className="flex w-full items-center gap-2 sm:w-auto">
-        <div className="relative min-w-0 flex-1 sm:w-64">
-          <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" aria-hidden />
-          <input ref={searchRef} type="search" value={query} aria-label="Search profiles" placeholder="Search profiles" autoComplete="off" maxLength={200} onChange={(event) => changeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
-          {query ? <button type="button" aria-label="Clear search" className="absolute right-0 top-0 flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={clearSearch}><X className="size-4" aria-hidden /></button> : null}
-        </div>
-        <Button variant="outline" className="shrink-0 border-foreground/25" size="sm" nativeButton={false} render={<Link href="/profiles" />}>View all</Button>
+      <div className="relative w-full sm:w-72">
+        <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" aria-hidden />
+        <input ref={searchRef} type="search" value={query} aria-label="Search profiles" placeholder="Search profiles" autoComplete="off" maxLength={200} onChange={(event) => changeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
+        {query ? <button type="button" aria-label="Clear search" className="absolute right-0 top-0 flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={clearSearch}><X className="size-4" aria-hidden /></button> : null}
       </div>
     </div>
     {loading && !items.length ? <div role="status" className="flex items-center justify-center gap-2 px-5 py-6 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading recent profiles…</div> : null}
