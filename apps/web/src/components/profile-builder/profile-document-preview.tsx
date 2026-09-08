@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Maximize, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   type CandidateProfile,
@@ -161,6 +161,9 @@ function groupTemplateSections(sections: ProfileTemplateSection[]) {
   return groups;
 }
 
+/** Zoom levels relative to the fitted page; 1 = fit the frame. */
+const PREVIEW_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+
 export function ProfileDocumentPreview({
   profile,
   template,
@@ -169,6 +172,7 @@ export function ProfileDocumentPreview({
   onLogoChange,
   onLogoSelect,
   fillHeight = false,
+  zoomable = false,
   sectionsEditable = false,
   onSectionsChange,
   onSectionSelect,
@@ -180,12 +184,24 @@ export function ProfileDocumentPreview({
   onLogoChange?: (logo: ProfileTemplateLogo) => void;
   onLogoSelect?: () => void;
   fillHeight?: boolean;
+  /** Show zoom in/out controls; the page then scrolls inside its frame when it outgrows it. */
+  zoomable?: boolean;
   sectionsEditable?: boolean;
   onSectionsChange?: (sections: ProfileTemplateSection[]) => void;
   onSectionSelect?: (sectionId: string) => void;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
-  const [pageScale, setPageScale] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const pageScale = fitScale * zoom;
+  const zoomedIn = zoomable && zoom > 1;
+  function stepZoom(direction: 1 | -1) {
+    setZoom((current) => {
+      const index = PREVIEW_ZOOM_STEPS.findIndex((step) => step >= current - 0.001);
+      const next = PREVIEW_ZOOM_STEPS[Math.min(PREVIEW_ZOOM_STEPS.length - 1, Math.max(0, (index < 0 ? PREVIEW_ZOOM_STEPS.length - 1 : index) + direction))];
+      return next ?? current;
+    });
+  }
   const pageWidth = 210 / 25.4 * 96;
   const pageHeight = 297 / 25.4 * 96;
   const [previewPage, setPreviewPage] = useState(1);
@@ -209,7 +225,7 @@ export function ProfileDocumentPreview({
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       if (width <= 0 || (fillHeight && height <= 0)) return;
-      setPageScale(Math.min(1, width / pageWidth, fillHeight ? height / pageHeight : 1));
+      setFitScale(Math.min(1, width / pageWidth, fillHeight ? height / pageHeight : 1));
     });
     observer.observe(frame);
     return () => observer.disconnect();
@@ -356,14 +372,20 @@ export function ProfileDocumentPreview({
     <div className={fillHeight ? "flex h-full min-h-0 min-w-0 flex-col" : "min-w-0"}>
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-end gap-2">
         <span className="sr-only">{label} · {template.name}</span>
+        {zoomable ? <div className="flex items-center gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Preview zoom">
+          <Button variant="ghost" size="icon-sm" aria-label="Zoom out" disabled={zoom <= PREVIEW_ZOOM_STEPS[0]} onClick={() => stepZoom(-1)}><ZoomOut /></Button>
+          <span className="min-w-12 text-center text-xs font-medium tabular-nums">{Math.round(zoom * 100)}%</span>
+          <Button variant="ghost" size="icon-sm" aria-label="Zoom in" disabled={zoom >= PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1]} onClick={() => stepZoom(1)}><ZoomIn /></Button>
+          <Button variant="ghost" size="icon-sm" aria-label="Fit to frame" disabled={zoom === 1} onClick={() => setZoom(1)}><Maximize /></Button>
+        </div> : null}
         <div className="flex items-center gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Preview page navigation">
           <Button variant="ghost" size="icon-sm" aria-label="Previous preview page" disabled={previewPage <= 1} onClick={() => setPreviewPage((current) => Math.max(1, current - 1))}><ChevronLeft /></Button>
           <span className="min-w-16 text-center text-xs font-medium tabular-nums">{previewPage} / {previewPageCount}</span>
           <Button variant="ghost" size="icon-sm" aria-label="Next preview page" disabled={previewPage >= previewPageCount} onClick={() => setPreviewPage((current) => Math.min(previewPageCount, current + 1))}><ChevronRight /></Button>
         </div>
       </div>
-      <div ref={frameRef} className={fillHeight ? "flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden" : "flex w-full justify-center overflow-hidden"}>
-      <div className="relative shrink-0" style={{ width: pageWidth * pageScale, height: pageHeight * pageScale }}>
+      <div ref={frameRef} className={`${fillHeight ? "flex min-h-0 min-w-0 flex-1 items-center justify-center" : "flex w-full justify-center"} ${zoomedIn ? "overflow-auto overscroll-contain" : "overflow-hidden"}`}>
+      <div className={`relative shrink-0 ${zoomedIn ? "m-auto" : ""}`} style={{ width: pageWidth * pageScale, height: pageHeight * pageScale }}>
       <div ref={pageRef} className="absolute left-0 top-0 origin-top-left overflow-hidden bg-white text-[#081932] shadow-lg ring-1 ring-black/10" style={{ width: pageWidth, height: pageHeight, transform: `scale(${pageScale})` }}>
         <div ref={previewViewportRef} className="absolute inset-x-[9.07%] bottom-[5.56%] top-[5.56%] overflow-hidden">
           <div
