@@ -182,7 +182,7 @@ Recent analyses SHALL provide a localized, keyboard-accessible candidate-name an
 - **THEN** the query remains and the filtered results are restored
 
 ### Requirement: Analyses page groups saved analyses
-The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. The page SHALL allow creating a named group, moving one analysis to any other group (including `Unassigned`) from a per-row menu that marks the current group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}`.
+The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. A `Create group` action in the top-right of the page header SHALL open a modal dialog with a group-name field; the page SHALL allow creating a named group there, moving one analysis to any other group (including `Unassigned`) from a per-row menu that marks the current group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}`.
 
 #### Scenario: Collapse a group
 - **WHEN** the recruiter collapses the `Junior backend engineer` module
@@ -197,7 +197,7 @@ The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-s
 - **THEN** only the `Unassigned` module is shown, expanded, with just the matching rows
 
 ### Requirement: Upload batch is assigned to a group
-The Upload CV files card SHALL offer a group selector defaulting to `Unassigned`, listing the recruiter's named groups, and offering a `New group...` option with a name field. Every file in the submitted batch SHALL be analyzed with the selected group id so the whole batch lands in that group; choosing `New group...` SHALL create the group before the first file is sent and select it for subsequent batches.
+The Upload CV files card SHALL offer a group selector that starts on a neutral `Select a group…` placeholder (no group preselected and no `Unassigned` option), lists the recruiter's named groups, and offers a `New group...` option with a name field. Every file in the submitted batch SHALL be analyzed with the selected group id so the whole batch lands in that group; when nothing is selected the batch is stored unassigned and the hint says so; choosing `New group...` SHALL create the group before the first file is sent and select it for subsequent batches.
 
 #### Scenario: Batch for a new offer
 - **WHEN** the recruiter selects `New group...`, types `Junior backend engineer`, and analyzes three files

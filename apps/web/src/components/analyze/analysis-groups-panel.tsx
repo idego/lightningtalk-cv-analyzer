@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronDown, ChevronRight, FolderInput, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
 import type { AnalysisGroup, AnalysisHistoryItem } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useConfirmation } from "@/components/ui/use-confirmation";
 import { AnalysisHistoryRow } from "@/components/analyze/recent-analyses";
@@ -25,6 +27,8 @@ export function AnalysisGroupsPanel() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [newGroupName, setNewGroupName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const searching = Boolean(query.trim());
@@ -67,11 +71,13 @@ export function AnalysisGroupsPanel() {
     router.push(`/analyze?analysis=${encodeURIComponent(item.analysis_id)}`);
   }
 
+  function openCreate() { setCreateError(null); setNewGroupName(""); setCreateOpen(true); }
+
   async function createGroup() {
     const name = newGroupName.trim();
     if (!name || creating) return;
     setCreating(true);
-    setError(null);
+    setCreateError(null);
     try {
       const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
       if (!response.ok) throw new Error("group_create_failed");
@@ -82,8 +88,9 @@ export function AnalysisGroupsPanel() {
         return [...named, { ...created, is_unassigned: false, analyses: [] }, ...rest];
       });
       setNewGroupName("");
+      setCreateOpen(false);
     } catch {
-      setError(t("groupCouldNotCreate"));
+      setCreateError(t("groupCouldNotCreate"));
     } finally {
       setCreating(false);
     }
@@ -127,10 +134,33 @@ export function AnalysisGroupsPanel() {
 
   return <div className="mx-auto max-w-5xl space-y-6">
     {confirmationDialog}
+    <Dialog open={createOpen} onOpenChange={(open) => { if (!creating) setCreateOpen(open); }}>
+      <DialogContent className="sm:max-w-md">
+        <form className="contents" onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
+          <DialogHeader>
+            <DialogTitle>{t("createGroup")}</DialogTitle>
+            <DialogDescription>{t("createGroupDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="new-group-name">{t("groupName")}</Label>
+            <Input id="new-group-name" autoFocus value={newGroupName} maxLength={120} placeholder={t("newGroupName")} onChange={(event) => setNewGroupName(event.target.value)} disabled={creating} />
+            {createError ? <p role="alert" className="text-sm text-destructive">{createError}</p> : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>{t("cancel")}</Button>
+            <Button type="submit" disabled={creating || !newGroupName.trim()}>
+              {creating ? <LoaderCircle className="size-4 animate-spin" data-icon="inline-start" /> : null}
+              {creating ? t("creatingGroup") : t("createGroup")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><FolderKanban className="size-5" aria-hidden />{t("analysesTitle")}</CardTitle>
         <CardDescription>{t("analysesDescription")}</CardDescription>
+        <CardAction><Button onClick={openCreate}><FolderPlus className="size-4" data-icon="inline-start" />{t("createGroup")}</Button></CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="relative">
@@ -138,13 +168,6 @@ export function AnalysisGroupsPanel() {
           <input ref={searchRef} type="search" value={query} aria-label={t("searchAnalyses")} placeholder={t("searchAnalyses")} autoComplete="off" maxLength={200} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-9 w-full rounded-md border bg-background pl-9 pr-9 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
           {query ? <button type="button" aria-label={t("clearSearch")} className="absolute right-0 top-0 flex size-9 items-center justify-center rounded-md text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={clearSearch}><X className="size-4" aria-hidden /></button> : null}
         </div>
-        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
-          <Input value={newGroupName} maxLength={120} placeholder={t("newGroupName")} aria-label={t("newGroupName")} onChange={(event) => setNewGroupName(event.target.value)} disabled={creating} />
-          <Button type="submit" variant="outline" disabled={creating || !newGroupName.trim()}>
-            {creating ? <LoaderCircle className="size-4 animate-spin" data-icon="inline-start" /> : <FolderPlus className="size-4" data-icon="inline-start" />}
-            {creating ? t("creatingGroup") : t("createGroup")}
-          </Button>
-        </form>
         {searching && !loading && !error ? <p role="status" className="text-xs text-muted-foreground">{t("analysisMatchCount", { count: matchCount, total })}</p> : null}
         {error ? <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 px-3 py-2 text-sm text-destructive"><span>{error}</span><Button variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
       </CardContent>

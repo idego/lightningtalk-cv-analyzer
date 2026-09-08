@@ -60,7 +60,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
   const [groups, setGroups] = useState<AnalysisGroup[]>([]);
-  const [groupId, setGroupId] = useState<string>(UNASSIGNED_GROUP_ID);
+  const [groupId, setGroupId] = useState<string>("");
   const [newGroupName, setNewGroupName] = useState("");
   const [opened, setOpened] = useState<AnalyzedFile | null>(null);
   const [openedReadOnly, setOpenedReadOnly] = useState(false);
@@ -179,7 +179,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
 
   /** Resolve the batch group: an existing group id, or a freshly created one when "New group..." is selected. */
   async function resolveBatchGroup(): Promise<string | null> {
-    if (groupId !== NEW_GROUP_OPTION) return groupId;
+    if (groupId !== NEW_GROUP_OPTION) return groupId || UNASSIGNED_GROUP_ID;
     const name = newGroupName.trim();
     if (!name) { setError(t("newGroupName")); return null; }
     const response = await fetch("/api/analysis-groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
@@ -266,7 +266,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
           <div className="grid gap-1.5">
             <Label htmlFor="analysis-group">{t("analysisGroup")}</Label>
             <select id="analysis-group" value={groupId} onChange={(event) => setGroupId(event.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
-              <option value={UNASSIGNED_GROUP_ID}>{t("unassignedGroup")}</option>
+              <option value="">{t("selectGroup")}</option>
               {groups.map((group) => <option key={group.group_id} value={group.group_id}>{group.name}</option>)}
               <option value={NEW_GROUP_OPTION}>{t("newGroupOption")}</option>
             </select>
