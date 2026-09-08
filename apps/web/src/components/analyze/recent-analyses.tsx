@@ -70,7 +70,7 @@ export function RecentAnalyses({ onOpen, query, onQueryChange, refreshKey = 0, h
 
   return <section className="rounded-xl border bg-card" aria-labelledby="recent-analyses-heading">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
-      <h2 id="recent-analyses-heading" className="flex items-center gap-2 font-medium"><History className="size-4" aria-hidden />{t("recentAnalyses")}</h2>
+      <div className="flex min-w-0 flex-col"><h2 id="recent-analyses-heading" className="flex items-center gap-2 font-medium"><History className="size-4" aria-hidden />{t("recentAnalyses")}</h2><p className="text-xs text-muted-foreground">{t("historyOwnerOnly")}</p></div>
       <div className="relative w-full sm:w-72">
         <Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" aria-hidden />
         <input ref={searchRef} type="search" value={query} aria-label={t("searchAnalyses")} placeholder={t("searchAnalyses")} autoComplete="off" maxLength={200} onChange={(event) => changeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); clearSearch(); } }} className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:appearance-none" />
