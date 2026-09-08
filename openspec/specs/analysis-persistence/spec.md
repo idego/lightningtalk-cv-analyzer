@@ -70,7 +70,7 @@ After a report is persisted successfully, the API SHALL store the original uploa
 - **THEN** those analyses and their stored documents disappear from the next list call
 
 ### Requirement: Recent analyses and document preview
-The analyze screen SHALL list the caller's recent analyses and allow reopening one. When `has_document` is true, the web app SHALL fetch the stored copy through `/api/analyses/{id}/document` (a proxy that authenticates the web user and forwards the server-derived owner id) and preview the PDF or DOCX exactly as it does for a fresh upload, without re-uploading. Deleting from the UI SHALL call the corresponding API delete through the web proxy; the Recent analyses module itself offers no delete control, deletion happens on the Analyses page.
+The analyze screen SHALL list the caller's recent analyses and allow reopening one. When `has_document` is true, the web app SHALL fetch the stored copy through `/api/analyses/{id}/document` (a proxy that authenticates the web user and forwards the server-derived owner id) and preview the PDF or DOCX exactly as it does for a fresh upload, without re-uploading. Deleting from the UI SHALL call the corresponding API delete through the web proxy; the Recent analyses module itself offers no delete control, deletion happens from the row actions menu on the Analyses page.
 
 #### Scenario: Reopen recent analysis
 - **WHEN** the user selects a recent analysis

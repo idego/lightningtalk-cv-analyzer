@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, ChevronRight, FolderInput, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, EllipsisVertical, FolderInput, FolderKanban, FolderPlus, LoaderCircle, Search, Trash2, X } from "lucide-react";
 import type { AnalysisGroup, AnalysisHistoryItem } from "@/lib/analyze-types";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -105,6 +105,8 @@ export function AnalysisGroupsPanel() {
   }
 
   async function removeAnalysis(item: AnalysisHistoryItem) {
+    const name = item.candidate_name ?? item.filename;
+    if (!(await confirm(t("deleteAnalysisDescription", { name }), { title: t("deleteAnalysisTitle"), action: t("deleteAnalysis") }))) return;
     try {
       const response = await fetch(`/api/analyses/${encodeURIComponent(item.analysis_id)}`, { method: "DELETE" });
       if (response.ok) setGroups((current) => withoutAnalysis(current, item.analysis_id));
@@ -226,39 +228,45 @@ function GroupSection({ group, allGroups, expanded, openingId, onToggle, onOpen,
     </div>
     {expanded ? <div id={contentId}>
       {group.analyses.length ? <ul className="divide-y">{group.analyses.map((item) => (
-        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onRemove={onRemoveAnalysis} onNoteChange={onNoteChange} actions={<MoveToGroupMenu item={item} current={group} groups={allGroups} disabled={openingId !== null} onMove={onMoveAnalysis} />} />
+        <AnalysisHistoryRow key={item.analysis_id} item={item} openingId={openingId} onOpen={onOpen} onNoteChange={onNoteChange} actions={<RowActionsMenu item={item} current={group} groups={allGroups} disabled={openingId !== null} onMove={onMoveAnalysis} onRemove={onRemoveAnalysis} />} />
       ))}</ul> : <p className="px-5 py-4 text-sm text-muted-foreground">{t("noAnalysesInGroup")}</p>}
     </div> : null}
   </section>;
 }
 
-/** Per-row "Move to group" menu listing every group, with the current one checked and disabled. */
-function MoveToGroupMenu({ item, current, groups, disabled, onMove }: {
+/** Per-row ⋮ menu: move to any other group, or delete (with a confirmation dialog). */
+function RowActionsMenu({ item, current, groups, disabled, onMove, onRemove }: {
   item: AnalysisHistoryItem;
   current: AnalysisGroup;
   groups: AnalysisGroup[];
   disabled: boolean;
   onMove: (item: AnalysisHistoryItem, target: AnalysisGroup) => Promise<void>;
+  onRemove: (item: AnalysisHistoryItem) => Promise<void>;
 }) {
   const { t } = useCopy();
-  const [moving, setMoving] = useState(false);
-  async function move(target: AnalysisGroup) {
-    if (target.group_id === current.group_id) return;
-    setMoving(true);
-    try { await onMove(item, target); } finally { setMoving(false); }
+  const [busy, setBusy] = useState(false);
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    try { await action(); } finally { setBusy(false); }
   }
   return <DropdownMenu>
-    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={disabled || moving} aria-label={moving ? t("movingToGroup") : t("moveToGroup")} />}>
-      {moving ? <LoaderCircle className="size-4 animate-spin" /> : <FolderInput className="size-4" />}
+    <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-8 shrink-0" disabled={disabled || busy} aria-label={t("analysisActions")} />}>
+      {busy ? <LoaderCircle className="size-4 animate-spin" /> : <EllipsisVertical className="size-4" />}
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end">
+    <DropdownMenuContent align="end" className="min-w-56">
+      <p className="px-1.5 pb-1 pt-0.5 text-xs text-muted-foreground">{t("moveToGroup")}</p>
       {groups.map((group) => {
         const isCurrent = group.group_id === current.group_id;
-        return <DropdownMenuItem key={group.group_id} disabled={isCurrent} onClick={() => void move(group)}>
-          <span className="flex size-4 items-center justify-center">{isCurrent ? <Check className="size-4" aria-hidden /> : null}</span>
+        return <DropdownMenuItem key={group.group_id} disabled={isCurrent} onClick={() => void run(() => onMove(item, group))}>
+          <span className="flex size-4 items-center justify-center">{isCurrent ? <Check className="size-4" aria-hidden /> : <FolderInput className="size-4 text-muted-foreground" aria-hidden />}</span>
           <span className="truncate">{group.is_unassigned ? t("unassignedGroup") : group.name}</span>
         </DropdownMenuItem>;
       })}
+      <div role="separator" className="my-1 h-px bg-border" />
+      <DropdownMenuItem variant="destructive" onClick={() => void run(() => onRemove(item))}>
+        <Trash2 className="size-4" aria-hidden />
+        <span>{t("deleteAnalysisEllipsis")}</span>
+      </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>;
 }

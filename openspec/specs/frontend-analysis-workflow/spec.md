@@ -72,12 +72,12 @@ An owner SHALL be able to copy a share link for an opened persisted analysis. Th
 - **WHEN** an authenticated colleague opens a valid shared analysis URL
 - **THEN** the persisted report and stored document load read-only even though the colleague is not the analysis owner
 
-### Requirement: Destructive analysis actions use scope-appropriate confirmation
-Deleting one analysis from the Analyses page SHALL use an inline click-again confirmation on the same delete control and SHALL NOT open a modal or native browser confirmation. The Recent analyses module on the analyze page SHALL NOT offer a delete control. Deleting a whole group from the Analyses page and deleting all analyses from Settings SHALL instead open a destructive confirmation dialog explaining that the affected saved analyses and stored CVs are permanently removed, with separate cancel and confirm actions.
+### Requirement: Destructive analysis actions use a confirmation dialog
+Each analysis row on the Analyses page SHALL expose a note button and a vertical-dots actions menu; the menu SHALL list every other group as a "move to" target and a destructive `Delete analysis…` entry. The Recent analyses module on the analyze page SHALL NOT offer a delete control. Deleting one analysis, deleting a whole group, and deleting all analyses from Settings SHALL each open a destructive confirmation dialog explaining that the affected saved analyses, stored CVs and notes are permanently removed, with separate cancel and confirm actions; no native browser confirmation is used.
 
 #### Scenario: Delete one analysis
-- **WHEN** the recruiter clicks the delete icon for one analysis row on the Analyses page
-- **THEN** the control enters a click-again confirmation state and deletion runs only after the second click
+- **WHEN** the recruiter opens the row actions menu and chooses `Delete analysis…`
+- **THEN** a confirmation dialog names the candidate or file, and deletion runs only after the destructive confirm action
 
 #### Scenario: Delete a group
 - **WHEN** the recruiter clicks Delete group on the Analyses page
@@ -182,7 +182,7 @@ Recent analyses SHALL provide a localized, keyboard-accessible candidate-name an
 - **THEN** the query remains and the filtered results are restored
 
 ### Requirement: Analyses page groups saved analyses
-The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Both the Analyses page and the Recent analyses module SHALL state visibly that only the signed-in user's own analyses and groups are shown, so the per-owner scope is not confused with the deployment-wide Dashboard totals. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. A `Create group` action in the top-right of the page header SHALL open a modal dialog with a group-name field; the page SHALL allow creating a named group there, moving one analysis to any other group (including `Unassigned`) from a per-row menu that marks the current group, deleting one analysis per row, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}&from=analyses`, and the report's Back action SHALL then return to `/analyses` instead of the empty analyze form.
+The app SHALL provide an `Analyses` page at `/analyses` that lists every owner-scoped analysis grouped by analysis group. Both the Analyses page and the Recent analyses module SHALL state visibly that only the signed-in user's own analyses and groups are shown, so the per-owner scope is not confused with the deployment-wide Dashboard totals. Each group SHALL render as its own collapsible module showing the group name and analysis count; analyses without a group SHALL appear in the always-present `Unassigned` module listed last. A search bar at the top SHALL filter rows by candidate name and filename with the same matching rules as Recent analyses, hide groups with no matches while searching, and expand matching groups. A `Create group` action in the top-right of the page header SHALL open a modal dialog with a group-name field; the page SHALL allow creating a named group there, moving one analysis to any other group (including `Unassigned`) from the per-row actions menu that marks the current group, deleting one analysis from that same menu, and deleting a whole group. Selecting a row SHALL open the report at `/analyze?analysis={analysis_id}&from=analyses`, and the report's Back action SHALL then return to `/analyses` instead of the empty analyze form.
 
 #### Scenario: Collapse a group
 - **WHEN** the recruiter collapses the `Junior backend engineer` module
