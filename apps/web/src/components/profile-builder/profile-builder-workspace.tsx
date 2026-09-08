@@ -100,8 +100,8 @@ function formatElapsed(seconds: number) {
   return `${minutes}:${remainder}`;
 }
 
-/** Mirrors the Analyze progress card: status header, per-file list, cancel. Completed files can be opened right away. */
-function ConversionProgress({ batch, elapsedSeconds, onCancel, onOpen }: { batch: ProfileBatch; elapsedSeconds: number; onCancel: () => void; onOpen: (profileId: string) => void }) {
+/** Mirrors the Analyze progress card: status header, per-file list, cancel. */
+function ConversionProgress({ batch, elapsedSeconds, onCancel }: { batch: ProfileBatch; elapsedSeconds: number; onCancel: () => void }) {
   const complete = batch.phase === "complete";
   const total = batch.items.length;
   const pendingIndex = batch.items.findIndex((item) => item.status === "processing" || item.status === "queued");
@@ -116,12 +116,10 @@ function ConversionProgress({ batch, elapsedSeconds, onCancel, onOpen }: { batch
     </div>
     <ol className="mt-4 divide-y rounded-lg border px-3">{batch.items.map((item, index) => {
       const status = item.status;
-      const profileId = item.profile_id;
       return <li key={item.id} className="flex min-w-0 items-center gap-3 py-2.5 text-sm">
         <span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${status === "completed" ? "bg-emerald-500/15 text-emerald-700" : status === "failed" ? "bg-destructive/10 text-destructive" : status === "processing" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{status === "completed" ? <Check className="size-3.5" /> : status === "failed" ? <CircleAlert className="size-3.5" /> : index + 1}</span>
         <span className="min-w-0 flex-1"><span className="block truncate">{item.candidate_name ?? item.file.name}</span>{item.error ? <span className="mt-0.5 block text-xs leading-relaxed text-destructive">{item.error}</span> : null}</span>
         <span className="shrink-0 text-xs text-muted-foreground">{status === "completed" ? "Completed" : status === "failed" ? "Failed" : status === "processing" ? "Converting" : "Waiting"}</span>
-        {profileId ? <Button variant="ghost" size="sm" className="shrink-0" onClick={() => onOpen(profileId)}>Open</Button> : null}
       </li>;
     })}</ol>
     {!complete ? <div className="mt-4 flex justify-center"><Button variant="outline" onClick={onCancel}>Cancel</Button></div> : null}
@@ -1035,7 +1033,7 @@ export function ProfileBuilderWorkspace() {
           </DialogContent>
         </Dialog>
         <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
-        {batch ? <ConversionProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancelConversion} onOpen={openConvertedProfile} /> : <Card>
+        {batch ? <ConversionProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancelConversion} /> : <Card>
           <CardHeader>
             <CardTitle>Upload candidate CV</CardTitle>
             <CardAction><Button variant="outline" size="sm" onClick={() => setPreferencesOpen(true)}><Settings2 />My preferences</Button></CardAction>

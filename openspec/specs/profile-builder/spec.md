@@ -139,7 +139,7 @@ Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose que
 
 #### Scenario: Recruiter opens a finished profile mid-batch
 - **WHEN** a file in a running batch has completed
-- **THEN** its Open action opens the saved profile while the remaining files keep converting
+- **THEN** it is already listed in Recent profiles and can be opened from there while the remaining files keep converting
 
 #### Scenario: Recruiter leaves the page mid-batch
 - **WHEN** the recruiter navigates elsewhere inside the app while a batch runs
