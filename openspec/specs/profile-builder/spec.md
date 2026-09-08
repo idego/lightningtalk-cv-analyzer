@@ -135,13 +135,25 @@ Each authenticated user SHALL have persisted Profile Builder conversion preferen
 Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible and editable inside the internal organization. Saving a new template MUST NOT share it by default.
 
 ### Requirement: Batch conversion flow
-Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot.
+Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot. The upload card SHALL follow the Analyze upload flow: selected files wait in a removable queue until the recruiter starts the conversion, and a progress card with elapsed time, per-file status, and Cancel replaces the card while the batch runs.
+
+#### Scenario: Recruiter opens a finished profile mid-batch
+- **WHEN** a file in a running batch has completed
+- **THEN** its Open action opens the saved profile while the remaining files keep converting
+
+#### Scenario: Recruiter leaves the page mid-batch
+- **WHEN** the recruiter navigates elsewhere inside the app while a batch runs
+- **THEN** navigation is allowed, the batch continues, and its progress is shown again on return
+
+#### Scenario: Batch finishes
+- **WHEN** every file has completed or failed
+- **THEN** the progress card briefly confirms completion and disappears, successful profiles appear in Recent profiles marked New, and failed files return to the queue with their errors
 
 ### Requirement: Reviewable AI translation
 The system SHALL translate selected professional profile sections to a supported target language with GPT-5.6 Luna, preserve names/URLs/technology identifiers, and require preview plus selective acceptance before changing canonical state.
 
 ### Requirement: Profiles catalog
-The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository. The catalog SHALL be reached through the outlined View all action, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
+The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository, and SHALL match Recent analyses in layout and behaviour: inline search, five rows with Show more, New badges for profiles created in this browser session, inline delete, and a Retry action when loading fails. The catalog SHALL be reached through the outlined View all action, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
 
 
 ### Requirement: Latency-bounded AI profile transforms

@@ -1,17 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import {
   ArrowLeft,
   ChevronDown,
   Check,
   ChevronUp,
+  CircleAlert,
+  Clock3,
+  X,
   Download,
   Eye,
   EyeOff,
-  History,
   LayoutTemplate,
   LoaderCircle,
   Pencil,
@@ -25,11 +26,11 @@ import {
   Code2, FolderOpen, Shield, Settings2, type LucideIcon,
 } from "lucide-react";
 import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
+import { RecentProfiles } from "@/components/profile-builder/recent-profiles";
 import { profileFilename } from "@/components/profile-builder/profile-filename";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { CvUploadDropzone } from "@/components/ui/cv-upload-dropzone";
 import { useConfirmation } from "@/components/ui/use-confirmation";
-import { DeleteButton } from "@/components/ui/delete-button";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,7 +42,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAppSettings } from "@/lib/app-settings";
+import { PROFILE_BATCH_MAX_FILES, getProfileBatchSessionStore, isProfileBatchFileTooLarge, isSupportedCvFilename, type ProfileBatch } from "@/lib/profile-batch-session";
 import {
   Dialog,
   DialogContent,
@@ -69,7 +70,6 @@ import {
   type ProfileTemplateListItem,
   type ProfessionalProposal,
   type ProfessionalSectionName,
-  type BatchConversionItem,
   type RecentProfileItem,
 } from "@/components/profile-builder/profile-builder-model";
 
@@ -91,7 +91,42 @@ import {
   updateProfile as apiUpdateProfile,
 } from "@/components/profile-builder/profile-builder-client";
 
-const PROFILE_BUILDER_MAX_BYTES = 10 * 1024 * 1024;
+const ESTIMATED_SECONDS_PER_CV = 40;
+const COMPLETE_CARD_MS = 1200;
+
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const remainder = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${remainder}`;
+}
+
+/** Mirrors the Analyze progress card: status header, per-file list, cancel. Completed files can be opened right away. */
+function ConversionProgress({ batch, elapsedSeconds, onCancel, onOpen }: { batch: ProfileBatch; elapsedSeconds: number; onCancel: () => void; onOpen: (profileId: string) => void }) {
+  const complete = batch.phase === "complete";
+  const total = batch.items.length;
+  const pendingIndex = batch.items.findIndex((item) => item.status === "processing" || item.status === "queued");
+  const currentIndex = pendingIndex < 0 ? total - 1 : pendingIndex;
+  const current = batch.items[currentIndex];
+  const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
+  return <Card aria-live="polite" className="analysis-flow-enter"><CardContent className="py-8">
+    <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">
+      {complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <span className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"><LoaderCircle className="size-7 animate-spin" aria-hidden /></span>}
+      <div><h2 className="text-lg font-semibold">{complete ? "Conversion complete" : `Converting ${currentIndex + 1} of ${total}`}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? "Finished profiles are listed under Recent profiles." : current?.file.name}</p></div>
+      {!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {estimatedRemaining > 0 ? `Estimated remaining about ${formatElapsed(estimatedRemaining)}` : "Taking longer than usual"}</div> : null}
+    </div>
+    <ol className="mt-4 divide-y rounded-lg border px-3">{batch.items.map((item, index) => {
+      const status = item.status;
+      const profileId = item.profile_id;
+      return <li key={item.id} className="flex min-w-0 items-center gap-3 py-2.5 text-sm">
+        <span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs ${status === "completed" ? "bg-emerald-500/15 text-emerald-700" : status === "failed" ? "bg-destructive/10 text-destructive" : status === "processing" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>{status === "completed" ? <Check className="size-3.5" /> : status === "failed" ? <CircleAlert className="size-3.5" /> : index + 1}</span>
+        <span className="min-w-0 flex-1"><span className="block truncate">{item.candidate_name ?? item.file.name}</span>{item.error ? <span className="mt-0.5 block text-xs leading-relaxed text-destructive">{item.error}</span> : null}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{status === "completed" ? "Completed" : status === "failed" ? "Failed" : status === "processing" ? "Converting" : "Waiting"}</span>
+        {profileId ? <Button variant="ghost" size="sm" className="shrink-0" onClick={() => onOpen(profileId)}>Open</Button> : null}
+      </li>;
+    })}</ol>
+    {!complete ? <div className="mt-4 flex justify-center"><Button variant="outline" onClick={onCancel}>Cancel</Button></div> : null}
+  </CardContent></Card>;
+}
 
 type EditorSectionId = "personal" | "profile" | "anonymization" | "experience" | "education"
   | "languages" | "certifications" | "additional" | "custom_fields";
@@ -266,7 +301,6 @@ function TemplateManagerDialog({
 
 export function ProfileBuilderWorkspace() {
   const { confirm, confirmationDialog } = useConfirmation();
-  const settings = useAppSettings();
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [aiAvailable, setAiAvailable] = useState(false);
@@ -287,7 +321,6 @@ export function ProfileBuilderWorkspace() {
   const [profileId, setProfileId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile | null>(null);
   const [sourceFilename, setSourceFilename] = useState<string | null>(null);
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [anonymization, setAnonymization] = useState(DEFAULT_ANONYMIZATION);
   const [selectedTemplate, setSelectedTemplate] = useState<ProfileTemplate>(DEFAULT_PROFILE_TEMPLATE);
   const [templateItems, setTemplateItems] = useState<ProfileTemplateListItem[]>([
@@ -296,10 +329,15 @@ export function ProfileBuilderWorkspace() {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [recentProfiles, setRecentProfiles] = useState<RecentProfileItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [openingProfileId, setOpeningProfileId] = useState<string | null>(null);
-  const [extracting, setExtracting] = useState(false);
-  const [batchItems, setBatchItems] = useState<BatchConversionItem[]>([]);
-  const [batchRunning, setBatchRunning] = useState(false);
+  const batchStore = getProfileBatchSessionStore();
+  const { queue: queuedFiles, batch, sessionIds, failures: batchFailures } = useSyncExternalStore(batchStore.subscribe, batchStore.getSnapshot, batchStore.getSnapshot);
+  const batchRunning = batch?.phase === "running";
+  const batchStartedAt = batch?.startedAt;
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [conversionNotice, setConversionNotice] = useState<string | null>(null);
+  const mountedRef = useRef(true);
   const [exporting, setExporting] = useState(false);
   const [summaryInstruction, setSummaryInstruction] = useState("");
   const [summaryGenerating, setSummaryGenerating] = useState(false);
@@ -337,14 +375,35 @@ export function ProfileBuilderWorkspace() {
 
   const refreshRecentProfiles = useCallback(async () => {
     setHistoryLoading(true);
+    setHistoryError(null);
     try {
       setRecentProfiles(await listProfiles());
     } catch {
-      setRecentProfiles([]);
+      setHistoryError("Recent profiles could not be loaded.");
     } finally {
       setHistoryLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!batchRunning || batchStartedAt === undefined) return;
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - batchStartedAt) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [batchRunning, batchStartedAt]);
+
+  // Refresh Recent profiles as each converted CV lands, including batches started before a page revisit.
+  useEffect(() => {
+    if (!sessionIds.size) return;
+    const timer = window.setTimeout(() => { void refreshRecentProfiles(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sessionIds, refreshRecentProfiles]);
 
   const refreshProfileBuilderPreferences = useCallback(async () => {
     try {
@@ -496,13 +555,9 @@ export function ProfileBuilderWorkspace() {
       if (!link || link.target === "_blank" || link.hasAttribute("download")) return;
       const snapshot = latestSnapshotRef.current;
       const dirty = snapshot && serializeProfileSnapshot(snapshot) !== lastSavedSnapshotRef.current;
-      if (!dirty && !extracting && !batchRunning) return;
+      if (!dirty) return;
       event.preventDefault();
       event.stopPropagation();
-      if (extracting || batchRunning) {
-        setError("Conversion is still running. Keep this page open until it finishes.");
-        return;
-      }
       if (navigating) return;
       navigating = true;
       void flushCurrentProfile().then((saved) => {
@@ -512,13 +567,14 @@ export function ProfileBuilderWorkspace() {
         else window.location.assign(url.href);
       }).finally(() => { navigating = false; });
     };
+    // Reloading or closing the tab would lose the queued files; in-app navigation is fine because the batch lives in a module store.
     const protectConversion = (event: BeforeUnloadEvent) => {
-      if (extracting || batchRunning) { event.preventDefault(); event.returnValue = ""; }
+      if (batchRunning) { event.preventDefault(); event.returnValue = ""; }
     };
     document.addEventListener("click", guardLink, true);
     window.addEventListener("beforeunload", protectConversion);
     return () => { document.removeEventListener("click", guardLink, true); window.removeEventListener("beforeunload", protectConversion); };
-  }, [batchRunning, extracting, flushCurrentProfile, router]);
+  }, [batchRunning, flushCurrentProfile, router]);
 
   const openStoredProfile = useCallback(async (storedProfileId: string) => {
     setOpeningProfileId(storedProfileId);
@@ -537,7 +593,6 @@ export function ProfileBuilderWorkspace() {
       window.history.replaceState(null, "", `/profile-builder?profile=${encodeURIComponent(stored.profile_id)}`);
       setProfile(stored.profile);
       setSourceFilename(stored.source_filename);
-      setSourceFile(null);
       setAnonymization(stored.anonymization);
       setSelectedTemplate(stored.template);
       setExpandedSections(new Set<EditorSectionId>(["profile", "experience"]));
@@ -616,7 +671,7 @@ export function ProfileBuilderWorkspace() {
   async function requestProfileExtraction(file: File): Promise<{ filename: string; profile: CandidateProfile }> {
     if (!aiAvailable) throw new Error("CV conversion is unavailable. Check System health in Settings and try again.");
     if (!/\.(pdf|docx)$/i.test(file.name)) throw new Error("Choose PDF or DOCX files only.");
-    if (file.size > PROFILE_BUILDER_MAX_BYTES) throw new Error("CV files must be 10 MB or smaller.");
+    if (isProfileBatchFileTooLarge(file)) throw new Error("CV files must be 10 MB or smaller.");
     try {
       const payload = await apiExtractProfile(file, aiAvailable);
       return { filename: payload.filename ?? file.name, profile: payload.profile };
@@ -646,70 +701,64 @@ export function ProfileBuilderWorkspace() {
   }
 
 
+  const acceptedFiles = useMemo(() => queuedFiles.filter((file) => isSupportedCvFilename(file.name) && !isProfileBatchFileTooLarge(file)), [queuedFiles]);
+  const unsupportedFiles = useMemo(() => queuedFiles.filter((file) => !isSupportedCvFilename(file.name)), [queuedFiles]);
+  const oversizedFiles = useMemo(() => queuedFiles.filter((file) => isSupportedCvFilename(file.name) && isProfileBatchFileTooLarge(file)), [queuedFiles]);
+
   function queueFiles(files: File[]) {
-    if (!profileBuilderReady) { setError("Conversion defaults are still loading. Try again in a moment."); return; }
-    if (files.length > 10) { setError("Batch conversion supports up to 10 CVs at once."); return; }
-    if (files.some((file) => !/\.(pdf|docx)$/i.test(file.name))) { setError("Batch conversion accepts PDF or DOCX files only."); return; }
-    if (files.some((file) => file.size > PROFILE_BUILDER_MAX_BYTES)) { setError("Each CV must be 10 MB or smaller."); return; }
-    const supported = files;
-    if (!supported.length) { setError("Choose PDF or DOCX files."); return; }
-    if (supported.length === 1) { setBatchItems([]); void extract(supported[0]); return; }
     setError(null);
-    setBatchItems(supported.map((file) => ({
-      id: globalThis.crypto.randomUUID(), file, status: "queued", profile_id: null, candidate_name: null, error: null,
-    })));
+    setConversionNotice(null);
+    batchStore.enqueue(files);
   }
 
-  async function runBatchConversion() {
-    if (batchRunning || !batchItems.length) return;
-    setBatchRunning(true);
+  function resetQueue() {
+    if (batchRunning) return;
+    batchStore.clearQueue();
     setError(null);
-    for (const item of batchItems) {
-      if (item.status === "completed") continue;
-      setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "processing", error: null } : entry));
+    setConversionNotice(null);
+  }
+
+  function cancelConversion() {
+    batchStore.cancel();
+    setElapsedSeconds(0);
+    setConversionNotice("Conversion cancelled. Unfinished files are back in the queue.");
+  }
+
+  function openConvertedProfile(convertedProfileId: string) {
+    router.push(`/profile-builder?profile=${encodeURIComponent(convertedProfileId)}`);
+  }
+
+  async function convertQueue() {
+    setError(null);
+    setConversionNotice(null);
+    if (batchRunning) return;
+    if (!profileBuilderReady) { setError("Conversion defaults are still loading. Try again in a moment."); return; }
+    if (!acceptedFiles.length) { setError("Add at least one PDF or DOCX file."); return; }
+    if (acceptedFiles.length > PROFILE_BATCH_MAX_FILES) { setError(`Batch conversion supports up to ${PROFILE_BATCH_MAX_FILES} CVs at once.`); return; }
+    setElapsedSeconds(0);
+    const token = batchStore.start(acceptedFiles);
+    const items = batchStore.getSnapshot().batch?.items ?? [];
+    for (const item of items) {
+      if (!batchStore.isCurrent(token)) return;
+      batchStore.beginItem(token, item.id);
       try {
         const extracted = await requestProfileExtraction(item.file);
         const persisted = await persistExtractedProfile(extracted.filename, extracted.profile);
         const candidateName = [persisted.snapshot.profile.personal.first_name, persisted.snapshot.profile.personal.last_name].filter(Boolean).join(" ") || null;
-        setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "completed", profile_id: persisted.profileId, candidate_name: candidateName } : entry));
+        batchStore.completeItem(token, item.id, persisted.profileId, candidateName);
       } catch (cause) {
-        setBatchItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "failed", error: cause instanceof Error ? cause.message : "Conversion failed." } : entry));
+        batchStore.failItem(token, item.id, cause instanceof Error ? cause.message : "Conversion failed.");
       }
     }
-    setBatchRunning(false);
-    void refreshRecentProfiles();
+    if (!batchStore.isCurrent(token)) return;
+    const finished = batchStore.getSnapshot().batch?.items ?? [];
+    batchStore.complete(token);
+    await new Promise((resolve) => window.setTimeout(resolve, COMPLETE_CARD_MS));
+    batchStore.clearBatch(token);
+    // A single successful CV opens straight into the editor, as long as the recruiter is still on this page.
+    const only = finished.length === 1 && finished[0].status === "completed" ? finished[0].profile_id : null;
+    if (only && mountedRef.current && !latestSnapshotRef.current) openConvertedProfile(only);
   }
-
-  async function extract(file: File) {
-    if (extracting) return;
-    setError(null);
-    setSourceFile(file);
-    setSourceFilename(file.name);
-    setProfileId(null);
-    setExtracting(true);
-    try {
-      const extracted = await requestProfileExtraction(file);
-      const persisted = await persistExtractedProfile(extracted.filename, extracted.profile);
-      templateSelectionLockedRef.current = true;
-      setProfile(persisted.snapshot.profile);
-      setProfileId(persisted.profileId);
-      window.history.replaceState(null, "", `/profile-builder?profile=${encodeURIComponent(persisted.profileId)}`);
-      setSourceFilename(persisted.snapshot.source_filename);
-      setAnonymization(persisted.snapshot.anonymization);
-      setSelectedTemplate(persisted.snapshot.template);
-      lastSavedSnapshotRef.current = serializeProfileSnapshot(persisted.snapshot);
-      setSavedSnapshot(serializeProfileSnapshot(persisted.snapshot));
-      latestSnapshotRef.current = { profile_id: persisted.profileId, ...persisted.snapshot };
-      lastSaveOkRef.current = true;
-      setSaveStatus("saved");
-      void refreshRecentProfiles();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Profile extraction failed.");
-    } finally {
-      setExtracting(false);
-    }
-  }
-
 
   async function deleteRecentProfile(item: RecentProfileItem) {
     try {
@@ -946,7 +995,6 @@ export function ProfileBuilderWorkspace() {
     setProfileId(null);
     setProfile(null);
     setSourceFilename(null);
-    setSourceFile(null);
     setAnonymization(profileBuilderPreferences.anonymization);
     setSummaryInstruction("");
     setSummaryError(null);
@@ -987,17 +1035,16 @@ export function ProfileBuilderWorkspace() {
           </DialogContent>
         </Dialog>
         <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
-        <Card>
+        {batch ? <ConversionProgress batch={batch} elapsedSeconds={elapsedSeconds} onCancel={cancelConversion} onOpen={openConvertedProfile} /> : <Card>
           <CardHeader>
             <CardTitle>Upload candidate CV</CardTitle>
             <CardAction><Button variant="outline" size="sm" onClick={() => setPreferencesOpen(true)}><Settings2 />My preferences</Button></CardAction>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <CvUploadDropzone
-              label={extracting ? "Extracting candidate profile…" : batchRunning ? "Batch conversion in progress…" : "Drag and drop files here, or click to select"}
-              hint="PDF or DOCX · up to 10 files · 10 MB each"
-              disabled={extracting || batchRunning || !aiAvailable || !profileBuilderReady}
-              busy={extracting || batchRunning}
+              label="Drag and drop files here, or click to select"
+              hint={`PDF or DOCX · up to ${PROFILE_BATCH_MAX_FILES} files · 10 MB each`}
+              disabled={!aiAvailable || !profileBuilderReady}
               keyboardActivation
               onFilesSelected={queueFiles}
             >
@@ -1007,31 +1054,16 @@ export function ProfileBuilderWorkspace() {
                 </p>
               ) : null}
             </CvUploadDropzone>
-            {batchItems.length ? <div className="mt-4 overflow-hidden rounded-xl border">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/25 px-4 py-3">
-                <div><p className="text-sm font-medium">Batch conversion · {batchItems.length} CVs</p><p className="text-xs text-muted-foreground">Each successful CV becomes its own saved profile.</p></div>
-                <div className="flex gap-2"><Button variant="ghost" size="sm" disabled={batchRunning} onClick={() => setBatchItems([])}>Clear</Button><Button size="sm" disabled={batchRunning || batchItems.every((item) => item.status === "completed")} onClick={() => void runBatchConversion()}>{batchRunning ? <LoaderCircle className="animate-spin" /> : null}{batchRunning ? "Converting…" : batchItems.some((item) => item.status === "failed") ? "Retry failed" : "Convert batch"}</Button></div>
-              </div>
-              <ul className="divide-y">{batchItems.map((item) => <li key={item.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                <span className="min-w-0 flex-1"><span className="block truncate font-medium">{item.candidate_name ?? item.file.name}</span>{item.error ? <span className="block break-words text-xs text-destructive">{item.error}</span> : null}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{item.status === "processing" ? "Processing…" : item.status === "completed" ? "Completed" : item.status === "failed" ? "Failed" : "Queued"}</span>
-                {item.status === "processing" ? <LoaderCircle className="size-4 animate-spin" /> : item.profile_id ? <Button variant="ghost" size="sm" render={<Link href={`/profile-builder?profile=${encodeURIComponent(item.profile_id)}`} />}>Open</Button> : null}
-              </li>)}</ul>
-            </div> : null}
-            {error ? (
-              <div className="mt-4 flex flex-wrap items-center gap-3" aria-live="polite">
-                <p className="min-w-0 flex-1 text-sm text-destructive">
-                  {sourceFilename ? `${sourceFilename}: ` : ""}{error}
-                </p>
-                {sourceFile ? (
-                  <Button variant="outline" size="sm" disabled={extracting} onClick={() => void extract(sourceFile)}>
-                    Retry
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
+            {queuedFiles.length ? <div className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">Queued ({queuedFiles.length})</p><ul className="space-y-1 text-muted-foreground">{queuedFiles.map((file, index) => <li key={`${file.name}-${index}`} className={`flex items-center gap-2 ${!isSupportedCvFilename(file.name) || isProfileBatchFileTooLarge(file) ? "text-destructive" : ""}`}><span className="min-w-0 flex-1 truncate">{file.name}</span><Button variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={`Remove ${file.name}`} onClick={() => batchStore.removeQueued(index)}><X className="size-4" /></Button></li>)}</ul></div> : null}
+            {unsupportedFiles.length ? <p role="alert" className="text-sm text-destructive">Unsupported files: {unsupportedFiles.map((file) => file.name).join(", ")}. Use PDF or DOCX.</p> : null}
+            {oversizedFiles.length ? <p role="alert" className="text-sm text-destructive">Larger than 10 MB: {oversizedFiles.map((file) => file.name).join(", ")}.</p> : null}
+            {acceptedFiles.length > PROFILE_BATCH_MAX_FILES ? <p role="alert" className="text-sm text-destructive">Batch conversion supports up to {PROFILE_BATCH_MAX_FILES} CVs at once. Remove {acceptedFiles.length - PROFILE_BATCH_MAX_FILES} to continue.</p> : null}
+            <div className="flex items-center gap-3"><Button onClick={() => void convertQueue()} disabled={!acceptedFiles.length || acceptedFiles.length > PROFILE_BATCH_MAX_FILES || !aiAvailable || !profileBuilderReady}>{acceptedFiles.length > 1 ? "Convert CVs" : "Convert CV"}</Button><Button variant="outline" onClick={resetQueue} disabled={!queuedFiles.length && !batchFailures.length}>Reset</Button></div>
+            {conversionNotice ? <p role="status" className="text-sm text-muted-foreground">{conversionNotice}</p> : null}
+            {batchFailures.length ? <p role="alert" className="whitespace-pre-line text-sm text-destructive">{batchFailures.map((failure) => `${failure.filename}: ${failure.error}`).join("\n")}</p> : null}
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           </CardContent>
-        </Card>
+        </Card>}
         <Card>
           <CardHeader><CardTitle>What this is for</CardTitle></CardHeader>
           <CardContent>
@@ -1045,34 +1077,7 @@ export function ProfileBuilderWorkspace() {
         </div>
 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
-          <section className="overflow-hidden rounded-xl border bg-card">
-            <div className="flex items-center gap-2 border-b px-5 py-4">
-              <History className="size-4" />
-              <div className="min-w-0 flex-1">
-                <h2 className="font-medium">Recent profiles</h2>
-              </div>
-              <Button variant="outline" className="border-foreground/25" size="sm" nativeButton={false} render={<Link href="/profiles" />}>View all</Button>
-            </div>
-            {historyLoading ? <div className="flex items-center justify-center py-9"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
-            {!historyLoading && !recentProfiles.length ? <p className="px-5 py-8 text-sm text-muted-foreground">No recent profiles yet.</p> : null}
-            {recentProfiles.length ? <ul className="divide-y">{recentProfiles.slice(0, 10).map((item) => (
-              <li key={item.profile_id} className="flex min-w-0 items-center gap-2 px-3 py-2">
-                <button type="button" onClick={() => void openStoredProfile(item.profile_id)} disabled={openingProfileId === item.profile_id} className="min-w-0 flex-1 rounded-md px-2 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
-                  <span className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-sm font-medium">{item.candidate_name ?? item.source_filename}</span>
-                    <time className="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(settings.uiLanguage, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.updated_at))}</time>
-                  </span>
-                  <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">{item.source_filename}</span>
-                    <span aria-hidden>·</span>
-                    <span className="truncate">{item.template_name}</span>
-                  </span>
-                </button>
-                {openingProfileId === item.profile_id ? <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" /> : null}
-                <DeleteButton label={`Delete ${item.candidate_name ?? item.source_filename}`} disabled={openingProfileId !== null} onDelete={() => deleteRecentProfile(item)} />
-              </li>
-            ))}</ul> : null}
-          </section>
+          <RecentProfiles items={recentProfiles} loading={historyLoading} error={historyError} openingId={openingProfileId} highlightIds={sessionIds} onOpen={(item) => openStoredProfile(item.profile_id)} onRemove={deleteRecentProfile} onRetry={() => void refreshRecentProfiles()} />
 
           <Card>
             <CardHeader>
