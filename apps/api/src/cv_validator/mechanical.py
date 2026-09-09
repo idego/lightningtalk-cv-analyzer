@@ -143,6 +143,63 @@ def _extract_phones(segments: tuple[TextSegment, ...]) -> list[dict[str, object]
     return found
 
 
+_SECTION_HEADER_KIND = "section_header"
+
+
+def tag_link_sections(
+    links: list[dict[str, object]],
+    blocks: Iterable[TextSegment],
+    employment: Iterable[dict[str, object]],
+    education: Iterable[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Annotate each literal link with the CV section its block belongs to.
+
+    A section span runs from the first to the last evidence block of a
+    category's validated records and extends to the block before the next
+    section header, so description bullets under the last record are covered.
+    ``section`` is ``employment``, ``education``, ``certification`` or ``None``.
+    """
+    ordered = sorted(blocks, key=lambda block: block.order)
+    order_by_id = {block.id: block.order for block in ordered}
+    header_orders = sorted(block.order for block in ordered if block.kind == _SECTION_HEADER_KIND)
+    last_order = ordered[-1].order if ordered else -1
+
+    def evidence_orders(records: Iterable[dict[str, object]]) -> list[int]:
+        found: list[int] = []
+        for record in records:
+            for field in record.values():
+                if not isinstance(field, dict):
+                    continue
+                for evidence in field.get("evidence", []) or []:
+                    order = order_by_id.get(str((evidence or {}).get("source_id", "")))
+                    if order is not None:
+                        found.append(order)
+        return found
+
+    education_records = list(education)
+    categories = {
+        "employment": evidence_orders(employment),
+        "education": evidence_orders(r for r in education_records if r.get("certificate") is None),
+        "certification": evidence_orders(r for r in education_records if r.get("certificate") is not None),
+    }
+    spans: list[tuple[str, int, int]] = []
+    for name, orders in categories.items():
+        if not orders:
+            continue
+        start, end = min(orders), max(orders)
+        next_header = next((h for h in header_orders if h > end), None)
+        spans.append((name, start, (next_header - 1) if next_header is not None else last_order))
+
+    tagged: list[dict[str, object]] = []
+    for link in links:
+        evidence = link.get("evidence") or []
+        source_id = str((evidence[0] or {}).get("source_id", "")) if evidence else ""
+        order = order_by_id.get(source_id)
+        section = next((name for name, start, end in spans if order is not None and start <= order <= end), None)
+        tagged.append({**link, "section": section})
+    return tagged
+
+
 def _extract_postal_candidates(segments: tuple[TextSegment, ...]) -> list[dict[str, object]]:
     by_location: dict[tuple[str, int, int], dict[str, object]] = {}
     for segment in segments:

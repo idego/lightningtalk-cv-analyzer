@@ -2,6 +2,7 @@ import { researchErrorFields, type ResearchErrorDetails } from "./research-error
 import type { AnalysisReport } from "./analyze-types.ts";
 import type { AppSettings } from "./app-settings.ts";
 import { isSelfEmploymentLabel } from "./relationship-labels.js";
+import { isContactLink } from "./contact-links.js";
 
 export const AUTO_RESEARCH_MAX_CONCURRENCY = 2;
 export type AutoResearchKind = "company" | "education" | "linkedin";
@@ -55,7 +56,7 @@ export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnable
 }
 
 export function linkedinProvidedInCv(report: AnalysisReport): boolean {
-  return (report.mechanical?.literal_links ?? []).some((link) => link?.known_host === "linkedin");
+  return (report.mechanical?.literal_links ?? []).some((link) => link?.known_host === "linkedin" && isContactLink(link));
 }
 
 /** Kinds that stay available manually but are not started automatically. */

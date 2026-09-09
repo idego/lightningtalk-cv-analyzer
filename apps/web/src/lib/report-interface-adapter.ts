@@ -1,3 +1,4 @@
+import { isContactLink } from "./contact-links.js";
 import type {
   AnalysisReport,
   Evidence,
@@ -261,6 +262,7 @@ function overviewLinks(items: unknown[]): OverviewLink[] {
     const literal = text(item?.value);
     const url = text(item?.normalized_url);
     if (!literal || !url || !/^https:\/\//i.test(url)) continue;
+    if (!isContactLink(item)) continue;
     const key = url.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

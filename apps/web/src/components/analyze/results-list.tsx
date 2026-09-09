@@ -172,7 +172,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                 {overview.candidateName ? <OverviewRow icon={<UserRound className="size-4" />} label={t("candidateName")} value={overview.candidateName} tone={contactTone} /> : null}
                 {overview.phone ? <OverviewRow icon={<Phone className="size-4" />} label={t("phoneNumber")} value={overview.phone} detail={overview.phoneCountry ? displayCountry(overview.phoneCountry, settings.uiLanguage) : null} tone={contactTone} /> : null}
                 {overview.email ? <OverviewRow icon={<Mail className="size-4" />} label={t("emailAddress")} value={overview.email} tone={contactTone} /> : null}
-                {overview.links.map((link) => <OverviewRow key={link.url} icon={linkIcon(link.kind)} label={t(linkLabelKey(link.kind))} value={<a href={link.url} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:underline" title={t("opensInNewTab")}>{link.value}</a>} tone={contactTone} />)}
+                {overview.links.map((link) => <OverviewRow key={link.url} icon={linkIcon(link.kind)} label={t(linkLabelKey(link.kind))} value={<a href={link.url} target="_blank" rel="noopener noreferrer" className="block truncate underline-offset-2 hover:underline" title={`${link.value} · ${t("opensInNewTab")}`}>{link.value}</a>} tone={contactTone} />)}
               </div>
             </section> : null}
 

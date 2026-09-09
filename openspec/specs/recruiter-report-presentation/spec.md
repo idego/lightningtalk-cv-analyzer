@@ -54,7 +54,7 @@ An owner-opened persisted report SHALL show a compact estimated AI cost badge ba
 
 
 ### Requirement: Contact section shows literal CV contact values
-The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV, deduplicated by normalized URL. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Extraction SHALL accept schemed or `www.` URLs for any host, and schemeless LinkedIn or GitHub links that carry a path (for example `linkedin.com/in/...`); other schemeless domains are not treated as links.
+The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV that is not inside an employment, education, or certificate section, deduplicated by normalized URL. The analysis SHALL tag each link with its section, derived from the validated records' evidence blocks extended to the next section header. Link rows SHALL render on one line with an ellipsis and expose the full literal value on hover. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Extraction SHALL accept schemed or `www.` URLs for any host, and schemeless LinkedIn or GitHub links that carry a path (for example `linkedin.com/in/...`); other schemeless domains are not treated as links.
 
 #### Scenario: CV lists a schemeless LinkedIn link
 - **WHEN** the CV text contains `linkedin.com/in/<handle>` without `https://` or `www.`
@@ -63,6 +63,10 @@ The CV overview Contact section SHALL show the candidate name, first phone numbe
 #### Scenario: CV contains a personal website
 - **WHEN** the CV contains a URL whose host is neither LinkedIn nor GitHub
 - **THEN** the Contact section shows it as a personal website link with the literal CV text
+
+#### Scenario: Project link under an employment record
+- **WHEN** a GitHub link appears in a description bullet under an employment record
+- **THEN** it is tagged `employment` and is not shown in the Contact section
 
 #### Scenario: Same link appears twice
 - **WHEN** the same normalized URL is extracted from two places in the CV

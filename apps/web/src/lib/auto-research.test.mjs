@@ -108,6 +108,11 @@ test("manual LinkedIn discovery still runs when the CV links a profile", async (
   assert.deepEqual(calls, ["/api/analyses/analysis-1/research/linkedin/discovery"]);
 });
 
+test("a LinkedIn link inside the experience section does not count as provided", () => {
+  const value = withLinks([{ ...LINKEDIN_LINK, section: "employment" }]);
+  assert.deepEqual([...automaticallySkippedKinds(value)], []);
+});
+
 test("non-LinkedIn links do not skip any automatic research", () => {
   assert.deepEqual([...automaticallySkippedKinds(withLinks([PERSONAL_LINK]))], []);
 });

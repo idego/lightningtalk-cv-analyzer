@@ -95,6 +95,8 @@ function report() {
         { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
         { value: "www.alex.dev", normalized_url: "https://www.alex.dev", known_host: "personal", evidence: field("www.alex.dev").evidence },
         { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
+        { value: "github.com/alex/project", normalized_url: "https://github.com/alex/project", known_host: "github", section: "employment", evidence: field("github.com/alex/project").evidence },
+        { value: "https://credly.com/badges/1", normalized_url: "https://credly.com/badges/1", known_host: "personal", section: "certification", evidence: field("https://credly.com/badges/1").evidence },
       ],
       postal_candidates: [],
       accepted_postal_addresses: [{ value: "00-001", possible_country_codes: ["PL"] }],
