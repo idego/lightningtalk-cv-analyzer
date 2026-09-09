@@ -557,8 +557,8 @@ def test_openai_contract_pins_model_store_and_reasoning() -> None:
     assert specialist["store"] is reviewer["store"] is False
     assert "tools" not in specialist and "tools" not in reviewer
     assert specialist["text"]["format"]["strict"] is True
-    assert specialist["prompt_cache_key"] == "cv-analysis-profile-v1"
-    assert reviewer["prompt_cache_key"] == "cv-analysis-review-v1"
+    assert specialist["prompt_cache_key"] == "cv-analysis-profile-v2"
+    assert reviewer["prompt_cache_key"] == "cv-analysis-review-v2"
 
 
 def test_validated_records_are_accepted_by_default_and_reviewer_can_reject() -> None:
@@ -812,8 +812,80 @@ def test_telemetry_persistence_failure_does_not_retry_successful_model_calls() -
 
     report = strategy.analyze(request)
 
-    assert report["base_analysis"]["status"] in {"complete", "partial"}
+    assert report["base_analysis"]["status"] in {"completed", "partial"}
     assert [name for name, _ in client.calls].count("profile") == 1
     assert [name for name, _ in client.calls].count("employment") == 1
     assert [name for name, _ in client.calls].count("education") == 1
     assert [name for name, _ in client.calls].count("review") == 1
+
+
+def test_rejected_reviewer_operations_do_not_make_the_review_partial() -> None:
+    source = SourceDocument.create((
+        SourceBlock("b-0", "Example Systems Developer", order=0),
+        SourceBlock("b-1", "Example University", order=1),
+    ), "pdf")
+    empty = {"start_date": None, "end_date": None, "location": None, "relationship_type": None}
+    state = validate_specialists(source, {}, {"records": [{
+        "id": "employment_1", **empty,
+        "organization": field("org", "Example Systems", "b-0"),
+        "role": field("role", "Developer", "b-0"),
+    }]}, {})
+
+    _, review = apply_review(source, state, {
+        "accepted_record_ids": ["unknown"],
+        "rejected_records": [{"id": "ghost", "reason_code": "hallucinated"}],
+        "merge_groups": [["employment_1", "employment_9"]],
+        "relation_patches": [{"record_id": "employment_1", "field_ids": ["missing"]}],
+        "added_profile_fields": [],
+        "added_candidates": [
+            {
+                "id": "employment_1", "candidate_type": "employment",
+                "candidate": {
+                    **empty,
+                    "organization": field("dup-org", "Example Systems", "b-0"),
+                    "role": field("dup-role", "Developer", "b-0"),
+                },
+            },
+            {
+                "id": "review_education_1", "candidate_type": "education",
+                "candidate": {
+                    "institution": field("inv", "Invented University", "b-1", "Invented University"),
+                    "program": None, "degree": None, "certificate": None,
+                    "start_date": None, "end_date": None, "location": None,
+                },
+            },
+        ],
+        "conflicts": [], "coverage_gaps": [], "status": "completed",
+    })
+
+    reasons = {item["reason_code"] for item in review["conflicts"]}
+    assert {"unknown_reviewer_record_id", "unknown_reviewer_merge_id", "unknown_reviewer_patch_id",
+            "reviewer_added_candidate_invalid_evidence"} <= reasons
+    assert all(gap["reason_code"] == "invalid_addition" for gap in review["coverage_gaps"])
+    assert review["status"] == "completed"
+    assert review["accepted_ids"] == ["employment_1"]
+
+
+def test_reviewer_document_gaps_and_declared_partial_still_make_the_review_partial() -> None:
+    source = SourceDocument.create((SourceBlock("b-0", "Example Systems Developer", order=0),), "pdf")
+    state = validate_specialists(source, {}, {}, {})
+    base = {
+        "accepted_record_ids": [], "rejected_records": [], "merge_groups": [], "relation_patches": [],
+        "added_profile_fields": [], "added_candidates": [], "conflicts": [], "coverage_gaps": [],
+    }
+    _, with_gap = apply_review(source, state, {
+        **base,
+        "coverage_gaps": [{"target": "employment", "reason_code": "dates_not_associated", "source_block_ids": ["b-0"]}],
+        "status": "completed",
+    })
+    assert with_gap["status"] == "partial"
+
+    _, with_conflict = apply_review(source, state, {
+        **base,
+        "conflicts": [{"reason_code": "wrapped_field_truncated", "record_ids": [], "field_ids": [], "source_block_ids": ["b-0"], "summary": None}],
+        "status": "completed",
+    })
+    assert with_conflict["status"] == "partial"
+
+    _, declared = apply_review(source, state, {**base, "status": "partial"})
+    assert declared["status"] == "partial"

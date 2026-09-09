@@ -58,7 +58,7 @@ class FeedbackInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rating: Rating | None = None
     reason: Reason | None = None
-    comment: str | None = Field(default=None, max_length=180)
+    comment: str | None = Field(default=None, max_length=300)
     context_label: str | None = Field(default=None, max_length=200)
     context_text: str | None = Field(default=None, max_length=12000)
     context_report: dict[str, Any] | None = None
