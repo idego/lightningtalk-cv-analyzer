@@ -42,6 +42,22 @@ def test_links_are_tagged_linkedin_github_or_personal() -> None:
     ]
 
 
+def test_schemeless_known_host_links_are_extracted() -> None:
+    result = extract_mechanical([
+        TextSegment(
+            id="segment-1",
+            text="LinkedIn: linkedin.com/in/jane-example | GitHub: github.com/jane. Skills: Node.js/Express, GitHub",
+            page_number=1,
+        )
+    ])
+
+    links = result["literal_links"]
+    assert [link["known_host"] for link in links] == ["linkedin", "github"]
+    assert links[0]["value"] == "linkedin.com/in/jane-example"
+    assert links[0]["normalized_url"] == "https://linkedin.com/in/jane-example"
+    assert links[1]["value"] == "github.com/jane"
+
+
 def test_postal_overlap_keeps_ambiguity() -> None:
     result = extract_mechanical([
         TextSegment(id="segment-1", text="Reference number 12345")

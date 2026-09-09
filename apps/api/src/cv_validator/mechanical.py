@@ -12,7 +12,12 @@ from cv_validator.analysis.source import TextSegment
 MECHANICAL_VERSION = "mechanical-extraction-v1"
 
 _EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
-_URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+")
+# Schemed or www-prefixed URLs, plus schemeless links to known hosts that
+# carry a path (e.g. "linkedin.com/in/jane", "github.com/jane").
+_URL_RE = re.compile(
+    r"(?i)(?<![\w.@/])(?:(?:https?://|www\.)[^\s<>\"']+"
+    r"|(?:www\.)?(?:linkedin|github)\.com/[^\s<>\"']+)"
+)
 _KNOWN_HOSTS = {
     "linkedin.com": "linkedin",
     "www.linkedin.com": "linkedin",

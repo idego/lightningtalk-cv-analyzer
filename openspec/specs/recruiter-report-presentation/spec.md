@@ -54,7 +54,11 @@ An owner-opened persisted report SHALL show a compact estimated AI cost badge ba
 
 
 ### Requirement: Contact section shows literal CV contact values
-The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV, deduplicated by normalized URL. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Links SHALL display the literal CV text, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
+The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV, deduplicated by normalized URL. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Extraction SHALL accept schemed or `www.` URLs for any host, and schemeless LinkedIn or GitHub links that carry a path (for example `linkedin.com/in/...`); other schemeless domains are not treated as links.
+
+#### Scenario: CV lists a schemeless LinkedIn link
+- **WHEN** the CV text contains `linkedin.com/in/<handle>` without `https://` or `www.`
+- **THEN** it is extracted, tagged `linkedin`, and shown in the Contact section Links SHALL display the literal CV text, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
 
 #### Scenario: CV contains a personal website
 - **WHEN** the CV contains a URL whose host is neither LinkedIn nor GitHub
