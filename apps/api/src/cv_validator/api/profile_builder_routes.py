@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from cv_validator.analysis.docling_converter import DoclingTextConverter
 from cv_validator.analysis.strategy import AnalysisStrategyError, SourceFormat
+from cv_validator.api.concurrency import AnalysisCancellationRegistry
 from cv_validator.api.persistence import PersistenceStore
 from cv_validator.api.profile_builder_store import ProfileBuilderStore
 from cv_validator.errors import PersistenceError, UploadReadError
@@ -65,9 +66,13 @@ def create_profile_builder_router(
     profile_summarizer: ProfileSummarizer | None = None,
     profile_transformer: ProfileTransformer | None = None,
     profile_builder_max_bytes: int | None = None,
+    cancellations: AnalysisCancellationRegistry | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["Profile Builder"], route_class=_PrivateProfileRoute)
     store = ProfileBuilderStore(analysis_store)
+    # Same checkpoint semantics as /analyze: a cancel takes effect before the
+    # model call starts or before the extracted profile is returned.
+    extraction_cancellations = cancellations or AnalysisCancellationRegistry()
     selected_ai_settings = ProfileAISettings(**asdict(settings))
     pricing = load_pricing_catalog()
 
@@ -105,15 +110,43 @@ def create_profile_builder_router(
             store.set_profile_builder_preferences(token, preferences)
         return preferences
 
+    @router.post("/profile-builder/extract/cancel", status_code=202)
+    def profile_builder_cancel_extraction(
+        x_profile_builder_access_token: str | None = Header(default=None),
+        x_profile_builder_request_id: str | None = Header(default=None),
+    ) -> JSONResponse:
+        token = _require_profile_builder_access_token(x_profile_builder_access_token)
+        if not x_profile_builder_request_id:
+            raise HTTPException(status_code=400, detail="profile_builder_request_id_required")
+        extraction_cancellations.request(token, x_profile_builder_request_id)
+        return JSONResponse({"status": "cancel_requested"}, status_code=202)
+
     @router.post("/profile-builder/extract")
     def profile_builder_extract(
         file: UploadFile = File(...),
         x_ai_enabled: bool = Header(default=True),
         x_profile_builder_access_token: str | None = Header(default=None),
+        x_profile_builder_request_id: str | None = Header(default=None),
     ) -> JSONResponse:
         token = _require_profile_builder_access_token(
             x_profile_builder_access_token
         )
+        try:
+            return _profile_builder_extract(file, x_ai_enabled, token, x_profile_builder_request_id)
+        finally:
+            extraction_cancellations.discard(token, x_profile_builder_request_id)
+
+    def _profile_builder_extract(
+        file: UploadFile,
+        x_ai_enabled: bool,
+        token: str,
+        request_id: str | None,
+    ) -> JSONResponse:
+        def raise_if_cancelled() -> None:
+            if extraction_cancellations.is_cancelled(token, request_id):
+                raise HTTPException(status_code=409, detail="profile_extraction_cancelled")
+
+        raise_if_cancelled()
         if not x_ai_enabled:
             raise HTTPException(
                 status_code=409,
@@ -129,12 +162,14 @@ def create_profile_builder_router(
                 file, selected_profile_builder_max_bytes
             )
             redacted_document = _convert_profile_cv(content, filename)
+            raise_if_cancelled()
             profile = extract_candidate_profile(
                 selected_ai_settings,
                 selected_profile_extractor,
                 redacted_document,
                 recorder=usage_recorder(),
             )
+            raise_if_cancelled()
             preferences = resolved_profile_builder_preferences(token)
             profile = apply_profile_conversion_preferences(profile, preferences)
             profile = materialize_custom_fields(
@@ -168,6 +203,7 @@ def create_profile_builder_router(
             ) from exc
         except UploadReadError as exc:
             raise HTTPException(status_code=500, detail="analysis_runtime_error") from exc
+        raise_if_cancelled()
         return JSONResponse(
             {
                 "filename": filename,

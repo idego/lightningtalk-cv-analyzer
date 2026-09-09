@@ -1604,3 +1604,65 @@ def test_legacy_company_category_policy_becomes_hidden():
     policy = AnonymizationPolicy.model_validate({"employer_mode": "genericize"})
     assert policy.employer_mode == "hide"
     assert AnonymizationPolicy.model_validate({"employer_mode": "show"}).employer_mode == "show"
+
+
+def _cancel_files() -> dict:
+    return {
+        "file": (
+            "candidate.docx",
+            _docx_bytes("Jane Example\nBackend Engineer at Acme"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    }
+
+
+def test_profile_builder_extraction_cancel_discards_result_before_it_is_returned(
+    tmp_path,
+    location_resolver,
+) -> None:
+    class _CancellingExtractor(_Extractor):
+        def extract(self, request):
+            # The recruiter cancels while the model call is in flight.
+            cancel = client.post(
+                "/profile-builder/extract/cancel",
+                headers={"X-Profile-Builder-Request-Id": "req-1"},
+            )
+            assert cancel.status_code == 202
+            return super().extract(request)
+
+    extractor = _CancellingExtractor()
+    client = _client(tmp_path, location_resolver, extractor)
+    response = client.post(
+        "/profile-builder/extract",
+        files=_cancel_files(),
+        headers={"X-Profile-Builder-Request-Id": "req-1"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "profile_extraction_cancelled"
+    assert len(extractor.requests) == 1
+
+
+def test_profile_builder_extraction_cancel_is_scoped_to_request_id_and_consumed(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    assert client.post("/profile-builder/extract/cancel").status_code == 400
+    assert client.post(
+        "/profile-builder/extract/cancel", headers={"X-Profile-Builder-Request-Id": "req-1"}
+    ).status_code == 202
+    other = client.post(
+        "/profile-builder/extract", files=_cancel_files(), headers={"X-Profile-Builder-Request-Id": "req-2"}
+    )
+    assert other.status_code == 200
+    without_id = client.post("/profile-builder/extract", files=_cancel_files())
+    assert without_id.status_code == 200
+    cancelled = client.post(
+        "/profile-builder/extract", files=_cancel_files(), headers={"X-Profile-Builder-Request-Id": "req-1"}
+    )
+    assert cancelled.status_code == 409
+    assert cancelled.json()["detail"] == "profile_extraction_cancelled"
+    again = client.post(
+        "/profile-builder/extract", files=_cancel_files(), headers={"X-Profile-Builder-Request-Id": "req-1"}
+    )
+    assert again.status_code == 200
