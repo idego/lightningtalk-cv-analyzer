@@ -41,10 +41,7 @@ export function researchEligibility(report: AnalysisReport) {
     (record) => acceptedRelation(record)
       && supported(record.institution),
   );
-  const linkedinProvided = (report.mechanical?.literal_links ?? []).some(
-    (link) => link?.known_host === "linkedin",
-  );
-  const linkedin = supported(report.base_analysis.profile.candidate_name) && !linkedinProvided;
+  const linkedin = supported(report.base_analysis.profile.candidate_name);
   return {
     company: report.ai_capabilities?.company_research !== false && employment,
     education: report.ai_capabilities?.education_research !== false && education,
@@ -55,6 +52,15 @@ export function researchEligibility(report: AnalysisReport) {
 export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnabled" | "autoResearchEnabled" | "autoCompanyResearch" | "autoEducationResearch" | "autoLinkedinDiscovery">): AutoResearchKind[] {
   if (settings.aiEnabled === false || !settings.autoResearchEnabled) return [];
   return [settings.autoCompanyResearch && "company", settings.autoEducationResearch && "education", settings.autoLinkedinDiscovery && "linkedin"].filter(Boolean) as AutoResearchKind[];
+}
+
+export function linkedinProvidedInCv(report: AnalysisReport): boolean {
+  return (report.mechanical?.literal_links ?? []).some((link) => link?.known_host === "linkedin");
+}
+
+/** Kinds that stay available manually but are not started automatically. */
+export function automaticallySkippedKinds(report: AnalysisReport): Set<AutoResearchKind> {
+  return new Set(linkedinProvidedInCv(report) ? ["linkedin" as const] : []);
 }
 
 export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResearchKind> {
@@ -151,8 +157,9 @@ export function createAutoResearchOrchestrator({
   async function schedule(report: AnalysisReport, settings: AppSettings) {
     if (settings.aiEnabled === false || report.ai_features_enabled === false) return;
     const eligible = eligibleAutoResearchKinds(report);
+    const skipped = automaticallySkippedKinds(report);
     const completions = effectiveAutoResearchKinds(settings)
-      .filter((kind) => eligible.has(kind))
+      .filter((kind) => eligible.has(kind) && !skipped.has(kind))
       .map((kind) => request(report, settings, kind, false));
     await Promise.all(completions);
   }

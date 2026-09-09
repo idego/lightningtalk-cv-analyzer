@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  automaticallySkippedKinds,
   createAutoResearchOrchestrator,
   eligibleAutoResearchKinds,
   researchEligibility,
@@ -66,26 +67,49 @@ test("accepted base analysis records enable all eligible research", () => {
   );
 });
 
-test("a LinkedIn link in the CV disables LinkedIn discovery only", () => {
+function withLinks(links) {
   const value = report();
-  value.mechanical = {
-    literal_links: [
-      { value: "github.com/jane", normalized_url: "https://github.com/jane", known_host: "github" },
-      { value: "linkedin.com/in/jane", normalized_url: "https://linkedin.com/in/jane", known_host: "linkedin" },
-    ],
-  };
+  value.mechanical = { literal_links: links };
+  return value;
+}
 
-  assert.deepEqual([...eligibleAutoResearchKinds(value)].sort(), ["company", "education"]);
-  assert.equal(researchEligibility(value).linkedin, false);
+const LINKEDIN_LINK = { value: "linkedin.com/in/jane", normalized_url: "https://linkedin.com/in/jane", known_host: "linkedin" };
+const PERSONAL_LINK = { value: "www.jane.dev", normalized_url: "https://www.jane.dev", known_host: "personal" };
+
+function recordingOrchestrator(calls) {
+  return createAutoResearchOrchestrator({
+    storage: storage(),
+    maxConcurrency: 3,
+    fetcher: async (url) => {
+      calls.push(url);
+      return { ok: true, status: 200, json: async () => ({ linkedin_discovery: {}, company_research: {}, education_research: {} }) };
+    },
+  });
+}
+
+test("a LinkedIn link in the CV keeps LinkedIn discovery eligible but skips the automatic start", async () => {
+  const value = withLinks([PERSONAL_LINK, LINKEDIN_LINK]);
+  assert.equal(researchEligibility(value).linkedin, true);
+  assert.deepEqual([...automaticallySkippedKinds(value)], ["linkedin"]);
+
+  const calls = [];
+  await recordingOrchestrator(calls).schedule(value, settings());
+
+  assert.deepEqual(calls.sort(), [
+    "/api/analyses/analysis-1/research/company",
+    "/api/analyses/analysis-1/research/education",
+  ]);
 });
 
-test("non-LinkedIn links keep LinkedIn discovery eligible", () => {
-  const value = report();
-  value.mechanical = {
-    literal_links: [{ value: "www.jane.dev", normalized_url: "https://www.jane.dev", known_host: "personal" }],
-  };
+test("manual LinkedIn discovery still runs when the CV links a profile", async () => {
+  const calls = [];
+  await recordingOrchestrator(calls).runManual(withLinks([LINKEDIN_LINK]), settings(), "linkedin");
 
-  assert.equal(researchEligibility(value).linkedin, true);
+  assert.deepEqual(calls, ["/api/analyses/analysis-1/research/linkedin/discovery"]);
+});
+
+test("non-LinkedIn links do not skip any automatic research", () => {
+  assert.deepEqual([...automaticallySkippedKinds(withLinks([PERSONAL_LINK]))], []);
 });
 
 test("ambiguous records are not research subjects", () => {
