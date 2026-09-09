@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, MessageSquareText, Search, Settings, UserRoundPen } from "lucide-react";
+import { BookOpen, LayoutDashboard, MessageSquareText, Search, Settings, UserRoundPen } from "lucide-react";
 
 export type NavItem = {
   title: string;
@@ -21,6 +21,7 @@ export function buildSidebarNav(showFeedback = false): NavGroup[] {
         { title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen },
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         ...(showFeedback ? [{ title: "Feedback", url: "/feedback", icon: MessageSquareText }] : []),
+        { title: "Manual", url: "/manual", icon: BookOpen },
         { title: "Settings", url: "/settings", icon: Settings },
       ],
     },
@@ -41,6 +42,7 @@ export function titleFromPathname(pathname: string): string {
   if (normalized.startsWith("/profile-builder/templates/")) return "Template Creator";
   if (normalized === "/profile-builder") return "Profile Builder";
   if (normalized === "/profiles") return "Profiles";
+  if (normalized === "/manual") return "Manual";
   if (normalized === "/settings") return "Settings";
   if (normalized.startsWith("/feedback")) return "Feedback";
   return "CV Analyzer";

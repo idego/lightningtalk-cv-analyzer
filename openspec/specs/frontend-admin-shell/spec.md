@@ -51,6 +51,12 @@ target.
 - **THEN** a `Feedback` navigation item pointing at `/feedback` is also present
 - **AND** users without a role see no `Feedback` item and are redirected from `/feedback` to `/analyze`
 
+#### Scenario: Manual route
+- **WHEN** any signed-in user opens the app shell
+- **THEN** a `Manual` navigation item pointing at `/manual` is present regardless of feedback role
+- **AND** the page presents a static, read-only user guide in the selected UI language (English or Polish) covering every sidebar feature, its workflow, limits, roles, and the product boundaries (no identity, location, or eligibility verification; no hiring judgment)
+- **AND** the guide contains no CV content, candidate data, or secrets
+
 #### Scenario: Layout structure
 - **WHEN** shell pages are rendered
 - **THEN** they are wrapped by sidebar + header + main content + footer structure suitable for later auth/upload pages

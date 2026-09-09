@@ -125,7 +125,7 @@ const copy = {
   en: {
     profileBuilder: "Profile Builder", profilePdfExport: "Profile PDF export",
 
-    analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings",
+    analysis: "Analysis", analyze: "Analyze", dashboard: "Dashboard", settings: "Settings", manual: "Manual",
     dashboardUsageTitle: "AI Usage", dashboardReportsProcessed: "Reports processed", dashboardTokens: "Tokens", dashboardTotal: "Total", dashboardAverage: "Average", dashboardEstimatedCost: "Estimated cost", dashboardPrompt: "Prompt", dashboardCached: "Cached", dashboardCompletion: "Completion", dashboardPerProcessedReport: "Per analyzed report (Analyzer only)", dashboardUsageByOperation: "Usage by operation", dashboardBreakdownDescription: "AI usage across the entire application, including CV analysis, research, and Profile Builder.", dashboardOperation: "Operation", dashboardCalls: "Calls", dashboardEstimatedCostUsd: "Est. Cost (USD)", dashboardNoUsage: "No AI operations have been ledgered yet.", dashboardLoadError: "Failed to load usage metrics.",
     uploadTitle: "Upload CV files",
     drop: "Drag and drop files here, or click to select", accepted: "Accepted: PDF, DOCX",
@@ -172,7 +172,7 @@ const copy = {
   pl: {
     profileBuilder: "Kreator profili", profilePdfExport: "Eksport profilu do PDF",
 
-    analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia",
+    analysis: "Analiza", analyze: "Analizuj", dashboard: "Dashboard", settings: "Ustawienia", manual: "Instrukcja",
     dashboardUsageTitle: "Zużycie AI", dashboardReportsProcessed: "Przetworzone raporty", dashboardTokens: "Tokeny", dashboardTotal: "Łącznie", dashboardAverage: "Średnio", dashboardEstimatedCost: "Szacowany koszt", dashboardPrompt: "Prompt", dashboardCached: "Cache", dashboardCompletion: "Odpowiedź", dashboardPerProcessedReport: "Na raport analizatora", dashboardUsageByOperation: "Zużycie według operacji", dashboardBreakdownDescription: "Zużycie AI w całej aplikacji: analiza CV, research i Profile Builder.", dashboardOperation: "Operacja", dashboardCalls: "Wywołania", dashboardEstimatedCostUsd: "Szac. koszt (USD)", dashboardNoUsage: "Nie zarejestrowano jeszcze żadnych operacji AI.", dashboardLoadError: "Nie udało się pobrać statystyk zużycia.",
     uploadTitle: "Dodaj pliki CV",
     drop: "Przeciągnij pliki tutaj lub kliknij, aby je wybrać", accepted: "Obsługiwane: PDF, DOCX",

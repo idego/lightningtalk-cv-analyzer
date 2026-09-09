@@ -11,6 +11,7 @@ test("includes builder alongside analyzer and feedback for feedback members", ()
       { title: "Profile Builder", url: "/profile-builder" },
       { title: "Dashboard", url: "/dashboard" },
       { title: "Feedback", url: "/feedback" },
+      { title: "Manual", url: "/manual" },
       { title: "Settings", url: "/settings" },
     ],
   );
@@ -19,8 +20,15 @@ test("includes builder alongside analyzer and feedback for feedback members", ()
 test("does not expose Feedback to users without feedback access", () => {
   assert.deepEqual(
     buildSidebarNav(false)[0].items.map(({ title }) => title),
-    ["Analyze", "Profile Builder", "Dashboard", "Settings"],
+    ["Analyze", "Profile Builder", "Dashboard", "Manual", "Settings"],
   );
+});
+
+test("exposes the manual to every user and names its route", () => {
+  assert.equal(buildSidebarNav(false)[0].items.some((item) => item.url === "/manual"), true);
+  assert.equal(isSidebarItemActive("/manual", "/manual"), true);
+  assert.equal(isSidebarItemActive("/manual-old", "/manual"), false);
+  assert.equal(titleFromPathname("/manual"), "Manual");
 });
 
 test("keeps sidebar sections active on nested routes", () => {
