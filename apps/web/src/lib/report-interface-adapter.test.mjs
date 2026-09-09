@@ -89,8 +89,13 @@ function report() {
     },
     mechanical: {
       phones: [{ value: "+48 123 456 789", country_code: "PL", evidence: field("+48 123 456 789").evidence }],
-      emails: [],
-      literal_links: [],
+      emails: [{ value: "alex@example.com", evidence: field("alex@example.com").evidence }],
+      literal_links: [
+        { value: "linkedin.com/in/alex", normalized_url: "https://linkedin.com/in/alex", known_host: "linkedin", evidence: field("linkedin.com/in/alex").evidence },
+        { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
+        { value: "www.alex.dev", normalized_url: "https://www.alex.dev", known_host: "personal", evidence: field("www.alex.dev").evidence },
+        { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
+      ],
       postal_candidates: [],
       accepted_postal_addresses: [{ value: "00-001", possible_country_codes: ["PL"] }],
       email_findings: [
@@ -133,6 +138,12 @@ test("CV overview includes accepted and annotated records and intentionally omit
 
   assert.equal(overview.candidateName, "Alex Example");
   assert.equal(overview.phoneCountry, "PL");
+  assert.equal(overview.email, "alex@example.com");
+  assert.deepEqual(overview.links, [
+    { kind: "linkedin", value: "linkedin.com/in/alex", url: "https://linkedin.com/in/alex" },
+    { kind: "github", value: "https://github.com/alex", url: "https://github.com/alex" },
+    { kind: "personal", value: "www.alex.dev", url: "https://www.alex.dev" },
+  ]);
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
   assert.equal(overview.employment[0].detail, "2020 – 2024 · Example Systems · Warsaw");

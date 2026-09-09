@@ -22,6 +22,26 @@ def test_mechanical_extracts_only_literal_candidates() -> None:
     assert result["accepted_postal_addresses"] == []
 
 
+def test_links_are_tagged_linkedin_github_or_personal() -> None:
+    result = extract_mechanical([
+        TextSegment(
+            id="segment-1",
+            text=(
+                "https://www.linkedin.com/in/jane https://github.com/jane "
+                "www.jane.dev https://portfolio.example.org/work"
+            ),
+            page_number=1,
+        )
+    ])
+
+    assert [link["known_host"] for link in result["literal_links"]] == [
+        "linkedin",
+        "github",
+        "personal",
+        "personal",
+    ]
+
+
 def test_postal_overlap_keeps_ambiguity() -> None:
     result = extract_mechanical([
         TextSegment(id="segment-1", text="Reference number 12345")

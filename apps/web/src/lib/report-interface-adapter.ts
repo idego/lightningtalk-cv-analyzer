@@ -24,10 +24,20 @@ export type OverviewRecord = {
   needsReview?: boolean;
 };
 
+export type OverviewLinkKind = "linkedin" | "github" | "personal";
+
+export type OverviewLink = {
+  kind: OverviewLinkKind;
+  value: string;
+  url: string;
+};
+
 export type ReportOverview = {
   candidateName: string | null;
   phone: string | null;
   phoneCountry: string | null;
+  email: string | null;
+  links: OverviewLink[];
   statedLocation: string | null;
   resolvedLocation: string | null;
   postalCode: string | null;
@@ -242,8 +252,29 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
   };
 }
 
+const MAX_OVERVIEW_LINKS = 8;
+
+function overviewLinks(items: unknown[]): OverviewLink[] {
+  const seen = new Set<string>();
+  const links: OverviewLink[] = [];
+  for (const item of items.map(record)) {
+    const literal = text(item?.value);
+    const url = text(item?.normalized_url);
+    if (!literal || !url || !/^https:\/\//i.test(url)) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const host = item?.known_host;
+    const kind: OverviewLinkKind = host === "linkedin" || host === "github" ? host : "personal";
+    links.push({ kind, value: literal, url });
+    if (links.length >= MAX_OVERVIEW_LINKS) break;
+  }
+  return links;
+}
+
 function overview(report: AnalysisReport): ReportOverview {
   const phone = record(report.mechanical.phones[0]);
+  const email = record(report.mechanical.emails[0]);
   const resolution = report.mechanical.location_resolution
     .map(record)
     .find((item) => item?.subject === "declared_location") ?? null;
@@ -268,6 +299,8 @@ function overview(report: AnalysisReport): ReportOverview {
     candidateName: value(report.base_analysis.profile.candidate_name),
     phone: text(phone?.value),
     phoneCountry: text(phone?.country_code),
+    email: text(email?.value),
+    links: overviewLinks(report.mechanical.literal_links),
     statedLocation: value(report.base_analysis.profile.declared_location),
     resolvedLocation: join([text(resolution?.canonical_name), text(resolution?.country_code)]),
     postalCode: text(postal?.value),

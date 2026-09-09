@@ -53,5 +53,16 @@ An owner-opened persisted report SHALL show a compact estimated AI cost badge ba
 - **THEN** the report header shows the compact two-decimal estimated cost and a five-decimal tooltip detail
 
 
+### Requirement: Contact section shows literal CV contact values
+The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV, deduplicated by normalized URL. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Links SHALL display the literal CV text, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
+
+#### Scenario: CV contains a personal website
+- **WHEN** the CV contains a URL whose host is neither LinkedIn nor GitHub
+- **THEN** the Contact section shows it as a personal website link with the literal CV text
+
+#### Scenario: Same link appears twice
+- **WHEN** the same normalized URL is extracted from two places in the CV
+- **THEN** the Contact section shows it once
+
 ### Requirement: Compact overview and research controls
 Education and employment overview records SHALL use two columns at desktop widths and one at mobile widths, preserving their existing order. Certifications SHALL remain a separate full-width group with Google actions aligned to its right edge. Research confidence SHALL use three dots with a localized tooltip and accessible name, without a visible text badge. Back, Copy link, and Show/Hide CV SHALL have visible outlines. Existing preview visibility and workspace breakpoints remain unchanged.

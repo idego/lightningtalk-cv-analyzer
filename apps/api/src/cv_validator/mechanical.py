@@ -13,6 +13,12 @@ MECHANICAL_VERSION = "mechanical-extraction-v1"
 
 _EMAIL_RE = re.compile(r"(?<![\w.+-])([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})(?![\w.-])", re.I)
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+")
+_KNOWN_HOSTS = {
+    "linkedin.com": "linkedin",
+    "www.linkedin.com": "linkedin",
+    "github.com": "github",
+    "www.github.com": "github",
+}
 _PHONE_RE = re.compile(r"(?<!\w)\(?(?:\+|00)\d[\d\s().-]{6,}\d(?!\w)")
 _POSTAL_PATTERNS = {
     "PL": re.compile(r"\b\d{2}-\d{3}\b"),
@@ -80,11 +86,7 @@ def _extract_links(segments: tuple[TextSegment, ...]) -> list[dict[str, object]]
             if not host or key in seen:
                 continue
             seen.add(key)
-            known_host = None
-            if host in {"linkedin.com", "www.linkedin.com"}:
-                known_host = "linkedin"
-            elif host in {"github.com", "www.github.com"}:
-                known_host = "github"
+            known_host = _KNOWN_HOSTS.get(host, "personal")
             found.append(
                 {
                     "value": literal,
