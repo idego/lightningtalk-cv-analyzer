@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createAutoResearchOrchestrator,
   eligibleAutoResearchKinds,
+  researchEligibility,
 } from "./auto-research.ts";
 
 function field(value) {
@@ -63,6 +64,28 @@ test("accepted base analysis records enable all eligible research", () => {
     [...eligibleAutoResearchKinds(report())].sort(),
     ["company", "education", "linkedin"],
   );
+});
+
+test("a LinkedIn link in the CV disables LinkedIn discovery only", () => {
+  const value = report();
+  value.mechanical = {
+    literal_links: [
+      { value: "github.com/jane", normalized_url: "https://github.com/jane", known_host: "github" },
+      { value: "linkedin.com/in/jane", normalized_url: "https://linkedin.com/in/jane", known_host: "linkedin" },
+    ],
+  };
+
+  assert.deepEqual([...eligibleAutoResearchKinds(value)].sort(), ["company", "education"]);
+  assert.equal(researchEligibility(value).linkedin, false);
+});
+
+test("non-LinkedIn links keep LinkedIn discovery eligible", () => {
+  const value = report();
+  value.mechanical = {
+    literal_links: [{ value: "www.jane.dev", normalized_url: "https://www.jane.dev", known_host: "personal" }],
+  };
+
+  assert.equal(researchEligibility(value).linkedin, true);
 });
 
 test("ambiguous records are not research subjects", () => {

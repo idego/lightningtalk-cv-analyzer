@@ -41,7 +41,10 @@ export function researchEligibility(report: AnalysisReport) {
     (record) => acceptedRelation(record)
       && supported(record.institution),
   );
-  const linkedin = supported(report.base_analysis.profile.candidate_name);
+  const linkedinProvided = (report.mechanical?.literal_links ?? []).some(
+    (link) => link?.known_host === "linkedin",
+  );
+  const linkedin = supported(report.base_analysis.profile.candidate_name) && !linkedinProvided;
   return {
     company: report.ai_capabilities?.company_research !== false && employment,
     education: report.ai_capabilities?.education_research !== false && education,

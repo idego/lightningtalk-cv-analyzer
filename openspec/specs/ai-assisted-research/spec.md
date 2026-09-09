@@ -33,10 +33,19 @@ research category automatically. Company, education, and LinkedIn categories
 run independently and remain available as manual actions after a failed or
 disabled automatic attempt.
 
+LinkedIn discovery SHALL NOT be eligible when the CV already contains a
+literal LinkedIn profile link (an extracted link tagged `linkedin`). Company
+and education eligibility are unaffected by CV links.
+
 #### Scenario: Eligible categories exist
 
 - **WHEN** automatic research is enabled and accepted subjects exist
 - **THEN** eligible categories start without waiting for another analysis pass
+
+#### Scenario: CV already includes a LinkedIn link
+
+- **WHEN** the extracted CV links include one tagged `linkedin`
+- **THEN** LinkedIn discovery is not started automatically and is not offered manually, while company and education research remain eligible
 
 #### Scenario: Research is disabled
 
