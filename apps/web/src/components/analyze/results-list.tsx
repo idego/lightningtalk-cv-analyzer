@@ -1,8 +1,8 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Award, BriefcaseBusiness, CircleAlert, Code2, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
-import { LinkedInIcon } from "@/components/analyze/search-provider-icon";
+import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { GitHubIcon, LinkedInIcon } from "@/components/analyze/search-provider-icon";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { OverviewLink, ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
@@ -102,7 +102,7 @@ function OverviewRow({
 
 function linkIcon(kind: OverviewLink["kind"]) {
   if (kind === "linkedin") return <LinkedInIcon className="size-4" />;
-  if (kind === "github") return <Code2 className="size-4" />;
+  if (kind === "github") return <GitHubIcon className="size-4" />;
   return <LinkIcon className="size-4" />;
 }
 
