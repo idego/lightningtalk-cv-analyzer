@@ -42,9 +42,6 @@ export type ReportOverview = {
   statedLocation: string | null;
   resolvedCity: string | null;
   resolvedCountry: string | null;
-  postalCode: string | null;
-  postalCountry: string | null;
-  postalConsistency: "consistent" | "mismatch" | null;
   euStatus: "inside" | "outside" | "unknown";
   education: OverviewRecord[];
   certifications: OverviewRecord[];
@@ -286,12 +283,7 @@ function overview(report: AnalysisReport): ReportOverview {
   const resolution = report.mechanical.location_resolution
     .map(record)
     .find((item) => item?.subject === "declared_location") ?? null;
-  const postal = record(report.mechanical.accepted_postal_addresses[0]);
-  const postalCountries = Array.isArray(postal?.possible_country_codes)
-    ? postal.possible_country_codes.filter((item): item is string => typeof item === "string")
-    : [];
   const eu = record(report.mechanical.eu_status);
-  const postalValidation = record(postal?.validation);
   const suspectedIds = new Set(
     (report.base_analysis.review.annotations ?? [])
       .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
@@ -312,13 +304,6 @@ function overview(report: AnalysisReport): ReportOverview {
     statedLocation: value(report.base_analysis.profile.declared_location),
     resolvedCity: text(resolution?.canonical_name),
     resolvedCountry: text(resolution?.country_code),
-    postalCode: text(postal?.value),
-    postalCountry: postalCountries.length === 1 ? postalCountries[0] : null,
-    postalConsistency: postalValidation?.status === "resolved"
-      ? "consistent"
-      : postalValidation?.status === "mismatch"
-        ? "mismatch"
-        : null,
     euStatus: declaredCountry && outsideEu.includes(declaredCountry) ? "outside" : declaredCountry && insideEu.includes(declaredCountry) ? "inside" : "unknown",
     education: report.base_analysis.education
       .filter((item) => !suspectedIds.has(item.id) && value(item.institution))

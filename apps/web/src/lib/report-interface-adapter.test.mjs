@@ -263,13 +263,7 @@ test("GeoNames and postal outcomes use evidence and cautious status-specific cop
   const presentation = adaptReportInterface(value, "en");
 
   assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
-  assert.equal(presentation.overview.postalConsistency, null);
   assert.equal(presentation.worthKnowing.some((item) => item.id.startsWith("postal-")), false);
-
-  value.mechanical.accepted_postal_addresses[0].validation.status = "resolved";
-  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "consistent");
-  value.mechanical.accepted_postal_addresses[0].validation.status = "mismatch";
-  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "mismatch");
 
   value.mechanical.location_resolution[0].status = "unresolved";
   value.mechanical.location_resolution[0].city_country_relationship = "unresolved";

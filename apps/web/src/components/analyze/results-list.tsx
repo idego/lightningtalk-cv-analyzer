@@ -125,7 +125,7 @@ function joinDisplay(...values: Array<string | null | undefined>) {
 export function StructuredFacts({ overview, report, feedbackManifest, readOnly = false }: { overview: ReportOverview; report: AnalysisReport; feedbackManifest?: FeedbackManifest; readOnly?: boolean }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
-  const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
+  const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.euStatus);
   const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
   const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
@@ -142,14 +142,6 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const resolvedLocationDetail = overview.statedLocation && resolvedLocation
     ? `${t("resolvedLocation")}: ${resolvedLocation}`
     : null;
-  const postalCountry = overview.postalCountry ? displayCountry(overview.postalCountry, settings.uiLanguage) : null;
-  const postalConsistency = overview.postalConsistency
-    ? t(overview.postalConsistency === "consistent" ? "postalConsistent" : "postalMismatch")
-    : null;
-  const postalDetail = joinDisplay(
-    postalCountry ? `${t("postalCountry")}: ${postalCountry}` : null,
-    postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null,
-  );
   const educationTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   const employmentTone = "bg-amber-500/10 text-amber-800 dark:text-amber-200";
   const overviewFeedbackTarget = feedbackTarget(
@@ -185,9 +177,6 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
               <div className="space-y-1">
                 {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} detail={resolvedLocationDetail} tone={locationTone} /> : null}
                 {!overview.statedLocation && resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={resolvedLocation} tone={locationTone} /> : null}
-                {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} detail={postalDetail} tone={locationTone} /> : null}
-                {!overview.postalCode && postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={postalCountry} detail={postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null} tone={locationTone} /> : null}
-                {!overview.postalCode && !postalCountry && postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={postalConsistency} tone={locationTone} /> : null}
                 {overview.euStatus ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("euStatus")} value={overview.euStatus === "unknown" ? (settings.uiLanguage === "pl" ? "Lokalizacja nieustalona" : "Location unknown") : t(overview.euStatus === "outside" ? "outsideEu" : "insideEu")} tone={locationTone} /> : null}
               </div>
             </section> : null}
