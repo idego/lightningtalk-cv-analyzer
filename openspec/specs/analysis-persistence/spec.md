@@ -43,7 +43,11 @@ The analyze screen SHALL list the caller's recent analyses and allow reopening o
 - **THEN** the stored report renders with the same research and feedback state
 
 ### Requirement: Scoped read-only analysis sharing
-An analysis owner SHALL be able to create a high-entropy share capability for one persisted analysis. The API SHALL store only a hash of that capability and SHALL accept it only on read-only shared-report and shared-document endpoints for the same analysis. A share capability MUST NOT grant owner history, delete, feedback, research, diagnostics, usage, or retention access, and MUST NOT be accepted as an owner identity. Deleting or retention-purging the analysis SHALL invalidate all of its share capabilities. The web app SHALL require its normal authenticated session before proxying shared report or document reads.
+An analysis owner SHALL be able to create a high-entropy share capability for one persisted analysis. The API SHALL store only a hash of that capability and SHALL accept it only on read-only shared-report and shared-document endpoints for the same analysis. A share capability MUST NOT grant owner history, delete, feedback, research, diagnostics, usage, or retention access, and MUST NOT be accepted as an owner identity. Each share capability SHALL expire two days after creation or at the analysis retention deadline, whichever is earlier; the API returns the ISO `expires_at` alongside the token, rejects expired capabilities exactly like unknown ones, and purge removes expired rows. Deleting or retention-purging the analysis SHALL invalidate all of its share capabilities. The web app SHALL require its normal authenticated session before proxying shared report or document reads.
+
+#### Scenario: Share link expires
+- **WHEN** a share capability is older than two days, or the analysis has passed its retention deadline
+- **THEN** shared report and document reads with that capability return 404
 
 #### Scenario: Authenticated colleague opens a shared analysis
 - **WHEN** the owner creates a share link and another authenticated web user opens it with the valid per-analysis share capability

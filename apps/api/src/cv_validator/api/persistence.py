@@ -157,6 +157,7 @@ class PersistenceStore:
                     analysis_id TEXT NOT NULL,
                     token_hash TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
+                    expires_at TEXT,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
                 CREATE TABLE IF NOT EXISTS runtime_settings (
@@ -228,6 +229,7 @@ class PersistenceStore:
                 """
             )
             _ensure_ai_usage_schema(conn)
+            _ensure_share_token_expiry_schema(conn)
             conn.execute(
                 """INSERT OR IGNORE INTO processed_report_events
                    (event_id, analysis_id, completed_at, status)
@@ -642,22 +644,29 @@ class PersistenceStore:
         analysis_id: str,
         owner_user_id: str | None,
         share_token: str,
-    ) -> bool:
+    ) -> str | None:
+        """Store a hashed share capability; returns its ISO expiry, or None when not owned.
+
+        A link lives for ``SHARE_TOKEN_TTL`` or until the analysis itself is
+        retention-purged, whichever comes first.
+        """
         if not owner_user_id:
-            return False
+            return None
+        now = datetime.now(timezone.utc)
         with self._connect() as conn:
             report = conn.execute(
-                "SELECT 1 FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
+                "SELECT created_at FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
                 (analysis_id, owner_user_id),
             ).fetchone()
             if report is None:
-                return False
+                return None
+            expires_at = _share_token_expiry(now, str(report["created_at"]), self.config.retention_days)
             conn.execute(
-                """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at)
-                   VALUES (?, ?, ?)""",
-                (analysis_id, _token_hash(share_token), _utc_now()),
+                """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at, expires_at)
+                   VALUES (?, ?, ?, ?)""",
+                (analysis_id, _token_hash(share_token), now.isoformat(), expires_at),
             )
-        return True
+        return expires_at
 
     def analysis_share_access_allowed(self, analysis_id: str, share_token: str | None) -> bool:
         if not share_token:
@@ -665,8 +674,9 @@ class PersistenceStore:
         token_hash = _token_hash(share_token)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT token_hash FROM analysis_share_tokens WHERE analysis_id = ? AND token_hash = ?",
-                (analysis_id, token_hash),
+                """SELECT token_hash FROM analysis_share_tokens
+                   WHERE analysis_id = ? AND token_hash = ? AND expires_at > ?""",
+                (analysis_id, token_hash, _utc_now()),
             ).fetchone()
         return row is not None and hmac.compare_digest(str(row["token_hash"]), token_hash)
 
@@ -986,8 +996,49 @@ class PersistenceStore:
                 "DELETE FROM reusable_research_cache WHERE expires_at <= ?",
                 (_utc_now(),),
             ).rowcount
+            deleted["expired_share_tokens"] = conn.execute(
+                "DELETE FROM analysis_share_tokens WHERE expires_at IS NULL OR expires_at <= ?",
+                (_utc_now(),),
+            ).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
         return deleted
+
+
+SHARE_TOKEN_TTL = timedelta(days=2)
+
+
+def _share_token_expiry(now: datetime, report_created_at: str, retention_days: int) -> str:
+    """Earlier of the fixed share TTL and the analysis retention deadline."""
+    expires_at = now + SHARE_TOKEN_TTL
+    try:
+        created_at = datetime.fromisoformat(report_created_at)
+    except ValueError:
+        return expires_at.isoformat()
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    retention_deadline = created_at + timedelta(days=retention_days)
+    return min(expires_at, retention_deadline).isoformat()
+
+
+def _ensure_share_token_expiry_schema(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(analysis_share_tokens)").fetchall()
+    }
+    if not columns or "expires_at" in columns:
+        return
+    conn.execute("ALTER TABLE analysis_share_tokens ADD COLUMN expires_at TEXT")
+    # Links minted before expiry existed inherit the fixed TTL from their creation time.
+    for row in conn.execute("SELECT token_hash, created_at FROM analysis_share_tokens").fetchall():
+        try:
+            created_at = datetime.fromisoformat(str(row["created_at"]))
+        except ValueError:
+            created_at = datetime.now(timezone.utc)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        conn.execute(
+            "UPDATE analysis_share_tokens SET expires_at = ? WHERE token_hash = ?",
+            ((created_at + SHARE_TOKEN_TTL).isoformat(), row["token_hash"]),
+        )
 
 
 def _utc_now() -> str:

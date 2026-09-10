@@ -767,13 +767,14 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
     ) -> JSONResponse:
         share_token = secrets.token_urlsafe(32)
-        if not store.persist_analysis_share_token(
+        expires_at = store.persist_analysis_share_token(
             analysis_id,
             _optional_owner_user_id(x_analysis_owner_id),
             share_token,
-        ):
+        )
+        if expires_at is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
-        return JSONResponse({"share_token": share_token})
+        return JSONResponse({"share_token": share_token, "expires_at": expires_at})
 
     @app.get("/shared/analyses/{analysis_id}")
     def get_shared_analysis(
