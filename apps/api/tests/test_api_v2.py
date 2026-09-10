@@ -177,6 +177,7 @@ def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
     assert document.content == b"%PDF-1.7 stored bytes"
     assert document.headers["content-type"] == "application/pdf"
     assert document.headers["cache-control"] == "private, no-store"
+    assert document.headers["x-content-type-options"] == "nosniff"
     disposition = document.headers["content-disposition"]
     assert disposition.startswith('inline; filename="')
     assert '"2026"' not in disposition
@@ -249,6 +250,11 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     assert shared.json()["report"]["analysis_id"] == analysis_id
     assert shared.json()["report"]["company_research"] == completed_company_research
     assert "analysis_access_token" not in shared.json()["report"]
+    for exposed in (shared.json()["report"], client.get(f"/analyses/{analysis_id}", headers=owner_headers).json()):
+        assert "versions" not in exposed and "usage" not in exposed
+        assert "sha256" not in exposed["source"]
+        assert all(set(item) <= {"status", "section_status"} for item in exposed["base_analysis"]["pass_statuses"].values())
+        assert "rejected" not in exposed["base_analysis"]["review"]
 
     shared_document = client.get(
         f"/shared/analyses/{analysis_id}/document",
@@ -256,6 +262,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     )
     assert shared_document.status_code == 200
     assert shared_document.content == b"%PDF-1.7 stored bytes"
+    assert shared_document.headers["x-content-type-options"] == "nosniff"
 
     assert client.get(
         f"/analyses/{analysis_id}",

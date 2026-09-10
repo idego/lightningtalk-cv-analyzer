@@ -32,6 +32,7 @@ from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchL
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
+from cv_validator.api.report_view import public_report_view
 from cv_validator.config import (
     LocationConfigurationError,
     load_location_resolver,
@@ -654,7 +655,7 @@ def create_app(
                     for item in report["base_analysis"][key]
                 ),
             )
-            return response_payload
+            return public_report_view(response_payload)
         except HTTPException:
             raise
         except AnalysisStrategyUnavailable as exc:
@@ -759,7 +760,7 @@ def create_app(
     ) -> JSONResponse:
         payload = _owned_payload(store, analysis_id, _optional_owner_user_id(x_analysis_owner_id))
         attach_capabilities(payload)
-        return JSONResponse(payload)
+        return JSONResponse(public_report_view(payload))
 
     @app.post("/analyses/{analysis_id}/share")
     def create_analysis_share_link(
@@ -788,6 +789,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         _attach_completed_research(store, analysis_id, view["report"])
         attach_capabilities(view["report"])
+        view["report"] = public_report_view(view["report"])
         return JSONResponse(view)
 
     @app.get("/analyses/{analysis_id}/diagnostics")
@@ -831,6 +833,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -850,6 +853,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
