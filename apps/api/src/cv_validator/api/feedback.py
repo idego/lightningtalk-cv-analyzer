@@ -144,6 +144,28 @@ def _sanitize_context_report(value: Any) -> Any:
     return value
 
 
+# Report keys the inbox needs to re-render one module. Everything else
+# (versions, usage, pass statuses, source digest, review internals, limitations)
+# is telemetry the inbox never shows and must not be retained in feedback.
+_CONTEXT_REPORT_BASE_KEYS = ("analysis_id", "base_analysis", "mechanical")
+_CONTEXT_REPORT_RESEARCH_KEYS = {
+    "company_research": "company_research",
+    "education_research": "education_research",
+    "linkedin_discovery": "linkedin_discovery",
+}
+
+
+def _project_context_report(value: dict[str, Any] | None, source_category: str | None) -> dict[str, Any] | None:
+    """Keep only the report slice the inbox renders for this target's module."""
+    if value is None:
+        return None
+    keys = list(_CONTEXT_REPORT_BASE_KEYS)
+    research_key = _CONTEXT_REPORT_RESEARCH_KEYS.get(source_category or "")
+    if research_key:
+        keys.append(research_key)
+    return {key: value[key] for key in keys if key in value}
+
+
 def _internal_context_key(key: Any) -> bool:
     if not isinstance(key, str):
         return False
@@ -313,7 +335,7 @@ class FeedbackStore:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             target = conn.execute(
-                "SELECT kind FROM feedback_targets WHERE target_id=? AND analysis_id=?",
+                "SELECT kind, source_category FROM feedback_targets WHERE target_id=? AND analysis_id=?",
                 (target_id, analysis_id),
             ).fetchone()
             if target is None:
@@ -331,7 +353,8 @@ class FeedbackStore:
             if target["kind"] == TargetKind.OPERATION_FAILURE:
                 if value.rating != Rating.NOT_HELPFUL or value.reason != Reason.OPERATION_FAILED:
                     raise ValueError("failure_feedback_is_closed")
-            context_report_json = None if value.context_report is None else json.dumps(value.context_report, separators=(",", ":"))
+            context_report = _project_context_report(value.context_report, target["source_category"])
+            context_report_json = None if context_report is None else json.dumps(context_report, separators=(",", ":"))
             existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, context_report_json, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
             equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["context_report_json"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, context_report_json, normalized_email)
             if not equivalent:

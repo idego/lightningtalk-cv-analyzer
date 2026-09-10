@@ -412,14 +412,16 @@ def test_feedback_context_report_strips_internal_capability_fields_recursively(t
             rating="helpful",
             context_report={
                 "analysis_access_token": "secret",
-                "nested": {"owner_user_id": "owner", "safe": "value"},
-                "items": [{"access_token": "also-secret", "safe": 1}],
+                "base_analysis": {
+                    "nested": {"owner_user_id": "owner", "safe": "value"},
+                    "items": [{"access_token": "also-secret", "safe": 1}],
+                },
             },
         ),
     )
     assert result is not None
     inbox = store.inbox()["items"][0]["context_report"]
-    assert inbox == {"nested": {"safe": "value"}, "items": [{"safe": 1}]}
+    assert inbox == {"base_analysis": {"nested": {"safe": "value"}, "items": [{"safe": 1}]}}
 
 
 def test_feedback_rate_limit_is_scoped_per_analysis(tmp_path):
@@ -436,3 +438,79 @@ def test_feedback_rate_limit_is_scoped_per_analysis(tmp_path):
     with pytest.raises(ValueError, match="feedback_rate_limit"):
         store.put("analysis-1", first["target_id"], actor, FeedbackInput(rating="helpful"))
     assert store.put("analysis-2", second["target_id"], actor, FeedbackInput(rating="helpful"))
+
+
+def test_internal_feedback_routes_require_internal_secret(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from cv_validator.api.app import create_app
+    from cv_validator.openai_config import OpenAISettings
+
+    secret = "internal-owner-secret-0123456789"
+    client = TestClient(
+        create_app(
+            db_path=tmp_path / "reports.db",
+            openai_settings=OpenAISettings(enabled=False),
+            internal_admin_secret=secret,
+        )
+    )
+    maintainer = {"X-Feedback-Maintainer": "maintainer"}
+
+    assert client.get("/internal/feedback").status_code == 403
+    assert client.get("/internal/feedback", headers={"X-Internal-Admin-Secret": "wrong"}).status_code == 403
+    assert client.put("/internal/feedback/t/a/triage", json={"status": "reviewing"}, headers=maintainer).status_code == 403
+    assert client.delete("/internal/feedback/t/a", headers=maintainer).status_code == 403
+
+    authorized = {"X-Internal-Admin-Secret": secret}
+    inbox = client.get("/internal/feedback", headers=authorized)
+    assert inbox.status_code == 200
+    assert inbox.json()["items"] == []
+    assert client.delete("/internal/feedback/t/a", headers={**authorized, **maintainer}).status_code == 404
+
+
+def test_internal_feedback_routes_fail_closed_without_secret(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from cv_validator.api.app import create_app
+    from cv_validator.openai_config import OpenAISettings
+
+    monkeypatch.delenv("CV_VALIDATOR_INTERNAL_API_SECRET", raising=False)
+    monkeypatch.delenv("BETTER_AUTH_SECRET", raising=False)
+    client = TestClient(
+        create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    )
+    assert client.get("/internal/feedback", headers={"X-Internal-Admin-Secret": "anything"}).status_code == 503
+    assert client.get("/internal/usage/summary").status_code == 503
+
+
+def test_context_report_is_projected_to_the_flagged_module(tmp_path):
+    store, _ = _store(tmp_path)
+    targets = store.materialize("analysis-1", {"ruleset_version": "v1", "findings": []})
+    full_report = {
+        "analysis_id": "analysis-1",
+        "base_analysis": {"education": [{"id": "edu-1"}]},
+        "mechanical": {"emails": []},
+        "company_research": {"status": "completed"},
+        "education_research": {"status": "completed"},
+        "linkedin_discovery": {"status": "completed"},
+        "versions": {"model": "gpt-x"},
+        "usage": {"total_tokens": 10},
+        "pass_statuses": [{"model": "gpt-x"}],
+        "source": {"sha256": "abc"},
+        "review": {"rejected": []},
+    }
+    by_category = {target["source_category"]: target for target in targets}
+
+    plain = by_category["report"]
+    store.put("analysis-1", plain["target_id"], "actor", FeedbackInput(comment="Plain", context_report=full_report))
+    stored = {item["target_id"]: item["context_report"] for item in store.inbox()["items"]}
+    assert stored[plain["target_id"]] == {
+        "analysis_id": "analysis-1",
+        "base_analysis": {"education": [{"id": "edu-1"}]},
+        "mechanical": {"emails": []},
+    }
+
+    research = by_category["education_research"]
+    store.put("analysis-1", research["target_id"], "actor-2", FeedbackInput(comment="Research", context_report=full_report))
+    stored = {item["target_id"]: item["context_report"] for item in store.inbox()["items"]}
+    assert set(stored[research["target_id"]]) == {"analysis_id", "base_analysis", "mechanical", "education_research"}

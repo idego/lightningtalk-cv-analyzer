@@ -32,5 +32,7 @@ def test_consolidation_keeps_deployment_port_and_private_api_contract():
     assert services["web"]["ports"] == ["${WEB_HOST:-127.0.0.1}:${WEB_PORT:-3001}:3000"]
     assert "ports" not in services["api"]
     assert "CV_VALIDATOR_LEGACY_OWNER_SECRET" in services["api"]["environment"]
+    assert services["api"]["environment"]["CV_VALIDATOR_INTERNAL_API_SECRET"] == "${INTERNAL_API_SECRET:-}"
+    assert services["web"]["environment"]["INTERNAL_API_SECRET"] == "${INTERNAL_API_SECRET:-}"
     lock = dict(line.split("=", 1) for line in (ROOT / "config/geonames.lock").read_text().splitlines())
     assert services["geonames-init"]["environment"]["GEONAMES_SNAPSHOT_VERSION"] == "${GEONAMES_SNAPSHOT_VERSION:-" + lock["version"] + "}"
