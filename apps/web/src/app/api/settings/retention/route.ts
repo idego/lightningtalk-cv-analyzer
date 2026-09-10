@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { feedbackRole } from "@/lib/feedback-access";
-import { fetchInternalJson, proxyInternalJson } from "@/lib/internal-api";
+import {
+  fetchInternalJson,
+  internalApiSecret,
+  internalSecretHeaders,
+  internalSecretUnconfigured,
+  proxyInternalJson,
+} from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
 
 export async function GET() {
@@ -32,18 +38,13 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "retention_owner_required" }, { status: 403 });
   }
   const body = await request.json().catch(() => ({}));
-  const internalAdminSecret = process.env.BETTER_AUTH_SECRET;
-  if (!internalAdminSecret) {
-    return NextResponse.json(
-      { error: "retention_admin_unconfigured" },
-      { status: 503 },
-    );
-  }
+  const secret = internalApiSecret();
+  if (!secret) return internalSecretUnconfigured();
   return proxyInternalJson("/settings/retention", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      "X-Internal-Admin-Secret": internalAdminSecret,
+      ...internalSecretHeaders(secret),
     },
     body: JSON.stringify(body),
   });

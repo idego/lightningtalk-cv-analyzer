@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { feedbackRole } from "@/lib/feedback-access";
-import { proxyInternalJson } from "@/lib/internal-api";
+import {
+  internalApiSecret,
+  internalSecretHeaders,
+  internalSecretUnconfigured,
+  proxyInternalJson,
+} from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
 
 type Context = { params: Promise<{ targetId: string; actorHash: string }> };
@@ -20,6 +25,8 @@ export async function PUT(request: Request, context: Context) {
   if (body.length > 2_048) {
     return NextResponse.json({ error: "Request too large" }, { status: 413 });
   }
+  const secret = internalApiSecret();
+  if (!secret) return internalSecretUnconfigured();
   return proxyInternalJson(
     `/internal/feedback/${encodeURIComponent(params.targetId)}/${encodeURIComponent(params.actorHash)}/triage`,
     {
@@ -27,6 +34,7 @@ export async function PUT(request: Request, context: Context) {
       headers: {
         "Content-Type": "application/json",
         "X-Feedback-Maintainer": user.id,
+        ...internalSecretHeaders(secret),
       },
       body,
     },
@@ -38,11 +46,13 @@ export async function DELETE(_request: Request, context: Context) {
   if (!user || !role) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const secret = internalApiSecret();
+  if (!secret) return internalSecretUnconfigured();
   return proxyInternalJson(
     `/internal/feedback/${encodeURIComponent(params.targetId)}/${encodeURIComponent(params.actorHash)}`,
     {
       method: "DELETE",
-      headers: { "X-Feedback-Maintainer": user.id },
+      headers: { "X-Feedback-Maintainer": user.id, ...internalSecretHeaders(secret) },
     },
   );
 }

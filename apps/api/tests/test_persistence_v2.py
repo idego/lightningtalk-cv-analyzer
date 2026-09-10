@@ -38,7 +38,7 @@ def test_analysis_share_requires_a_persisted_report_not_only_an_analysis_run(tmp
     assert store.analysis_owned_by("failed-analysis", "owner-1") is True
     assert store.persist_analysis_share_token(
         "failed-analysis", "owner-1", "share-secret"
-    ) is False
+    ) is None
 
 
 def test_analysis_share_capabilities_are_hashed_scoped_and_deleted_with_report(tmp_path) -> None:
@@ -53,8 +53,8 @@ def test_analysis_share_capabilities_are_hashed_scoped_and_deleted_with_report(t
         source_filename="candidate.pdf",
     )
 
-    assert store.persist_analysis_share_token("analysis-share", "wrong-owner", "share-secret") is False
-    assert store.persist_analysis_share_token("analysis-share", "owner-1", "share-secret") is True
+    assert store.persist_analysis_share_token("analysis-share", "wrong-owner", "share-secret") is None
+    assert store.persist_analysis_share_token("analysis-share", "owner-1", "share-secret") is not None
     assert store.analysis_share_access_allowed("analysis-share", "wrong-share") is False
     assert store.analysis_share_access_allowed("analysis-share", "share-secret") is True
     with store._connect() as connection:
@@ -87,7 +87,7 @@ def test_retention_purge_removes_analysis_share_capabilities(tmp_path) -> None:
     )
     assert store.persist_analysis_share_token(
         "analysis-expired-share", "owner-1", "share-secret"
-    ) is True
+    ) is not None
     with store._connect() as connection:
         connection.execute(
             "UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00' WHERE analysis_id = ?",

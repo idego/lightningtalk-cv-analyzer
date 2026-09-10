@@ -191,7 +191,7 @@ def create_profile_builder_router(
                         error_code=str(exc),
                     )
         except AnalysisStrategyError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except ProfileExtractionError as exc:
             safe_log(
                 "profile_builder_extraction_failed",

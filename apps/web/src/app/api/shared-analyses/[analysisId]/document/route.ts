@@ -34,5 +34,6 @@ export async function GET(
     if (value) headers.set(name, value);
   }
   if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
   return new Response(upstream.body, { status: 200, headers });
 }

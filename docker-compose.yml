@@ -82,6 +82,8 @@ services:
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-idego.io}
       LOCAL_DEV_AUTH_BYPASS: ${LOCAL_DEV_AUTH_BYPASS:-false}
       INTERNAL_API_URL: http://api:8000
+      # Web -> API secret for /internal/* and privileged writes (falls back to BETTER_AUTH_SECRET).
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
     volumes:
       - web_auth_data:/app/data
     depends_on:
@@ -110,6 +112,8 @@ services:
       # Privileged writes and authenticated migration of legacy analysis owners.
       # Already migrated ownership no longer depends on this secret.
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-dev-only-secret-change-me}
+      # Must match the web INTERNAL_API_SECRET; guards /internal/* against anything else on the network.
+      CV_VALIDATOR_INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
       CV_VALIDATOR_LEGACY_OWNER_SECRET: ${CV_VALIDATOR_LEGACY_OWNER_SECRET:-}
       CV_VALIDATOR_RETENTION_DAYS: ${CV_VALIDATOR_RETENTION_DAYS:-90}
       CV_VALIDATOR_AI_ENABLED: ${CV_VALIDATOR_AI_ENABLED:-true}

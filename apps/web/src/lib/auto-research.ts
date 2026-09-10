@@ -109,10 +109,10 @@ export function createAutoResearchOrchestrator({
   }
   function enqueue(job: () => Promise<void>) { queue.push(job); pump(); }
 
-  function request(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind, allowRetry: boolean, refresh = false) {
+  function request(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind, allowRetry: boolean) {
     const requestKey = key(report.analysis_id, kind);
     const reportResult = report[RESULT_KEYS[kind]];
-    if (reportResult && !refresh) {
+    if (reportResult) {
       publish(report.analysis_id, kind, { status: "succeeded", result: reportResult });
       return Promise.resolve();
     }
@@ -135,7 +135,7 @@ export function createAutoResearchOrchestrator({
         const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
         const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh }),
+          body: JSON.stringify({}),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
         if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status, ...researchErrorFields(payload) });
@@ -170,16 +170,9 @@ export function createAutoResearchOrchestrator({
     return request(report, settings, kind, true);
   }
 
-  function runRefresh(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind) {
-    if (settings.aiEnabled === false || report.ai_features_enabled === false || !eligibleAutoResearchKinds(report).has(kind)) return Promise.resolve();
-    states.delete(key(report.analysis_id, kind));
-    return request(report, settings, kind, true, true);
-  }
-
   return {
     schedule,
     runManual,
-    runRefresh,
     getState: (analysisId: string, kind: AutoResearchKind) => states.get(key(analysisId, kind)),
     subscribe(listener: (analysisId: string, kind: AutoResearchKind, state: AutoResearchState) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };

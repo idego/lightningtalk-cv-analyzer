@@ -177,6 +177,7 @@ def test_source_document_is_stored_and_served_to_owner(tmp_path) -> None:
     assert document.content == b"%PDF-1.7 stored bytes"
     assert document.headers["content-type"] == "application/pdf"
     assert document.headers["cache-control"] == "private, no-store"
+    assert document.headers["x-content-type-options"] == "nosniff"
     disposition = document.headers["content-disposition"]
     assert disposition.startswith('inline; filename="')
     assert '"2026"' not in disposition
@@ -232,6 +233,9 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     assert share_response.status_code == 200
     share_token = share_response.json()["share_token"]
     share_headers = {"X-Analysis-Share-Token": share_token}
+    expires_at = datetime.fromisoformat(share_response.json()["expires_at"])
+    remaining = expires_at - datetime.now(timezone.utc)
+    assert timedelta(hours=47) < remaining <= timedelta(days=2)
 
     assert client.get(f"/shared/analyses/{analysis_id}").status_code == 404
     assert client.get(
@@ -246,6 +250,11 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     assert shared.json()["report"]["analysis_id"] == analysis_id
     assert shared.json()["report"]["company_research"] == completed_company_research
     assert "analysis_access_token" not in shared.json()["report"]
+    for exposed in (shared.json()["report"], client.get(f"/analyses/{analysis_id}", headers=owner_headers).json()):
+        assert "versions" not in exposed and "usage" not in exposed
+        assert "sha256" not in exposed["source"]
+        assert all(set(item) <= {"status", "section_status"} for item in exposed["base_analysis"]["pass_statuses"].values())
+        assert "rejected" not in exposed["base_analysis"]["review"]
 
     shared_document = client.get(
         f"/shared/analyses/{analysis_id}/document",
@@ -253,6 +262,7 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
     )
     assert shared_document.status_code == 200
     assert shared_document.content == b"%PDF-1.7 stored bytes"
+    assert shared_document.headers["x-content-type-options"] == "nosniff"
 
     assert client.get(
         f"/analyses/{analysis_id}",
@@ -261,6 +271,39 @@ def test_owner_can_create_read_only_analysis_share_link(tmp_path) -> None:
 
     assert client.delete(f"/analyses/{analysis_id}", headers=owner_headers).status_code == 200
     assert client.get(f"/shared/analyses/{analysis_id}", headers=share_headers).status_code == 404
+
+
+def test_share_links_expire_after_two_days_or_at_retention_deadline(tmp_path) -> None:
+    app = _document_app(tmp_path)
+    client = TestClient(app)
+    store = app.state.store
+    owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
+    analysis_id = _analyze(client, owner_headers, filename="candidate.pdf")
+
+    share_token = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers).json()["share_token"]
+    share_headers = {"X-Analysis-Share-Token": share_token}
+    assert client.get(f"/shared/analyses/{analysis_id}", headers=share_headers).status_code == 200
+
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE analysis_share_tokens SET expires_at = ?",
+            ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),),
+        )
+    assert client.get(f"/shared/analyses/{analysis_id}", headers=share_headers).status_code == 404
+    assert client.get(f"/shared/analyses/{analysis_id}/document", headers=share_headers).status_code == 404
+    purged = store.purge_expired()
+    assert purged["expired_share_tokens"] == 1
+
+    # An analysis close to its retention deadline caps the link at that deadline.
+    store.set_retention_days(3)
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE reports SET created_at = ? WHERE analysis_id = ?",
+            ((datetime.now(timezone.utc) - timedelta(days=2, hours=12)).isoformat(), analysis_id),
+        )
+    capped = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers).json()
+    remaining = datetime.fromisoformat(capped["expires_at"]) - datetime.now(timezone.utc)
+    assert timedelta(hours=11) < remaining < timedelta(hours=12, minutes=1)
 
 
 def test_source_document_storage_failure_does_not_fail_analysis(tmp_path) -> None:

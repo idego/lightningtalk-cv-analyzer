@@ -16,7 +16,7 @@ The root compose configuration SHALL run the long-lived `web` and `api` services
 #### Scenario: API remains internal in production
 - **WHEN** compose services are running from `docker-compose.yml` alone
 - **THEN** `api` is reachable from `web` on the internal network
-- **AND** `api` is not directly exposed on a host port, because `/internal/feedback` relies on the web layer for authorization
+- **AND** `api` is not directly exposed on a host port; `/internal/*` additionally requires the web-to-API internal secret (`INTERNAL_API_SECRET`, falling back to `BETTER_AUTH_SECRET`) so other services on the network cannot reach it
 
 #### Scenario: Local Swagger access
 - **WHEN** `make dev` starts the stack

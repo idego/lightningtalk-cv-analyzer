@@ -9,7 +9,7 @@ public-research results.
 ## Requirements
 
 ### Requirement: Sequential batch analysis with visible history
-The analyze page SHALL process selected files one request at a time, in selection order. While a batch runs, the page SHALL replace the upload form with an Analyzing card that lists every file with its status (waiting, analyzing, completed, failed), the current file, elapsed time, and an estimate, and SHALL keep the Recent analyses section visible and interactive below it. Selecting files, starting another batch, and resetting the form MUST NOT be possible while a batch is running, and opening or closing a report MUST NOT reset the in-flight batch.
+The analyze page SHALL process selected files one request at a time, in selection order. The web analyze proxy SHALL bound the request body to the 20 MB upload limit before parsing multipart and answer 413 `upload_size_limit_exceeded` (or 400 `invalid_upload` for a malformed body) instead of buffering an oversized upload. `POST /analyze` SHALL reject a PDF with more than 5 pages with 422 `document_page_limit_exceeded` before any text extraction, and the page SHALL show a dedicated "too many pages" message for that file. While a batch runs, the page SHALL replace the upload form with an Analyzing card that lists every file with its status (waiting, analyzing, completed, failed), the current file, elapsed time, and an estimate, and SHALL keep the Recent analyses section visible and interactive below it. Selecting files, starting another batch, and resetting the form MUST NOT be possible while a batch is running, and opening or closing a report MUST NOT reset the in-flight batch.
 
 #### Scenario: Batch is running
 - **WHEN** the recruiter starts a batch of several files

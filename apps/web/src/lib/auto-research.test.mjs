@@ -215,33 +215,6 @@ test("disabled public research makes no request", async () => {
   assert.equal(calls, 0);
 });
 
-test("refresh bypasses a report result and requests fresh research", async () => {
-  const calls = [];
-  const orchestrator = createAutoResearchOrchestrator({
-    storage: storage(),
-    fetcher: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) });
-      return { ok: true, status: 200, json: async () => ({ company_research: { cache: { status: "miss" } } }) };
-    },
-  });
-  const value = report();
-  value.company_research = { cache: { status: "hit" } };
-
-  await orchestrator.runRefresh(value, settings(), "company");
-
-  assert.deepEqual(calls, [{
-    url: "/api/analyses/analysis-1/research/company",
-    body: { refresh: true },
-  }]);
-});
-
-test("certificate-only entries never trigger education research", () => {
-  const value = report();
-  value.base_analysis.education[0].institution = null;
-  value.base_analysis.education[0].certificate = {value: "Example Certificate", status: "supported"};
-  assert.equal(eligibleAutoResearchKinds(value).has("education"), false);
-});
-
 test("failed research preserves safe diagnostic details for copying", async () => {
   const value = report();
   const orchestrator = createAutoResearchOrchestrator({

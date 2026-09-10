@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from reportlab.pdfgen.canvas import Canvas
 
 from cv_validator.analysis.candidates import apply_review, validate_specialists
-from cv_validator.analysis.docling_converter import DoclingTextConverter
+from cv_validator.analysis.docling_converter import MAX_DOCUMENT_PAGES, DoclingTextConverter
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.model_client import (
     ModelPassError,
@@ -18,7 +18,7 @@ from cv_validator.analysis.model_client import (
     OpenAIResponsesAnalysisClient,
 )
 from cv_validator.analysis.source import SourceBlock, SourceDocument
-from cv_validator.analysis.strategy import AnalysisInput, AnalysisStrategyError, SourceFormat
+from cv_validator.analysis.strategy import AnalysisInput, AnalysisStrategyError, SourceFormat, safe_error_code
 from cv_validator.api.app import create_app
 from cv_validator.openai_config import OpenAISettings
 
@@ -191,6 +191,39 @@ def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
 
     with pytest.raises(AnalysisStrategyError, match="document_text_layer_unavailable"):
         DoclingTextConverter().convert(output.getvalue(), "scan.pdf", SourceFormat.PDF)
+
+
+def test_strategy_error_only_accepts_machine_codes() -> None:
+    assert AnalysisStrategyError("empty_upload").code == "empty_upload"
+    with pytest.raises(ValueError):
+        AnalysisStrategyError("could not parse /tmp/candidate.pdf")
+    assert safe_error_code("feedback_rate_limit") == "feedback_rate_limit"
+    assert safe_error_code("Some free text: /var/data") == "request_rejected"
+    assert safe_error_code(ValueError("x" * 80), "feedback_rejected") == "feedback_rejected"
+
+
+def test_pdf_over_page_limit_is_rejected_before_conversion() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    for page in range(MAX_DOCUMENT_PAGES + 1):
+        canvas.drawString(50, 750, f"Candidate page {page + 1} with enough text to be useful")
+        canvas.showPage()
+    canvas.save()
+
+    with pytest.raises(AnalysisStrategyError, match="document_page_limit_exceeded"):
+        DoclingTextConverter().convert(output.getvalue(), "long.pdf", SourceFormat.PDF)
+
+
+def test_pdf_at_page_limit_converts() -> None:
+    output = BytesIO()
+    canvas = Canvas(output)
+    for page in range(MAX_DOCUMENT_PAGES):
+        canvas.drawString(50, 750, f"Candidate page {page + 1} with enough text to be useful")
+        canvas.showPage()
+    canvas.save()
+
+    source = DoclingTextConverter().convert(output.getvalue(), "five.pdf", SourceFormat.PDF)
+    assert {block.page_number for block in source.blocks} == set(range(1, MAX_DOCUMENT_PAGES + 1))
 
 
 def test_far_fields_are_detached_and_records_stay_isolated() -> None:

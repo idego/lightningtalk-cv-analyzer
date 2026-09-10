@@ -27,11 +27,13 @@ from cv_validator.analysis import (
     AnalysisStrategyUnavailable,
 )
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
+from cv_validator.api.report_view import public_report_view
 from cv_validator.config import (
     LocationConfigurationError,
     load_location_resolver,
@@ -153,7 +155,11 @@ def create_app(
 ) -> FastAPI:
     configure_structured_logging()
     settings = openai_settings or load_openai_settings()
-    retention_admin_secret = internal_admin_secret or os.environ.get("BETTER_AUTH_SECRET")
+    internal_secret = (
+        internal_admin_secret
+        or os.environ.get("CV_VALIDATOR_INTERNAL_API_SECRET")
+        or os.environ.get("BETTER_AUTH_SECRET")
+    )
     reference_data_error: str | None = None
     if location_resolver is not None:
         resolver = location_resolver
@@ -286,6 +292,17 @@ def create_app(
             store.bind_legacy_owner(owner_user_id, legacy_token)
         except PersistenceError as exc:
             raise HTTPException(status_code=503, detail="analysis_ownership_migration_failed") from exc
+
+    def require_internal_secret(
+        x_internal_admin_secret: str | None = Header(default=None),
+    ) -> None:
+        """Guard for ``/internal/*`` and privileged writes: only the web proxy holds this secret."""
+        if not internal_secret:
+            raise HTTPException(status_code=503, detail="internal_secret_unconfigured")
+        if not x_internal_admin_secret or not hmac.compare_digest(
+            x_internal_admin_secret, internal_secret
+        ):
+            raise HTTPException(status_code=403, detail="internal_secret_required")
 
     app = FastAPI(
         title="CV Analyzer",
@@ -639,21 +656,21 @@ def create_app(
                     for item in report["base_analysis"][key]
                 ),
             )
-            return response_payload
+            return public_report_view(response_payload)
         except HTTPException:
             raise
         except AnalysisStrategyUnavailable as exc:
-            store.complete_analysis_run(analysis_id, "unavailable", str(exc))
+            store.complete_analysis_run(analysis_id, "unavailable", exc.code)
             raise HTTPException(
                 status_code=503,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except AnalysisStrategyError as exc:
-            store.complete_analysis_run(analysis_id, "failed", str(exc))
+            store.complete_analysis_run(analysis_id, "failed", exc.code)
             raise HTTPException(
                 status_code=422,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except ValueError as exc:
@@ -744,7 +761,7 @@ def create_app(
     ) -> JSONResponse:
         payload = _owned_payload(store, analysis_id, _optional_owner_user_id(x_analysis_owner_id))
         attach_capabilities(payload)
-        return JSONResponse(payload)
+        return JSONResponse(public_report_view(payload))
 
     @app.post("/analyses/{analysis_id}/share")
     def create_analysis_share_link(
@@ -752,13 +769,14 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
     ) -> JSONResponse:
         share_token = secrets.token_urlsafe(32)
-        if not store.persist_analysis_share_token(
+        expires_at = store.persist_analysis_share_token(
             analysis_id,
             _optional_owner_user_id(x_analysis_owner_id),
             share_token,
-        ):
+        )
+        if expires_at is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
-        return JSONResponse({"share_token": share_token})
+        return JSONResponse({"share_token": share_token, "expires_at": expires_at})
 
     @app.get("/shared/analyses/{analysis_id}")
     def get_shared_analysis(
@@ -772,6 +790,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         _attach_completed_research(store, analysis_id, view["report"])
         attach_capabilities(view["report"])
+        view["report"] = public_report_view(view["report"])
         return JSONResponse(view)
 
     @app.get("/analyses/{analysis_id}/diagnostics")
@@ -795,7 +814,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         return JSONResponse(store.get_analysis_usage_summary(analysis_id))
 
-    @app.get("/internal/usage/summary")
+    @app.get("/internal/usage/summary", dependencies=[Depends(require_internal_secret)])
     def get_usage_summary() -> JSONResponse:
         return JSONResponse(store.get_usage_summary())
 
@@ -815,6 +834,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -834,6 +854,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -850,17 +871,8 @@ def create_app(
     def get_retention() -> JSONResponse:
         return JSONResponse({"days": store.config.retention_days})
 
-    @app.put("/settings/retention")
-    def update_retention(
-        update: _RetentionUpdate,
-        x_internal_admin_secret: str | None = Header(default=None),
-    ) -> JSONResponse:
-        if not retention_admin_secret:
-            raise HTTPException(status_code=503, detail="retention_admin_unconfigured")
-        if not x_internal_admin_secret or not hmac.compare_digest(
-            x_internal_admin_secret, retention_admin_secret
-        ):
-            raise HTTPException(status_code=403, detail="retention_owner_required")
+    @app.put("/settings/retention", dependencies=[Depends(require_internal_secret)])
+    def update_retention(update: _RetentionUpdate) -> JSONResponse:
         try:
             store.set_retention_days(update.days)
         except ValueError as exc:
@@ -882,7 +894,7 @@ def create_app(
         try:
             result = feedback_store.put(analysis_id, target_id, _owner_user_id(x_analysis_owner_id), update, actor_email=x_feedback_actor_email)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=safe_error_code(exc, "feedback_rejected")) from exc
         if result is None:
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse(result)
@@ -895,11 +907,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"withdrawn": result})
 
-    @app.get("/internal/feedback")
+    @app.get("/internal/feedback", dependencies=[Depends(require_internal_secret)])
     def feedback_inbox(limit: int = Query(default=50, ge=1, le=100), cursor: int = Query(default=0, ge=0), rating: str | None = None, reason: str | None = None, kind: str | None = None, status: str | None = None, source: str | None = None, version: str | None = None, operation: str | None = None, error_code: str | None = None, date_from: str | None = None, date_to: str | None = None) -> JSONResponse:
         return JSONResponse(feedback_store.inbox(limit=limit, cursor=cursor, filters={"rating": rating, "reason": reason, "kind": kind, "status": status, "source": source, "version": version, "operation": operation, "error_code": error_code, "date_from": date_from, "date_to": date_to}))
 
-    @app.put("/internal/feedback/{target_id}/{actor_hash}/triage")
+    @app.put("/internal/feedback/{target_id}/{actor_hash}/triage", dependencies=[Depends(require_internal_secret)])
     def update_feedback_triage(target_id: str, actor_hash: str, update: TriageInput, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
         if not x_feedback_maintainer:
             raise HTTPException(status_code=400, detail="maintainer_required")
@@ -907,7 +919,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"updated": True})
 
-    @app.delete("/internal/feedback/{target_id}/{actor_hash}")
+    @app.delete("/internal/feedback/{target_id}/{actor_hash}", dependencies=[Depends(require_internal_secret)])
     def delete_feedback_response(target_id: str, actor_hash: str, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
         if not x_feedback_maintainer:
             raise HTTPException(status_code=400, detail="maintainer_required")
