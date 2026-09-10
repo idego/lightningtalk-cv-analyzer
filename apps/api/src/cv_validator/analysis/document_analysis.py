@@ -37,7 +37,7 @@ from cv_validator.location import (
     Resolved,
     ResolutionLevel,
 )
-from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical
+from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical, tag_link_sections
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.operations import safe_log, utc_now
 from cv_validator.usage import normalize_usage
@@ -221,8 +221,12 @@ class DocumentAnalysisStrategy:
                     for record in [*state.employment, *state.education]
                 ),
             )
+        mechanical = deepcopy(mechanical)
+        mechanical["literal_links"] = tag_link_sections(
+            mechanical["literal_links"], source.blocks, state.employment, state.education,
+        )
         mechanical = _enrich_mechanical(
-            deepcopy(mechanical),
+            mechanical,
             public_profile(state.profile),
             self._location_resolver,
             self._postal_code_resolver,

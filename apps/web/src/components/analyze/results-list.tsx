@@ -1,9 +1,10 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { GitHubIcon, LinkedInIcon } from "@/components/analyze/search-provider-icon";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
-import type { ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
+import type { OverviewLink, ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SectionTitle } from "@/components/analyze/section-title";
@@ -82,7 +83,7 @@ function OverviewRow({
 }: {
   icon: ReactNode;
   label: string;
-  value: string;
+  value: ReactNode;
   detail?: ReactNode;
   tone: string;
   action?: ReactNode;
@@ -99,6 +100,18 @@ function OverviewRow({
   );
 }
 
+function linkIcon(kind: OverviewLink["kind"]) {
+  if (kind === "linkedin") return <LinkedInIcon className="size-4" />;
+  if (kind === "github") return <GitHubIcon className="size-4" />;
+  return <LinkIcon className="size-4" />;
+}
+
+function linkLabelKey(kind: OverviewLink["kind"]) {
+  if (kind === "linkedin") return "linkedinLink" as const;
+  if (kind === "github") return "githubLink" as const;
+  return "personalLink" as const;
+}
+
 function displayCountry(countryCode: string, language: "en" | "pl") {
   const code = countryCode.toUpperCase();
   const name = new Intl.DisplayNames([language], { type: "region" }).of(code);
@@ -111,7 +124,7 @@ function joinDisplay(...values: Array<string | null | undefined>) {
 
 export function StructuredFacts({ overview, report, feedbackManifest, readOnly = false }: { overview: ReportOverview; report: AnalysisReport; feedbackManifest?: FeedbackManifest; readOnly?: boolean }) {
   const { settings, t } = useCopy();
-  const hasContact = Boolean(overview.candidateName || overview.phone);
+  const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
   const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
   const reviewLabel = t("needsReview");
@@ -158,6 +171,8 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
               <div className="space-y-1">
                 {overview.candidateName ? <OverviewRow icon={<UserRound className="size-4" />} label={t("candidateName")} value={overview.candidateName} tone={contactTone} /> : null}
                 {overview.phone ? <OverviewRow icon={<Phone className="size-4" />} label={t("phoneNumber")} value={overview.phone} detail={overview.phoneCountry ? displayCountry(overview.phoneCountry, settings.uiLanguage) : null} tone={contactTone} /> : null}
+                {overview.email ? <OverviewRow icon={<Mail className="size-4" />} label={t("emailAddress")} value={overview.email} tone={contactTone} /> : null}
+                {overview.links.map((link) => <OverviewRow key={link.url} icon={linkIcon(link.kind)} label={t(linkLabelKey(link.kind))} value={<a href={link.url} target="_blank" rel="noopener noreferrer" className="block truncate underline-offset-2 hover:underline" title={`${link.value} · ${t("opensInNewTab")}`}>{link.value}</a>} tone={contactTone} />)}
               </div>
             </section> : null}
 

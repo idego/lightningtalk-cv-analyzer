@@ -13,7 +13,7 @@ import { ResearchConfidenceBadge, sortByResearchConfidence } from "@/components/
 import { SectionTitle } from "@/components/analyze/section-title";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
 import { useCopy } from "@/lib/app-settings";
-import { researchEligibility } from "@/lib/auto-research";
+import { linkedinProvidedInCv, researchEligibility } from "@/lib/auto-research";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { linkedinPeopleKeyword, linkedinPeopleSearchUrl } from "@/lib/google-search";
@@ -154,6 +154,8 @@ export function LinkedInResearchPanel({
         busyLabel={t("discovering")}
         busyAriaLabel={t("linkedinDiscoveryInProgress")}
         disabledReason={!enabled ? t("noCandidateDetails") : undefined}
+        confirmHint={linkedinProvidedInCv(report) ? t("linkedinProvidedInContact") : undefined}
+        confirmLabel={t("clickAgainToConfirm")}
       /> : null}
       {!readOnly && hasContent && sectionFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={sectionFeedbackTarget} /> : null}
     </div>}

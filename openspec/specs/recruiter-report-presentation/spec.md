@@ -53,5 +53,24 @@ An owner-opened persisted report SHALL show a compact estimated AI cost badge ba
 - **THEN** the report header shows the compact two-decimal estimated cost and a five-decimal tooltip detail
 
 
+### Requirement: Contact section shows literal CV contact values
+The CV overview Contact section SHALL show the candidate name, first phone number, first email address, and every literal link extracted from the CV that is not inside an employment, education, or certificate section, deduplicated by normalized URL. The analysis SHALL tag each link with its section, derived from the validated records' evidence blocks extended to the next section header. Link rows SHALL render on one line with an ellipsis and expose the full literal value on hover. Each link SHALL be tagged `linkedin`, `github`, or `personal`; any host that is not LinkedIn or GitHub is `personal`. Extraction SHALL accept schemed or `www.` URLs for any host, and schemeless LinkedIn or GitHub links that carry a path (for example `linkedin.com/in/...`); other schemeless domains are not treated as links.
+
+#### Scenario: CV lists a schemeless LinkedIn link
+- **WHEN** the CV text contains `linkedin.com/in/<handle>` without `https://` or `www.`
+- **THEN** it is extracted, tagged `linkedin`, and shown in the Contact section Links SHALL display the literal CV text without its scheme, leading `www.`, or trailing slash, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
+
+#### Scenario: CV contains a personal website
+- **WHEN** the CV contains a URL whose host is neither LinkedIn nor GitHub
+- **THEN** the Contact section shows it as a personal website link with the literal CV text
+
+#### Scenario: Project link under an employment record
+- **WHEN** a GitHub link appears in a description bullet under an employment record
+- **THEN** it is tagged `employment` and is not shown in the Contact section
+
+#### Scenario: Same link appears twice
+- **WHEN** the same normalized URL is extracted from two places in the CV
+- **THEN** the Contact section shows it once
+
 ### Requirement: Compact overview and research controls
 Education and employment overview records SHALL use two columns at desktop widths and one at mobile widths, preserving their existing order. Certifications SHALL remain a separate full-width group with Google actions aligned to its right edge. Research confidence SHALL use three dots with a localized tooltip and accessible name, without a visible text badge. Back, Copy link, and Show/Hide CV SHALL have visible outlines. Existing preview visibility and workspace breakpoints remain unchanged.

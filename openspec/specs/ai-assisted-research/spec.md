@@ -33,10 +33,27 @@ research category automatically. Company, education, and LinkedIn categories
 run independently and remain available as manual actions after a failed or
 disabled automatic attempt.
 
+LinkedIn discovery SHALL NOT start automatically when the CV already contains
+a literal LinkedIn profile link (an extracted link tagged `linkedin`). It
+remains eligible and available as a manual action. In that case the manual
+action SHALL require two activations: the first shows a notice that a LinkedIn
+profile is already listed in the Contact section, the second starts discovery.
+Company and education automatic starts are unaffected by CV links.
+
 #### Scenario: Eligible categories exist
 
 - **WHEN** automatic research is enabled and accepted subjects exist
 - **THEN** eligible categories start without waiting for another analysis pass
+
+#### Scenario: CV already includes a LinkedIn link
+
+- **WHEN** the extracted CV links include one tagged `linkedin`
+- **THEN** LinkedIn discovery is not started automatically, the manual LinkedIn action stays enabled, and company and education research start as usual
+
+#### Scenario: Manual LinkedIn discovery with a provided link
+
+- **WHEN** the recruiter activates the LinkedIn discovery action and the CV links a LinkedIn profile
+- **THEN** the first activation shows the Contact-section notice without a request, and the second activation starts discovery
 
 #### Scenario: Research is disabled
 
