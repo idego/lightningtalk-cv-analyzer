@@ -1,4 +1,4 @@
-/** Bound bytes before parsing multipart/JSON, even without a trustworthy Content-Length. */
+/** Bound bytes before parsing multipart/JSON, even without a trustworthy Content-Length. Shared by the Profile Builder and analyze proxies. */
 export class ProfileBodyTooLarge extends Error {}
 
 export async function readProfileBody(request: Request, maxBytes: number): Promise<Uint8Array<ArrayBuffer>> {

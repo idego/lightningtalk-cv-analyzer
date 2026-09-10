@@ -4,8 +4,13 @@ import {
   INTERNAL_API_URL,
 } from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
+import { ProfileBodyTooLarge, readProfileBody } from "@/lib/profile-request-body";
 
 const REPORT_LANGUAGES = new Set(["en", "pl"]);
+// Mirrors the API's DEFAULT_UPLOAD_MAX_BYTES; enforced here too so the web
+// container never buffers more than one oversized upload before rejecting it.
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MULTIPART_OVERHEAD_BYTES = 128 * 1024;
 
 export async function POST(req: Request) {
   const user = await getWebUser();
@@ -13,10 +18,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const incoming = await req.formData();
+  let incoming: FormData;
+  try {
+    const bytes = await readProfileBody(req, MAX_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES);
+    incoming = await new Response(bytes, {
+      headers: { "Content-Type": req.headers.get("content-type") ?? "" },
+    }).formData();
+  } catch (cause) {
+    if (cause instanceof ProfileBodyTooLarge) {
+      return NextResponse.json({ detail: "upload_size_limit_exceeded" }, { status: 413 });
+    }
+    return NextResponse.json({ detail: "invalid_upload" }, { status: 400 });
+  }
   const file = incoming.get("file") ?? incoming.getAll("files")[0];
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ detail: "upload_size_limit_exceeded" }, { status: 413 });
   }
 
   const reportLanguage = (req.headers.get("X-Report-Language") ?? "en")

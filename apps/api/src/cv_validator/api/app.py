@@ -27,6 +27,7 @@ from cv_validator.analysis import (
     AnalysisStrategyUnavailable,
 )
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
 from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
@@ -659,17 +660,17 @@ def create_app(
         except HTTPException:
             raise
         except AnalysisStrategyUnavailable as exc:
-            store.complete_analysis_run(analysis_id, "unavailable", str(exc))
+            store.complete_analysis_run(analysis_id, "unavailable", exc.code)
             raise HTTPException(
                 status_code=503,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except AnalysisStrategyError as exc:
-            store.complete_analysis_run(analysis_id, "failed", str(exc))
+            store.complete_analysis_run(analysis_id, "failed", exc.code)
             raise HTTPException(
                 status_code=422,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except ValueError as exc:
@@ -893,7 +894,7 @@ def create_app(
         try:
             result = feedback_store.put(analysis_id, target_id, _owner_user_id(x_analysis_owner_id), update, actor_email=x_feedback_actor_email)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=safe_error_code(exc, "feedback_rejected")) from exc
         if result is None:
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse(result)

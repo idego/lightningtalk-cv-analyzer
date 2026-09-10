@@ -147,7 +147,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     if (detail === "empty_upload") return t("cvEmptyFile");
     if (detail === "unsupported_file_type") return t("cvUnsupportedType");
     if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");
-    if (detail === "upload_read_error") return t("uploadCouldNotRead");
+    if (detail === "upload_read_error" || detail === "invalid_upload") return t("uploadCouldNotRead");
     return t("analysisFailed");
   }
 

@@ -18,7 +18,7 @@ from cv_validator.analysis.model_client import (
     OpenAIResponsesAnalysisClient,
 )
 from cv_validator.analysis.source import SourceBlock, SourceDocument
-from cv_validator.analysis.strategy import AnalysisInput, AnalysisStrategyError, SourceFormat
+from cv_validator.analysis.strategy import AnalysisInput, AnalysisStrategyError, SourceFormat, safe_error_code
 from cv_validator.api.app import create_app
 from cv_validator.openai_config import OpenAISettings
 
@@ -191,6 +191,15 @@ def test_scan_only_pdf_fails_with_clear_text_layer_error() -> None:
 
     with pytest.raises(AnalysisStrategyError, match="document_text_layer_unavailable"):
         DoclingTextConverter().convert(output.getvalue(), "scan.pdf", SourceFormat.PDF)
+
+
+def test_strategy_error_only_accepts_machine_codes() -> None:
+    assert AnalysisStrategyError("empty_upload").code == "empty_upload"
+    with pytest.raises(ValueError):
+        AnalysisStrategyError("could not parse /tmp/candidate.pdf")
+    assert safe_error_code("feedback_rate_limit") == "feedback_rate_limit"
+    assert safe_error_code("Some free text: /var/data") == "request_rejected"
+    assert safe_error_code(ValueError("x" * 80), "feedback_rejected") == "feedback_rejected"
 
 
 def test_pdf_over_page_limit_is_rejected_before_conversion() -> None:
