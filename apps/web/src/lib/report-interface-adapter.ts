@@ -40,7 +40,8 @@ export type ReportOverview = {
   email: string | null;
   links: OverviewLink[];
   statedLocation: string | null;
-  resolvedLocation: string | null;
+  resolvedCity: string | null;
+  resolvedCountry: string | null;
   postalCode: string | null;
   postalCountry: string | null;
   postalConsistency: "consistent" | "mismatch" | null;
@@ -309,7 +310,8 @@ function overview(report: AnalysisReport): ReportOverview {
     email: text(email?.value),
     links: overviewLinks(report.mechanical.literal_links),
     statedLocation: value(report.base_analysis.profile.declared_location),
-    resolvedLocation: join([text(resolution?.canonical_name), text(resolution?.country_code)]),
+    resolvedCity: text(resolution?.canonical_name),
+    resolvedCountry: text(resolution?.country_code),
     postalCode: text(postal?.value),
     postalCountry: postalCountries.length === 1 ? postalCountries[0] : null,
     postalConsistency: postalValidation?.status === "resolved"

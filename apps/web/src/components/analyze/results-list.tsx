@@ -125,7 +125,7 @@ function joinDisplay(...values: Array<string | null | undefined>) {
 export function StructuredFacts({ overview, report, feedbackManifest, readOnly = false }: { overview: ReportOverview; report: AnalysisReport; feedbackManifest?: FeedbackManifest; readOnly?: boolean }) {
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
-  const hasLocation = Boolean(overview.statedLocation || overview.resolvedLocation || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
+  const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.postalCode || overview.postalCountry || overview.postalConsistency || overview.euStatus);
   const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
   const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
@@ -135,8 +135,12 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   };
   const contactTone = "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   const locationTone = "bg-violet-500/10 text-violet-700 dark:text-violet-300";
-  const resolvedLocationDetail = overview.statedLocation && overview.resolvedLocation
-    ? `${t("resolvedLocation")}: ${overview.resolvedLocation}`
+  const resolvedLocation = joinDisplay(
+    overview.resolvedCity,
+    overview.resolvedCountry ? displayCountry(overview.resolvedCountry, settings.uiLanguage) : null,
+  );
+  const resolvedLocationDetail = overview.statedLocation && resolvedLocation
+    ? `${t("resolvedLocation")}: ${resolvedLocation}`
     : null;
   const postalCountry = overview.postalCountry ? displayCountry(overview.postalCountry, settings.uiLanguage) : null;
   const postalConsistency = overview.postalConsistency
@@ -180,7 +184,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
               <h4 id="overview-location" className="mb-2 text-xs font-semibold text-foreground">{t("location")}</h4>
               <div className="space-y-1">
                 {overview.statedLocation ? <OverviewRow icon={<MapPin className="size-4" />} label={t("statedLocation")} value={overview.statedLocation} detail={resolvedLocationDetail} tone={locationTone} /> : null}
-                {!overview.statedLocation && overview.resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={overview.resolvedLocation} tone={locationTone} /> : null}
+                {!overview.statedLocation && resolvedLocation ? <OverviewRow icon={<MapIcon className="size-4" />} label={t("resolvedLocation")} value={resolvedLocation} tone={locationTone} /> : null}
                 {overview.postalCode ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalCode")} value={overview.postalCode} detail={postalDetail} tone={locationTone} /> : null}
                 {!overview.postalCode && postalCountry ? <OverviewRow icon={<Globe2 className="size-4" />} label={t("postalCountry")} value={postalCountry} detail={postalConsistency ? `${t("postalConsistency")}: ${postalConsistency}` : null} tone={locationTone} /> : null}
                 {!overview.postalCode && !postalCountry && postalConsistency ? <OverviewRow icon={<MapPin className="size-4" />} label={t("postalConsistency")} value={postalConsistency} tone={locationTone} /> : null}
