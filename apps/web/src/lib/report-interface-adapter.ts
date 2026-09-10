@@ -255,6 +255,11 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
 
 const MAX_OVERVIEW_LINKS = 8;
 
+/** Shorten a literal link for display: drop the scheme, `www.`, and a trailing slash. */
+function displayLink(literal: string): string {
+  return literal.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "") || literal;
+}
+
 function overviewLinks(items: unknown[]): OverviewLink[] {
   const seen = new Set<string>();
   const links: OverviewLink[] = [];
@@ -268,7 +273,7 @@ function overviewLinks(items: unknown[]): OverviewLink[] {
     seen.add(key);
     const host = item?.known_host;
     const kind: OverviewLinkKind = host === "linkedin" || host === "github" ? host : "personal";
-    links.push({ kind, value: literal, url });
+    links.push({ kind, value: displayLink(literal), url });
     if (links.length >= MAX_OVERVIEW_LINKS) break;
   }
   return links;

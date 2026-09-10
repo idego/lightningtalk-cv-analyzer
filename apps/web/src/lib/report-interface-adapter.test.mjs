@@ -92,9 +92,9 @@ function report() {
       emails: [{ value: "alex@example.com", evidence: field("alex@example.com").evidence }],
       literal_links: [
         { value: "linkedin.com/in/alex", normalized_url: "https://linkedin.com/in/alex", known_host: "linkedin", evidence: field("linkedin.com/in/alex").evidence },
-        { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
+        { value: "https://www.github.com/alex/", normalized_url: "https://www.github.com/alex/", known_host: "github", evidence: field("https://www.github.com/alex/").evidence },
         { value: "www.alex.dev", normalized_url: "https://www.alex.dev", known_host: "personal", evidence: field("www.alex.dev").evidence },
-        { value: "https://github.com/alex", normalized_url: "https://github.com/alex", known_host: "github", evidence: field("https://github.com/alex").evidence },
+        { value: "https://www.github.com/alex/", normalized_url: "https://www.github.com/alex/", known_host: "github", evidence: field("https://www.github.com/alex/").evidence },
         { value: "github.com/alex/project", normalized_url: "https://github.com/alex/project", known_host: "github", section: "employment", evidence: field("github.com/alex/project").evidence },
         { value: "https://credly.com/badges/1", normalized_url: "https://credly.com/badges/1", known_host: "personal", section: "certification", evidence: field("https://credly.com/badges/1").evidence },
       ],
@@ -143,8 +143,8 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(overview.email, "alex@example.com");
   assert.deepEqual(overview.links, [
     { kind: "linkedin", value: "linkedin.com/in/alex", url: "https://linkedin.com/in/alex" },
-    { kind: "github", value: "https://github.com/alex", url: "https://github.com/alex" },
-    { kind: "personal", value: "www.alex.dev", url: "https://www.alex.dev" },
+    { kind: "github", value: "github.com/alex", url: "https://www.github.com/alex/" },
+    { kind: "personal", value: "alex.dev", url: "https://www.alex.dev" },
   ]);
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");

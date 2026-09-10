@@ -58,7 +58,7 @@ The CV overview Contact section SHALL show the candidate name, first phone numbe
 
 #### Scenario: CV lists a schemeless LinkedIn link
 - **WHEN** the CV text contains `linkedin.com/in/<handle>` without `https://` or `www.`
-- **THEN** it is extracted, tagged `linkedin`, and shown in the Contact section Links SHALL display the literal CV text, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
+- **THEN** it is extracted, tagged `linkedin`, and shown in the Contact section Links SHALL display the literal CV text without its scheme, leading `www.`, or trailing slash, open in a new tab with a referrer-protecting relationship, and MUST NOT be fetched, inspected, or verified by the system.
 
 #### Scenario: CV contains a personal website
 - **WHEN** the CV contains a URL whose host is neither LinkedIn nor GitHub
