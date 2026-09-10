@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
+import pypdfium2 as pdfium
 from docling.backend.abstract_backend import DeclarativeDocumentBackend
 from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
 from docling.datamodel.base_models import DocumentStream, InputFormat
@@ -18,6 +19,9 @@ from cv_validator.analysis.strategy import AnalysisStrategyError, SourceFormat
 DOCLING_VERSION = "2.124.0"
 CONVERTER_VERSION = "docling-text-only-v1"
 MIN_USEFUL_TEXT_CHARACTERS = 20
+# CVs are short documents; a page cap bounds the text-layer extraction and the
+# model context an uploader can force per request.
+MAX_DOCUMENT_PAGES = 5
 
 
 class TextOnlyPdfBackend(DeclarativeDocumentBackend):
@@ -165,6 +169,8 @@ class DoclingTextConverter:
         filename: str,
         source_format: SourceFormat,
     ) -> SourceDocument:
+        if source_format is SourceFormat.PDF:
+            _enforce_pdf_page_limit(content)
         try:
             result = self._converter.convert(
                 DocumentStream(name=filename, stream=BytesIO(content)),
@@ -179,6 +185,19 @@ class DoclingTextConverter:
         if useful < MIN_USEFUL_TEXT_CHARACTERS:
             raise AnalysisStrategyError("document_text_layer_unavailable")
         return source
+
+
+def _enforce_pdf_page_limit(content: bytes) -> None:
+    try:
+        pdf = pdfium.PdfDocument(content)
+    except Exception as exc:
+        raise AnalysisStrategyError("document_conversion_failed") from exc
+    try:
+        page_count = len(pdf)
+    finally:
+        pdf.close()
+    if page_count > MAX_DOCUMENT_PAGES:
+        raise AnalysisStrategyError("document_page_limit_exceeded")
 
 
 NO_SPACE_BEFORE = (",", ".", ";", ":", ")", "!", "?")

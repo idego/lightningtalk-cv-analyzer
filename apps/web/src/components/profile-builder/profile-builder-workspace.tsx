@@ -683,6 +683,7 @@ export function ProfileBuilderWorkspace() {
         if (cause.detail === "profile_builder_ai_disabled_for_request") throw new Error("CV conversion is unavailable. Check System health in Settings and try again.");
         if (cause.detail === "profile_builder_ai_disabled") throw new Error("CV conversion is unavailable. Contact your administrator.");
         if (cause.detail === "profile_builder_file_size_limit_exceeded") throw new Error("CV files must be 10 MB or smaller.");
+        if (cause.detail === "document_page_limit_exceeded") throw new Error("CV files must have 5 pages or fewer.");
         if (cause.detail === "document_text_too_sparse") throw new Error("The CV does not contain enough extractable text.");
       }
       throw new Error("Profile extraction failed. Check the file and try again.");

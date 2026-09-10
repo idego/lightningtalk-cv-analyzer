@@ -107,7 +107,8 @@ disclose whether a result came from cache.
 
 A repeated compatible request SHALL return the stored completed result without
 another provider call. Cache failures in one category MUST NOT block unrelated
-categories.
+categories. The web research proxies SHALL always send `X-Research-Refresh: false`;
+a browser request MUST NOT be able to invalidate the shared public-entity cache.
 
 #### Scenario: Compatible reusable result exists
 

@@ -34,6 +34,16 @@ export const auth = betterAuth({
   secret: betterAuthSecret,
   baseURL: process.env.BETTER_AUTH_URL ?? process.env.BASE_URL ?? "http://localhost:3000",
   socialProviders,
+  advanced: {
+    // Session cookies are first-party only: Lax blocks cross-site POSTs from
+    // carrying the session, secure/httpOnly keep it off plain HTTP and out of JS.
+    defaultCookieAttributes: {
+      sameSite: "lax",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    },
+  },
   databaseHooks: {
     user: {
       create: {

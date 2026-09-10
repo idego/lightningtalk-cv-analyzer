@@ -143,6 +143,7 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     if (detail === "document_text_layer_unavailable") return t("cvNeedsTextLayer");
     if (detail === "document_conversion_failed") return t("cvCouldNotRead");
     if (detail === "upload_size_limit_exceeded") return t("cvTooLarge");
+    if (detail === "document_page_limit_exceeded") return t("cvTooManyPages");
     if (detail === "empty_upload") return t("cvEmptyFile");
     if (detail === "unsupported_file_type") return t("cvUnsupportedType");
     if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");

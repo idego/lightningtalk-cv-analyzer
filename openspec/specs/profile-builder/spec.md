@@ -5,7 +5,7 @@ Ported from `origin/feature/profile-builder` at `5f4b934`. Analyzer contracts ar
 ## ADDED Requirements
 
 ### Requirement: Structured profile extraction
-The system SHALL accept a text-extractable PDF or DOCX and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
+The system SHALL accept a text-extractable PDF or DOCX of at most 5 pages (PDF page count is checked before any text extraction; over-limit uploads fail with 422 `document_page_limit_exceeded`) and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
 
 #### Scenario: CV contains ordinary candidate data
 - **WHEN** HR uploads a supported CV to Profile Builder

@@ -5,7 +5,7 @@ Defines Google SSO, allowed-domain enforcement, protected application routes,
 and SQLite-backed session persistence.
 ## Requirements
 ### Requirement: Google SSO integration for web app
-The frontend SHALL support Google sign-in via Better Auth and maintain authenticated sessions for protected routes.
+The frontend SHALL support Google sign-in via Better Auth and maintain authenticated sessions for protected routes. Better Auth cookies SHALL be configured explicitly as `SameSite=Lax`, `HttpOnly`, `Path=/`, and `Secure` in production, so a cross-site page cannot attach the session to a forged POST.
 
 #### Scenario: Successful Google sign-in
 - **WHEN** a user signs in with Google from `/sign-in`

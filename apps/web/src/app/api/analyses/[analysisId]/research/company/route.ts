@@ -11,7 +11,6 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { analysisId } = await context.params;
-  const body = await request.json().catch(() => ({})) as { refresh?: unknown };
   return proxyInternalJson(
     `/analyses/${encodeURIComponent(analysisId)}/research/company`,
     {
@@ -19,7 +18,8 @@ export async function POST(
       headers: {
         ...analysisOwnerHeaders(user.id),
         "X-AI-Enabled": "true",
-        "X-Research-Refresh": body.refresh === true ? "true" : "false",
+        // The browser can never force a shared-cache refresh; the proxy pins it off.
+        "X-Research-Refresh": "false",
       },
     },
   );
