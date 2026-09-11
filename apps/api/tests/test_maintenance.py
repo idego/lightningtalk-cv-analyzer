@@ -19,12 +19,12 @@ class _Clock:
         return self.now
 
 
-def _saturday() -> datetime:
+def _tick_time() -> datetime:
     return datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
 
 
-def test_cycle_purges_every_tick_and_vacuums_once_per_saturday() -> None:
-    clock = _Clock(_saturday())
+def test_cycle_purges_then_vacuums_every_tick() -> None:
+    clock = _Clock(_tick_time())
     calls: list[str] = []
     maintenance = RetentionMaintenance(
         purgers=(lambda: calls.append("purge"),),
@@ -33,25 +33,21 @@ def test_cycle_purges_every_tick_and_vacuums_once_per_saturday() -> None:
     )
 
     maintenance.run_cycle()
-    maintenance.run_cycle()
-    clock.now += timedelta(days=1)  # Sunday
-    maintenance.run_cycle()
-    clock.now += timedelta(days=6)  # next Saturday
+    clock.now += timedelta(days=1)
     maintenance.run_cycle()
 
-    assert calls == ["purge", "vacuum", "purge", "purge", "purge", "vacuum"]
-    assert maintenance.status()["last_vacuum_on"] == "2026-09-19"
+    assert calls == ["purge", "vacuum", "purge", "vacuum"]
+    assert maintenance.status()["last_vacuum_at"] == "2026-09-13T03:00:00+00:00"
 
 
-def test_cycle_skips_vacuum_on_weekdays() -> None:
+def test_startup_only_purges() -> None:
     calls: list[str] = []
     maintenance = RetentionMaintenance(
         purgers=(lambda: calls.append("purge"),),
         vacuum=lambda: calls.append("vacuum"),
-        clock=_Clock(_saturday() + timedelta(days=3)),
     )
 
-    maintenance.run_cycle()
+    assert maintenance.run_startup() is True
 
     assert calls == ["purge"]
 
@@ -85,14 +81,14 @@ def test_vacuum_failure_is_recorded_without_stopping_purges() -> None:
         raise PersistenceError("busy")
 
     maintenance = RetentionMaintenance(
-        purgers=(lambda: None,), vacuum=failing_vacuum, clock=_Clock(_saturday())
+        purgers=(lambda: None,), vacuum=failing_vacuum, clock=_Clock(_tick_time())
     )
 
     maintenance.run_cycle()
 
     assert maintenance.healthy is True
     assert maintenance.status()["last_vacuum_failed"] is True
-    assert maintenance.status()["last_vacuum_on"] is None
+    assert maintenance.status()["last_vacuum_at"] is None
 
 
 def test_run_forever_ticks_on_interval_and_stops() -> None:
@@ -101,13 +97,13 @@ def test_run_forever_ticks_on_interval_and_stops() -> None:
         purgers=(lambda: calls.append("purge"),),
         vacuum=lambda: None,
         interval=timedelta(milliseconds=20),
-        clock=_Clock(_saturday() + timedelta(days=1)),
+        clock=_Clock(_tick_time()),
     )
 
     async def scenario() -> None:
         stop = asyncio.Event()
         task = asyncio.create_task(maintenance.run_forever(stop))
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
         stop.set()
         await asyncio.wait_for(task, timeout=1)
 

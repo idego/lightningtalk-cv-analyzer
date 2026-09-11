@@ -1,4 +1,4 @@
-"""Scheduled retention maintenance: daily purge, weekly vacuum, health flags.
+"""Scheduled retention maintenance: daily purge and vacuum, health flags.
 
 Purging on request paths alone leaves expired rows in place while the API sits
 idle, so the app also runs this loop in the background. The loop never raises:
@@ -11,14 +11,13 @@ import asyncio
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from starlette.concurrency import run_in_threadpool
 
 from cv_validator.errors import PersistenceError
 from cv_validator.operations import safe_log
 
-SATURDAY = 5
 PURGE_INTERVAL = timedelta(days=1)
 
 
@@ -28,18 +27,17 @@ def _utc_now() -> datetime:
 
 @dataclass
 class RetentionMaintenance:
-    """Runs retention purges on a fixed interval and vacuums once every Saturday."""
+    """Runs a retention purge followed by a vacuum on a fixed interval."""
 
     purgers: Sequence[Callable[[], object]]
     vacuum: Callable[[], None]
     interval: timedelta = PURGE_INTERVAL
-    vacuum_weekday: int = SATURDAY
     clock: Callable[[], datetime] = _utc_now
     startup_purge_failed: bool = False
     last_purge_failed: bool = False
     last_vacuum_failed: bool = False
     last_purge_at: datetime | None = None
-    last_vacuum_on: date | None = None
+    last_vacuum_at: datetime | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def run_startup(self) -> bool:
@@ -65,11 +63,8 @@ class RetentionMaintenance:
         return not failed
 
     def run_cycle(self) -> None:
-        """One maintenance tick: purge, then vacuum if it is Saturday and not yet done today."""
+        """One maintenance tick: purge, then vacuum so freed pages leave the file."""
         self.purge()
-        today = self.clock().date()
-        if today.weekday() != self.vacuum_weekday or self.last_vacuum_on == today:
-            return
         try:
             self.vacuum()
         except (OSError, PersistenceError):
@@ -79,7 +74,7 @@ class RetentionMaintenance:
             return
         with self._lock:
             self.last_vacuum_failed = False
-            self.last_vacuum_on = today
+            self.last_vacuum_at = self.clock()
 
     async def run_forever(self, stop: asyncio.Event) -> None:
         interval_seconds = self.interval.total_seconds()
@@ -105,6 +100,6 @@ class RetentionMaintenance:
                 "last_purge_failed": self.last_purge_failed,
                 "last_purge_at": self.last_purge_at.isoformat() if self.last_purge_at else None,
                 "last_vacuum_failed": self.last_vacuum_failed,
-                "last_vacuum_on": self.last_vacuum_on.isoformat() if self.last_vacuum_on else None,
+                "last_vacuum_at": self.last_vacuum_at.isoformat() if self.last_vacuum_at else None,
                 "interval_seconds": int(self.interval.total_seconds()),
             }
