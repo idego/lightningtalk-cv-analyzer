@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
 import hmac
 import json
 import os
@@ -30,6 +31,7 @@ from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
+from cv_validator.api.maintenance import RetentionMaintenance
 from cv_validator.api.persistence import (
     RETENTION_DAYS_MAX,
     RETENTION_DAYS_MIN,
@@ -37,6 +39,7 @@ from cv_validator.api.persistence import (
     PersistenceStore,
 )
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
+from cv_validator.api.profile_builder_store import ProfileBuilderStore
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.api.report_view import public_report_view
 from cv_validator.config import (
@@ -270,15 +273,24 @@ def create_app(
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
+    maintenance = RetentionMaintenance(
+        purgers=(store.purge_expired, ProfileBuilderStore(store).purge_expired),
+        vacuum=store.vacuum,
+    )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        stop_maintenance = asyncio.Event()
+        maintenance_task: asyncio.Task[None] | None = None
         try:
-            try:
-                store.purge_expired()
-            except (OSError, PersistenceError):
+            if not maintenance.run_startup():
                 safe_log("retention_purge_failed", error_code="startup_purge_failed")
+            maintenance_task = asyncio.create_task(maintenance.run_forever(stop_maintenance))
             yield
         finally:
+            stop_maintenance.set()
+            if maintenance_task is not None:
+                await maintenance_task
             research_locks.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
@@ -506,7 +518,7 @@ def create_app(
                 "store": settings.store,
                 "timeout_seconds": settings.timeout_seconds,
             },
-            "retention": {"days": store.config.retention_days},
+            "retention": {"days": store.config.retention_days, "maintenance": maintenance.status()},
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
             "upload": {"max_bytes": max_upload_bytes},
         }
@@ -1228,6 +1240,7 @@ def create_app(
         return JSONResponse(response)
 
     app.state.store = store
+    app.state.retention_maintenance = maintenance
     app.state.location_resolver = resolver
     app.state.openai_settings = settings
     app.state.analysis_strategy = strategy

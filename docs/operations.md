@@ -15,7 +15,16 @@
   network in production; `make dev` adds `docker-compose.dev.yml`, which
   publishes it on `127.0.0.1:8001` for Swagger only.
 - Persist and back up the API and authentication SQLite volumes.
-- Configure retention with `CV_VALIDATOR_RETENTION_DAYS`.
+- Configure retention with `CV_VALIDATOR_RETENTION_DAYS` (1-3650 days; the
+  API refuses to start outside that range).
+
+Retention is enforced by a background maintenance loop, not only on request
+paths. The API purges expired analyses and Profile Builder profiles once at
+startup and then every 24 hours while running; on Saturdays it also runs one
+SQLite `VACUUM` so freed pages leave the database file. All connections set
+`PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
+pages. `GET /operations/status` exposes the loop state under
+`retention.maintenance`.
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.
