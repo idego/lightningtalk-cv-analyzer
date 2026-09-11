@@ -15,7 +15,7 @@ import { EducationResearchPanel } from "@/components/analyze/education-research"
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { useCopy } from "@/lib/app-settings";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
-import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
+import { educationGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { ResearchSources } from "@/components/analyze/research-sources";
@@ -185,18 +185,14 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
           {overview.education.length || overview.educationStatus ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.education.map((item) => {
-                const href = educationGoogleSearchUrl({ institution: item.searchSubject, program: item.searchContext });
-                return <OverviewRow
-                  key={item.id}
-                  icon={<GraduationCap className="size-4" />}
-                  label={t("educationEntry")}
-                  value={item.value}
-                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
-                  tone={educationTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
-                />;
-              })}
+              {overview.education.map((item) => <OverviewRow
+                key={item.id}
+                icon={<GraduationCap className="size-4" />}
+                label={t("educationEntry")}
+                value={item.value}
+                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                tone={educationTone}
+              />)}
             </div>
             {!overview.education.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.educationStatus)}</p> : null}
           </section> : null}
@@ -222,18 +218,14 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
           {overview.employment.length || overview.employmentStatus ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.employment.map((item) => {
-                const href = companyGoogleSearchUrl({ organization: item.searchSubject, location: item.searchContext });
-                return <OverviewRow
-                  key={item.id}
-                  icon={<BriefcaseBusiness className="size-4" />}
-                  label={t("employmentEntry")}
-                  value={item.value}
-                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
-                  tone={employmentTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
-                />;
-              })}
+              {overview.employment.map((item) => <OverviewRow
+                key={item.id}
+                icon={<BriefcaseBusiness className="size-4" />}
+                label={t("employmentEntry")}
+                value={item.value}
+                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                tone={employmentTone}
+              />)}
             </div>
             {!overview.employment.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.employmentStatus)}</p> : null}
           </section> : null}

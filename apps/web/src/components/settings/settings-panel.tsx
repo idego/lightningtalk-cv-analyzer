@@ -5,6 +5,7 @@ import { CheckCircle2, CircleAlert, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ProfileBuilderSettings } from "@/components/profile-builder/profile-builder-settings";
+import { PROFILE_BUILDER_ENABLED } from "@/lib/feature-flags";
 import { updateAppSettings, useCopy, type AppLanguage, type CopyKey } from "@/lib/app-settings";
 
 type Capability = { ready: boolean; version?: string | null; recovery?: string | null };
@@ -159,7 +160,7 @@ export function SettingsPanel() {
       </div>
       {settings.aiEnabled && anyResearchAvailable ? <p className="mt-3 text-xs text-muted-foreground">{t("linkedinDiscoveryDescription")}</p> : null}
     </section>
-    <ProfileBuilderSettings />
+    {PROFILE_BUILDER_ENABLED ? <ProfileBuilderSettings /> : null}
     <section className="rounded-xl border bg-card p-5">
       <h3 className="font-medium">{t("dataRetention")}</h3>
       <p className="mt-1 text-sm text-muted-foreground">{t("retentionGlobalDescription")}</p>
