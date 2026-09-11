@@ -47,10 +47,21 @@ class PersistenceStore:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.config.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA secure_delete = ON")
         conn.row_factory = sqlite3.Row
         try:
             with conn:
                 yield conn
+        finally:
+            conn.close()
+
+    def vacuum(self) -> None:
+        """Rebuild the database file so freed pages of purged rows leave the file."""
+        conn = sqlite3.connect(self.config.db_path)
+        try:
+            conn.execute("VACUUM")
+        except sqlite3.Error as exc:
+            raise PersistenceError("database vacuum failed") from exc
         finally:
             conn.close()
 

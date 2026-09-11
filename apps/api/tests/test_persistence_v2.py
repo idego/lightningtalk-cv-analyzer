@@ -245,3 +245,33 @@ def test_delete_analysis_removes_processed_report_events(tmp_path) -> None:
 
     assert store.delete_analysis("analysis-deleted-event", "owner-1") is True
     assert _processed_event_count(store, "analysis-deleted-event") == 0
+
+
+def test_connections_enable_secure_delete(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    with store._connect() as connection:
+        assert connection.execute("PRAGMA secure_delete").fetchone()[0] == 1
+
+
+def test_vacuum_reclaims_space_after_purge(tmp_path) -> None:
+    db_path = tmp_path / "reports.db"
+    store = PersistenceStore(PersistenceConfig(db_path, retention_days=1))
+    for index in range(20):
+        payload = valid_report()
+        analysis_id = f"analysis-vacuum-{index}"
+        payload["analysis_id"] = analysis_id
+        store.persist_report(
+            payload["source"]["sha256"],
+            payload,
+            analysis_id=analysis_id,
+            owner_user_id="owner-1",
+            source_filename="candidate.pdf",
+        )
+    with store._connect() as connection:
+        connection.execute("UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00'")
+    store.purge_expired()
+    before = db_path.stat().st_size
+
+    store.vacuum()
+
+    assert db_path.stat().st_size < before

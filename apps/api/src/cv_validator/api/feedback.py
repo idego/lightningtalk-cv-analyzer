@@ -290,6 +290,7 @@ class FeedbackStore:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA secure_delete = ON")
         conn.row_factory = sqlite3.Row
         try:
             with conn:
