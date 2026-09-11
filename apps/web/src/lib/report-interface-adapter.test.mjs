@@ -123,11 +123,10 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 0);
-  assert.equal(presentation.worthKnowing.length, 2);
-  assert.equal(presentation.worthKnowing[0].evidence[0].source_id, "block-1");
+  assert.equal(presentation.whatToCheck.length, 2);
+  assert.equal(presentation.whatToCheck[0].evidence[0].source_id, "block-1");
   assert.equal(
-    [...presentation.attention, ...presentation.worthKnowing]
+    presentation.whatToCheck
       .every((item) => item.evidence.length > 0),
     true,
   );
@@ -196,7 +195,7 @@ test("completed LinkedIn not-found result becomes one cautious checklist finding
   };
 
   const presentation = adaptReportInterface(value, "en");
-  const linkedin = presentation.attention.find((item) => item.id === "linkedin-not-found");
+  const linkedin = presentation.whatToCheck.find((item) => item.id === "linkedin-not-found");
 
   assert.match(linkedin.whatWeFound, /limited search/i);
   assert.match(linkedin.whyItMatters, /does not mean.*does not exist/i);
@@ -224,8 +223,7 @@ test("outside-EU status is neutral overview information, not a finding", () => {
 
   const presentation = adaptReportInterface(value, "en");
   assert.equal(presentation.overview.euStatus, "outside");
-  assert.equal(presentation.attention.some((item) => item.id === "outside-eu"), false);
-  assert.equal(presentation.worthKnowing.some((item) => item.id === "outside-eu"), false);
+  assert.equal(presentation.whatToCheck.some((item) => item.id === "outside-eu"), false);
 
   value.mechanical.eu_status.sources[0].country_code = "PL";
   value.mechanical.eu_status.inside_eu = ["PL"];
@@ -261,14 +259,14 @@ test("location outcomes use evidence and cautious status-specific copy", () => {
 
   const presentation = adaptReportInterface(value, "en");
 
-  assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
-  assert.equal(presentation.worthKnowing.some((item) => item.id.startsWith("postal-")), false);
-  assert.equal(presentation.attention.some((item) => item.id.startsWith("email-")), false);
+  assert.match(presentation.whatToCheck.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
+  assert.equal(presentation.whatToCheck.some((item) => item.id.startsWith("postal-")), false);
+  assert.equal(presentation.whatToCheck.some((item) => item.id.startsWith("email-")), false);
   assert.doesNotMatch(JSON.stringify(presentation), /GeoNames/);
 
   value.mechanical.location_resolution[0].status = "unresolved";
   value.mechanical.location_resolution[0].city_country_relationship = "unresolved";
-  const unresolved = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id.startsWith("location-"));
+  const unresolved = adaptReportInterface(value, "en").whatToCheck.find((item) => item.id.startsWith("location-"));
   assert.match(unresolved.whatWeFound, /not confirmed in the limited location index/i);
   assert.doesNotMatch(unresolved.whatWeFound, /does not exist/i);
 });

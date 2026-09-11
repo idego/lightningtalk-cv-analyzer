@@ -27,7 +27,7 @@ PDF or DOCX upload
 - A postal-looking token is not a candidate address until supported context
   accepts that relation.
 - Education research distinguishes supported institution existence, cited conflicts,
-  and insufficient evidence. Only a sourced institution conflict creates an attention
+  and insufficient evidence. Only a sourced institution conflict creates a "What to check"
   finding; missing research evidence remains a panel status. Older results without
   this assessment remain readable and need fresh research for a new verdict.
 - Company research lowers overstated aggregate confidence and drops empty or
@@ -41,8 +41,8 @@ PDF or DOCX upload
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.
 - The overview EU row classifies only the declared location. A phone prefix alone
-  leaves location unknown; a phone/location country difference is worth knowing,
-  not an attention finding.
+  leaves location unknown; a phone/location country difference is listed under "What to check"
+  as a consistency signal, not a judgment.
 - The system does not perform identity, honesty, residence, nationality, work
   eligibility, or automatic hiring verification.
 

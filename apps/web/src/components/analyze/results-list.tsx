@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Award, BriefcaseBusiness, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { Award, BriefcaseBusiness, FileUser, Globe2, GraduationCap, Link as LinkIcon, ListChecks, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import { GitHubIcon, LinkedInIcon } from "@/components/analyze/search-provider-icon";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { OverviewLink, ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
@@ -303,10 +303,10 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
         const presentation = adaptReportInterface(report, settings.uiLanguage);
         const reportFeedbackManifest = feedback[report.analysis_id];
-        const worthKnowingFeedbackTarget = feedbackTarget(
+        const whatToCheckFeedbackTarget = feedbackTarget(
           reportFeedbackManifest,
           "report_overall",
-          "worth_knowing",
+          "what_to_check",
           "section",
         );
         return (
@@ -324,12 +324,8 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
               {!readOnly ? <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction> : null}
             </CardHeader>
             <CardContent className="space-y-3">
-              {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.attention} />
-              </HoverDisclosure> : null}
-
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && worthKnowingFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={worthKnowingFeedbackTarget} /> : null} contentClassName="pt-3">
-                <FlagList flags={presentation.worthKnowing} />
+              {presentation.whatToCheck.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("whatToCheck")} ({presentation.whatToCheck.length})</SectionTitle>} feedbackSnapshotLabel={t("whatToCheck")} action={!readOnly && whatToCheckFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={whatToCheckFeedbackTarget} /> : null} contentClassName="pt-3">
+                <FlagList flags={presentation.whatToCheck} />
               </HoverDisclosure> : null}
 
               <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} />

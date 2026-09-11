@@ -51,8 +51,7 @@ export type ReportOverview = {
 };
 
 export type ReportInterface = {
-  attention: ReportFinding[];
-  worthKnowing: ReportFinding[];
+  whatToCheck: ReportFinding[];
   overview: ReportOverview;
 };
 
@@ -375,14 +374,11 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       sourceUrls: item.source_urls,
     }];
   });
-  const attention: ReportFinding[] = [
+  // One list, ordered from research-backed contradictions to weaker consistency signals.
+  const whatToCheck: ReportFinding[] = [
     ...institutionFindings,
     ...companyFindings,
-    ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-  ];
-
-  const worthKnowing: ReportFinding[] = [
     ...comparisons
       .filter((item) => item.relationship === "different")
       .map((_item, index) => findingFromEvidence(
@@ -392,6 +388,7 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         copy.mismatchCheck,
         comparisonEvidence,
       )),
+    ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },
@@ -399,8 +396,8 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       copy.gapWhy,
       copy.gapCheck,
     )),
-    ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
+    ...(linkedinFinding ? [linkedinFinding] : []),
   ];
 
-  return { attention, worthKnowing, overview: overview(report) };
+  return { whatToCheck, overview: overview(report) };
 }
