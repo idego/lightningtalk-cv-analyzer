@@ -123,9 +123,9 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 1);
+  assert.equal(presentation.attention.length, 0);
   assert.equal(presentation.worthKnowing.length, 2);
-  assert.equal(presentation.attention[0].evidence[0].source_id, "block-1");
+  assert.equal(presentation.worthKnowing[0].evidence[0].source_id, "block-1");
   assert.equal(
     [...presentation.attention, ...presentation.worthKnowing]
       .every((item) => item.evidence.length > 0),
@@ -239,7 +239,7 @@ test("outside-EU status is neutral overview information, not a finding", () => {
   assert.equal(adaptReportInterface(value, "en").overview.euStatus, "unknown");
 });
 
-test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {
+test("location outcomes use evidence and cautious status-specific copy", () => {
   const value = report();
   value.mechanical.location_resolution = [{
     subject: "declared_location",
@@ -263,10 +263,12 @@ test("GeoNames and postal outcomes use evidence and cautious status-specific cop
 
   assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
   assert.equal(presentation.worthKnowing.some((item) => item.id.startsWith("postal-")), false);
+  assert.equal(presentation.attention.some((item) => item.id.startsWith("email-")), false);
+  assert.doesNotMatch(JSON.stringify(presentation), /GeoNames/);
 
   value.mechanical.location_resolution[0].status = "unresolved";
   value.mechanical.location_resolution[0].city_country_relationship = "unresolved";
   const unresolved = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id.startsWith("location-"));
-  assert.match(unresolved.whatWeFound, /not confirmed in the limited GeoNames index/i);
+  assert.match(unresolved.whatWeFound, /not confirmed in the limited location index/i);
   assert.doesNotMatch(unresolved.whatWeFound, /does not exist/i);
 });

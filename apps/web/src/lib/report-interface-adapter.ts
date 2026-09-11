@@ -131,15 +131,12 @@ function localized(language: ReportLanguage) {
     mismatch: "Deklarowany kraj i kraj numeru telefonu są różne.",
     mismatchWhy: "To sygnał niespójności, a nie dowód miejsca pobytu.",
     mismatchCheck: "Sprawdź deklarowaną lokalizację i numer telefonu w CV.",
-    emailTypo: "Adres e-mail może zawierać literówkę w popularnej domenie.",
-    emailTypoWhy: "Literówka może uniemożliwić kontakt z kandydatem.",
-    emailTypoCheck: "Porównaj adres z oryginalnym CV przed użyciem.",
     linkedinMissing: "Nie znaleziono dopasowanego profilu LinkedIn w ograniczonym wyszukiwaniu.",
     linkedinMissingWhy: "Brak wyniku z ograniczonego wyszukiwania nie oznacza, że profil nie istnieje.",
     linkedinMissingCheck: "Wyszukaj profil ręcznie, używając danych kandydata z CV.",
-    locationAmbiguous: "Deklarowane miasto jest niejednoznaczne w indeksie GeoNames.",
-    locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie GeoNames.",
-    locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje w GeoNames.",
+    locationAmbiguous: "Deklarowane miasto pasuje do kilku miejscowości.",
+    locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie lokalizacji.",
+    locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje.",
     locationWhy: "Rozpoznanie dotyczy zgodności tekstu CV z ograniczonym indeksem, nie miejsca pobytu.",
     locationCheck: "Sprawdź pisownię miasta i kraju w CV oraz potwierdź je z kandydatem.",
   } : {
@@ -149,15 +146,12 @@ function localized(language: ReportLanguage) {
     mismatch: "The declared country and phone country differ.",
     mismatchWhy: "This is a consistency signal, not proof of residence.",
     mismatchCheck: "Review the declared location and phone number in the CV.",
-    emailTypo: "The email address may contain a typo in a common provider domain.",
-    emailTypoWhy: "A typo may prevent contact with the candidate.",
-    emailTypoCheck: "Compare the address with the original CV before using it.",
     linkedinMissing: "No matching LinkedIn profile was found by the limited search.",
     linkedinMissingWhy: "No result from a limited search does not mean that a profile does not exist.",
     linkedinMissingCheck: "Search manually using the candidate details stated in the CV.",
-    locationAmbiguous: "The declared city is ambiguous in the GeoNames index.",
-    locationUnresolved: "The declared city was not confirmed in the limited GeoNames index.",
-    locationMismatch: "The declared city and country point to different countries in GeoNames.",
+    locationAmbiguous: "The declared city matches several places.",
+    locationUnresolved: "The declared city was not confirmed in the limited location index.",
+    locationMismatch: "The declared city and country point to different countries.",
     locationWhy: "This checks CV text against a limited index; it does not establish physical residence.",
     locationCheck: "Review the city and country spelling in the CV and confirm them with the candidate.",
   };
@@ -302,12 +296,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
     countryList(item.declared_country_codes),
     countryList(item.phone_country_codes),
   ].join(":"));
-  const emailFindings = unique(report.mechanical.email_findings.map(record).filter((item): item is UnknownRecord => Boolean(item)), (item) => [
-    text(item.kind),
-    text(item.observed_domain),
-    text(item.suggested_domain),
-  ].join(":"))
-    .filter((item) => firstEvidence(item).length > 0);
   const coverageGaps = unique(review.coverage_gaps.map(record).filter((item): item is UnknownRecord => Boolean(item)), (item) => [
     text(item.target),
     text(item.reason_code),
@@ -392,13 +380,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
     ...companyFindings,
     ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-    ...emailFindings
-      .map((item, index) => finding(`email-${index}`, { ...item, summary: [
-        copy.emailTypo,
-        text(item.observed_domain) && text(item.suggested_domain)
-          ? `${text(item.observed_domain)} → ${text(item.suggested_domain)}`
-          : null,
-      ].filter(Boolean).join(" ") }, copy.emailTypo, copy.emailTypoWhy, copy.emailTypoCheck)),
   ];
 
   const worthKnowing: ReportFinding[] = [
