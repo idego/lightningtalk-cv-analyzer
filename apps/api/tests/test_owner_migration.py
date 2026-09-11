@@ -131,8 +131,8 @@ def test_retention_removes_unclaimed_migration_rows_but_preserves_feedback(tmp_p
     path, _ = populated_legacy_database(tmp_path)
     store = PersistenceStore(PersistenceConfig(path))
     with store._connect() as conn:
-        conn.execute("UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00'")
-        conn.execute("UPDATE analysis_runs SET created_at = '2000-01-01T00:00:00+00:00'")
+        conn.execute("UPDATE reports SET expires_at = '2000-01-01T00:00:00+00:00'")
+        conn.execute("UPDATE analysis_runs SET expires_at = '2000-01-01T00:00:00+00:00'")
     store.purge_expired()
     with store._connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM legacy_analysis_owners").fetchone()[0] == 0

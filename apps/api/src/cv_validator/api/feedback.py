@@ -13,6 +13,8 @@ from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cv_validator.api.sqlite_support import open_connection
+
 
 TARGET_NAMESPACE = UUID("b1541b7f-e1ec-44b2-bac8-e30bf2445772")
 CONTACT_RE = re.compile(r"(?i)(?:https?://|www\.)\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:\+?\d[\d ()-]{7,}\d)")
@@ -288,14 +290,8 @@ class FeedbackStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with open_connection(self.db_path) as conn:
+            yield conn
 
     def pseudonym(self, purpose: Literal["actor", "maintainer"], value: str) -> str:
         return hashlib.sha256(f"{purpose}:{value}".encode()).hexdigest()
@@ -415,8 +411,9 @@ class FeedbackStore:
                 params,
             ).fetchall()
             counts = {row["triage_status"]: row["count"] for row in conn.execute("SELECT COALESCE(g.status,'new') triage_status,COUNT(*) count FROM feedback_responses r LEFT JOIN feedback_triage g ON g.target_id=r.target_id AND g.actor_hash=r.actor_hash WHERE r.withdrawn_at IS NULL GROUP BY triage_status")}
+            retained = _retained_analysis_ids(conn, [row["analysis_id"] for row in rows])
         page_limit = min(max(limit, 1), 100)
-        return {"items": [_inbox_row(row) for row in rows[:page_limit]], "counts": counts, "next_cursor": rows[page_limit - 1]["cursor"] if len(rows) > page_limit else None}
+        return {"items": [_inbox_row(row, retained) for row in rows[:page_limit]], "counts": counts, "next_cursor": rows[page_limit - 1]["cursor"] if len(rows) > page_limit else None}
 
     def triage(self, target_id: str, actor_hash: str, maintainer: str, value: TriageInput) -> bool:
         now = _now()
@@ -543,9 +540,45 @@ def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
     return {"target_id": row["target_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "response": response}
 
 
-def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
-    failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
-    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None, "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
+def _retained_analysis_ids(conn: sqlite3.Connection, analysis_ids: list[str]) -> set[str]:
+    """Analyses that still have a report; feedback outlives deletion and retention purge."""
+    if not analysis_ids:
+        return set()
+    has_reports = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'").fetchone()
+    if has_reports is None:
+        return set()
+    unique_ids = sorted(set(analysis_ids))
+    placeholders = ",".join("?" for _ in unique_ids)
+    return {row[0] for row in conn.execute(f"SELECT analysis_id FROM reports WHERE analysis_id IN ({placeholders})", unique_ids)}
+
+
+_FAILURE_KEYS = ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")
+
+
+def _inbox_row(row: sqlite3.Row, retained_analysis_ids: set[str]) -> dict[str, Any]:
+    failure = None if row["operation_kind"] is None else {key: row[key] for key in _FAILURE_KEYS}
+    return {
+        "cursor": row["cursor"],
+        "target_id": row["target_id"],
+        "analysis_id": row["analysis_id"],
+        "analysis_available": row["analysis_id"] in retained_analysis_ids,
+        "kind": row["kind"],
+        "source_category": row["source_category"],
+        "source_key": row["source_key"],
+        "versions": json.loads(row["versions_json"]),
+        "actor_hash": row["actor_hash"],
+        "actor_email": row["actor_email"],
+        "rating": row["rating"],
+        "reason": row["reason"],
+        "comment": row["comment"],
+        "context_label": row["context_label"],
+        "context_text": row["context_text"],
+        "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None,
+        "updated_at": row["updated_at"],
+        "triage_status": row["triage_status"],
+        "triage_note": row["note"],
+        "failure": failure,
+    }
 
 
 def _now() -> str:

@@ -279,11 +279,11 @@ def test_feedback_survives_retention_purge(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(
-            "UPDATE reports SET created_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            "UPDATE reports SET expires_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
             (aid,),
         )
         conn.execute(
-            "UPDATE analysis_runs SET created_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            "UPDATE analysis_runs SET expires_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
             (aid,),
         )
 
@@ -295,6 +295,7 @@ def test_feedback_survives_retention_purge(tmp_path):
     assert len(inbox["items"]) == 1
     item = inbox["items"][0]
     assert item["analysis_id"] == aid
+    assert item["analysis_available"] is False
     assert item["comment"] == "LLM call timed out"
     assert item["context_label"] == "Failure diagnostic"
     assert item["context_text"] == "Execution failed with timeout"

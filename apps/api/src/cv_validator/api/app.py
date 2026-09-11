@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
 import hmac
 import json
 import os
@@ -30,8 +31,19 @@ from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.maintenance import (
+    MAINTENANCE_TIME_ENV,
+    RetentionMaintenance,
+    parse_maintenance_time,
+)
+from cv_validator.api.persistence import (
+    RETENTION_DAYS_MAX,
+    RETENTION_DAYS_MIN,
+    PersistenceConfig,
+    PersistenceStore,
+)
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
+from cv_validator.api.profile_builder_store import ProfileBuilderStore
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.api.report_view import public_report_view
 from cv_validator.config import (
@@ -115,7 +127,12 @@ def _db_path_from_env() -> Path:
 
 
 def _retention_days_from_env() -> int:
-    return int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    value = int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    if not RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX:
+        raise ValueError(
+            f"CV_VALIDATOR_RETENTION_DAYS must be between {RETENTION_DAYS_MIN} and {RETENTION_DAYS_MAX}"
+        )
+    return value
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -260,15 +277,28 @@ def create_app(
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
+    maintenance = RetentionMaintenance(
+        purgers=(store.purge_expired, ProfileBuilderStore(store).purge_expired),
+        vacuum=store.vacuum,
+        run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
+    )
+    # Request-path purges (list, persist, retention change) also report their
+    # outcome, so a successful one clears a stale failure flag before 03:00.
+    store.purge_listeners.append(maintenance.record_purge_outcome)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        stop_maintenance = asyncio.Event()
+        maintenance_task: asyncio.Task[None] | None = None
         try:
-            try:
-                store.purge_expired()
-            except (OSError, PersistenceError):
+            if not maintenance.run_startup():
                 safe_log("retention_purge_failed", error_code="startup_purge_failed")
+            maintenance_task = asyncio.create_task(maintenance.run_forever(stop_maintenance))
             yield
         finally:
+            stop_maintenance.set()
+            if maintenance_task is not None:
+                await maintenance_task
             research_locks.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
@@ -348,6 +378,10 @@ def create_app(
             "profile_builder": {"ready": settings.enabled},
             "profile_pdf_export": {"ready": shutil.which("soffice") is not None or shutil.which("libreoffice") is not None},
             "database": {"ready": True},
+            "retention_purge": {
+                "ready": maintenance.healthy,
+                "reason": None if maintenance.healthy else "retention_purge_failed",
+            },
             "feedback": {"ready": True, "enabled": True},
             "feedback_inbox": {"ready": True, "enabled": True},
         }
@@ -464,7 +498,11 @@ def create_app(
     @app.get("/health")
     def health() -> dict:
         current = capabilities()
-        required_ready = current["database"]["ready"] and current["base_analysis"]["ready"]
+        required_ready = (
+            current["database"]["ready"]
+            and current["retention_purge"]["ready"]
+            and current["base_analysis"]["ready"]
+        )
         if require_location_resolver:
             required_ready = (
                 required_ready
@@ -496,7 +534,7 @@ def create_app(
                 "store": settings.store,
                 "timeout_seconds": settings.timeout_seconds,
             },
-            "retention": {"days": store.config.retention_days},
+            "retention": {"days": store.config.retention_days, "maintenance": maintenance.status()},
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
             "upload": {"max_bytes": max_upload_bytes},
         }
@@ -1218,6 +1256,7 @@ def create_app(
         return JSONResponse(response)
 
     app.state.store = store
+    app.state.retention_maintenance = maintenance
     app.state.location_resolver = resolver
     app.state.openai_settings = settings
     app.state.analysis_strategy = strategy

@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import valid_report
-from cv_validator.api.app import create_app
+from cv_validator.api.app import _retention_days_from_env, create_app
 from cv_validator.errors import PersistenceError
 from cv_validator.openai_config import OpenAISettings
 
@@ -294,12 +295,11 @@ def test_share_links_expire_after_two_days_or_at_retention_deadline(tmp_path) ->
     purged = store.purge_expired()
     assert purged["expired_share_tokens"] == 1
 
-    # An analysis close to its retention deadline caps the link at that deadline.
-    store.set_retention_days(3)
+    # An analysis close to its stored retention deadline caps the link at that deadline.
     with store._connect() as conn:
         conn.execute(
-            "UPDATE reports SET created_at = ? WHERE analysis_id = ?",
-            ((datetime.now(timezone.utc) - timedelta(days=2, hours=12)).isoformat(), analysis_id),
+            "UPDATE reports SET expires_at = ? WHERE analysis_id = ?",
+            ((datetime.now(timezone.utc) + timedelta(hours=12)).isoformat(), analysis_id),
         )
     capped = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers).json()
     remaining = datetime.fromisoformat(capped["expires_at"]) - datetime.now(timezone.utc)
@@ -350,11 +350,11 @@ def test_source_document_is_purged_with_expired_analysis(tmp_path) -> None:
     owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers)
     store = app.state.store
-    stale = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     with store._connect() as conn:
-        for table in ("reports", "audit_log", "analysis_runs", "source_documents"):
+        for table in ("reports", "analysis_runs"):
             conn.execute(
-                f"UPDATE {table} SET created_at = ? WHERE analysis_id = ?",
+                f"UPDATE {table} SET expires_at = ? WHERE analysis_id = ?",
                 (stale, analysis_id),
             )
 
@@ -560,3 +560,15 @@ def test_sensitive_analysis_endpoints_hide_reports_from_non_owners(tmp_path) -> 
 
     assert client.delete(f"/analyses/{analysis_id}", headers=other_headers).status_code == 404
     assert client.get(f"/analyses/{analysis_id}/feedback", headers=owner_headers).status_code == 200
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "3651"])
+def test_retention_env_var_outside_range_is_rejected(monkeypatch, value) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_RETENTION_DAYS", value)
+    with pytest.raises(ValueError, match="CV_VALIDATOR_RETENTION_DAYS"):
+        _retention_days_from_env()
+
+
+def test_retention_env_var_within_range_is_accepted(monkeypatch) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_RETENTION_DAYS", "1")
+    assert _retention_days_from_env() == 1

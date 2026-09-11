@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 
@@ -90,7 +91,7 @@ def test_retention_purge_removes_analysis_share_capabilities(tmp_path) -> None:
     ) is not None
     with store._connect() as connection:
         connection.execute(
-            "UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            "UPDATE reports SET expires_at = '2000-01-01T00:00:00+00:00' WHERE analysis_id = ?",
             ("analysis-expired-share",),
         )
 
@@ -145,7 +146,7 @@ def test_retention_uses_report_age_not_older_run_age(tmp_path) -> None:
     )
     with store._connect() as connection:
         connection.execute(
-            "UPDATE analysis_runs SET created_at='2000-01-01T00:00:00+00:00' WHERE analysis_id=?",
+            "UPDATE analysis_runs SET expires_at='2000-01-01T00:00:00+00:00' WHERE analysis_id=?",
             ("analysis-boundary",),
         )
 
@@ -198,3 +199,125 @@ def test_owner_schema_migration_removes_legacy_token_columns_and_allows_new_runs
     assert "access_token_hash" not in report_columns
     assert "access_token_hash" not in run_columns
     assert store.analysis_owned_by("new-analysis", "owner-1") is True
+
+
+def test_connections_enable_secure_delete(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    with store._connect() as connection:
+        assert connection.execute("PRAGMA secure_delete").fetchone()[0] == 1
+
+
+def test_vacuum_reclaims_space_after_purge(tmp_path) -> None:
+    db_path = tmp_path / "reports.db"
+    store = PersistenceStore(PersistenceConfig(db_path, retention_days=1))
+    for index in range(20):
+        payload = valid_report()
+        analysis_id = f"analysis-vacuum-{index}"
+        payload["analysis_id"] = analysis_id
+        store.persist_report(
+            payload["source"]["sha256"],
+            payload,
+            analysis_id=analysis_id,
+            owner_user_id="owner-1",
+            source_filename="candidate.pdf",
+        )
+    with store._connect() as connection:
+        connection.execute("UPDATE reports SET expires_at = '2000-01-01T00:00:00+00:00'")
+    store.purge_expired()
+    before = db_path.stat().st_size
+
+    store.vacuum()
+
+    assert db_path.stat().st_size < before
+
+
+def _persist(store: PersistenceStore, analysis_id: str) -> None:
+    payload = valid_report()
+    payload["analysis_id"] = analysis_id
+    store.persist_report(
+        payload["source"]["sha256"],
+        payload,
+        analysis_id=analysis_id,
+        owner_user_id="owner-1",
+        source_filename="candidate.pdf",
+    )
+
+
+def _report_expires_at(store: PersistenceStore, analysis_id: str) -> datetime:
+    with store._connect() as connection:
+        row = connection.execute(
+            "SELECT expires_at FROM reports WHERE analysis_id = ?", (analysis_id,)
+        ).fetchone()
+    return datetime.fromisoformat(row["expires_at"])
+
+
+def test_reports_store_their_retention_deadline_on_write(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db", retention_days=30))
+    before = datetime.now(timezone.utc)
+
+    _persist(store, "analysis-deadline")
+
+    expires_at = _report_expires_at(store, "analysis-deadline")
+    assert timedelta(days=30) - timedelta(minutes=1) < expires_at - before <= timedelta(days=30, minutes=1)
+    assert store.list_analyses("owner-1")[0]["expires_at"] == expires_at.isoformat()
+
+
+def test_changing_retention_keeps_stored_deadlines(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db", retention_days=90))
+    _persist(store, "analysis-old-window")
+    original = _report_expires_at(store, "analysis-old-window")
+
+    store.set_retention_days(1)
+    _persist(store, "analysis-new-window")
+
+    assert _report_expires_at(store, "analysis-old-window") == original
+    assert store.get_analysis_payload("analysis-old-window") is not None
+    new_deadline = _report_expires_at(store, "analysis-new-window")
+    assert new_deadline - datetime.now(timezone.utc) < timedelta(days=1, minutes=1)
+
+
+def test_purge_ignores_rows_whose_deadline_has_not_passed(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db", retention_days=1))
+    _persist(store, "analysis-future")
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            ("analysis-future",),
+        )
+
+    deleted = store.purge_expired()
+
+    assert deleted["analysis_ids"] == ()
+    assert store.get_analysis_payload("analysis-future") is not None
+
+
+def test_existing_rows_without_deadline_are_backfilled_from_created_at(tmp_path) -> None:
+    db_path = tmp_path / "reports.db"
+    store = PersistenceStore(PersistenceConfig(db_path, retention_days=10))
+    store.create_analysis_run("analysis-legacy", "corr", "owner-1")
+    _persist(store, "analysis-legacy")
+    with sqlite3.connect(db_path) as connection:
+        for table in ("reports", "analysis_runs"):
+            connection.execute(f"DROP INDEX IF EXISTS {table}_expires_at")
+            connection.execute(f"ALTER TABLE {table} DROP COLUMN expires_at")
+            connection.execute(
+                f"UPDATE {table} SET created_at = '2026-01-01T00:00:00+00:00'"
+            )
+
+    reopened = PersistenceStore(PersistenceConfig(db_path, retention_days=10))
+
+    assert _report_expires_at(reopened, "analysis-legacy") == datetime(2026, 1, 11, tzinfo=timezone.utc)
+    with reopened._connect() as connection:
+        run = connection.execute(
+            "SELECT expires_at FROM analysis_runs WHERE analysis_id = 'analysis-legacy'"
+        ).fetchone()
+    assert run["expires_at"] == "2026-01-11T00:00:00+00:00"
+
+
+def test_purge_wraps_sqlite_errors_in_persistence_error(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    with sqlite3.connect(tmp_path / "reports.db") as connection:
+        connection.execute("DROP TABLE analysis_runs")
+
+    with pytest.raises(PersistenceError, match="retention purge failed"):
+        store.purge_expired()

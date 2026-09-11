@@ -15,7 +15,30 @@
   network in production; `make dev` adds `docker-compose.dev.yml`, which
   publishes it on `127.0.0.1:8001` for Swagger only.
 - Persist and back up the API and authentication SQLite volumes.
-- Configure retention with `CV_VALIDATOR_RETENTION_DAYS`.
+- Configure retention with `CV_VALIDATOR_RETENTION_DAYS` (1-3650 days; the
+  API refuses to start outside that range).
+
+Every report, analysis run, and saved Profile Builder profile stores an
+`expires_at` deadline computed when the row is written (each profile edit
+renews it). Purge deletes rows whose stored deadline has passed, so changing
+the retention setting only affects rows written afterwards; existing rows
+keep their deadline. Databases created before the column existed are
+backfilled on startup from each row's own timestamp plus the current window.
+
+Retention is enforced by a background maintenance loop, not only on request
+paths. The API purges expired analyses and Profile Builder profiles once at
+startup and then once a day at `CV_VALIDATOR_MAINTENANCE_TIME_UTC` (`HH:MM`,
+24-hour UTC, default `03:00`; the API refuses to start on any other format)
+while running; each scheduled purge is followed by a SQLite `VACUUM` so freed
+pages leave the database file. All connections set
+`PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
+pages. `GET /operations/status` exposes the loop state under
+`retention.maintenance`. A failed startup or scheduled purge sets the
+`retention_purge` capability on `GET /health` to not ready with reason
+`retention_purge_failed`, which also flips top-level `ready` to false so the
+Compose healthcheck marks the container unhealthy. The flag clears on the
+next successful analysis purge from any path: the scheduled run, a history
+list, a persisted report, or a retention change.
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.
@@ -36,7 +59,10 @@ retain the signed-in author's email and a snapshot of the displayed CV/report
 section (label up to 200 characters, text up to 12000 characters, and the
 report JSON up to 400000 serialized characters) so the inbox can re-render the
 referenced report section with the same components as the analysis view, even
-after the analysis itself is gone. Comments are 12 to 300 characters; team
+after the analysis itself is gone. Each inbox item carries
+`analysis_available`; when the analysis was deleted and neither a report
+snapshot nor a CV excerpt exists, the inbox shows the section name in place of
+the report section. Comments are 12 to 300 characters; team
 notes are limited to 500 characters; contact details and URLs are rejected from
 both. The web proxy caps a feedback write at 512 KiB and a triage note at 2
 KiB. The inbox never stores the uploaded original, raw model output, raw
@@ -176,8 +202,8 @@ copied into `public/pdfjs` during `pnpm dev` / `pnpm build`; generated vendor fi
 are not committed. Include `public` when distributing standalone builds, as the
 existing Docker build already does. No CDN receives profile data.
 
-Profile retention follows the existing configured retention period, using the
-profile's last-updated timestamp. Deleting an analysis does not delete a separately
+Profile retention follows the existing configured retention period through a
+stored `expires_at` deadline that every save renews. Deleting an analysis does not delete a separately
 saved editable profile. Back up the existing API database to include profiles,
 templates, custom fields, and preferences. No new database service is required.
 
