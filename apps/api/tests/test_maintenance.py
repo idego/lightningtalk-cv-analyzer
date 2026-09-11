@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -91,25 +91,53 @@ def test_vacuum_failure_is_recorded_without_stopping_purges() -> None:
     assert maintenance.status()["last_vacuum_at"] is None
 
 
-def test_run_forever_ticks_on_interval_and_stops() -> None:
+def test_next_run_is_today_at_three_utc_when_still_ahead() -> None:
+    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+
+    now = datetime(2026, 9, 12, 1, 30, tzinfo=timezone.utc)
+
+    assert maintenance.next_run(now) == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+
+
+def test_next_run_rolls_to_tomorrow_once_three_utc_has_passed() -> None:
+    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+
+    exactly = datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 9, 12, 17, 45, tzinfo=timezone.utc)
+
+    assert maintenance.next_run(exactly) == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
+    assert maintenance.next_run(later) == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
+
+
+def test_next_run_uses_utc_regardless_of_caller_timezone() -> None:
+    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+    warsaw = timezone(timedelta(hours=2))
+
+    now = datetime(2026, 9, 12, 4, 30, tzinfo=warsaw)  # 02:30 UTC
+
+    assert maintenance.next_run(now) == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+
+
+def test_run_forever_fires_at_the_scheduled_time_and_stops() -> None:
     calls: list[str] = []
+    real_now = datetime.now(timezone.utc)
+    soon = (real_now + timedelta(milliseconds=200)).timetz()
     maintenance = RetentionMaintenance(
         purgers=(lambda: calls.append("purge"),),
-        vacuum=lambda: None,
-        interval=timedelta(milliseconds=20),
-        clock=_Clock(_tick_time()),
+        vacuum=lambda: calls.append("vacuum"),
+        run_at=soon,
     )
 
     async def scenario() -> None:
         stop = asyncio.Event()
         task = asyncio.create_task(maintenance.run_forever(stop))
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.7)
         stop.set()
         await asyncio.wait_for(task, timeout=1)
 
     asyncio.run(scenario())
 
-    assert len(calls) >= 2
+    assert calls == ["purge", "vacuum"]
 
 
 def test_app_runs_startup_purge_through_maintenance_and_reports_status(tmp_path) -> None:
@@ -120,7 +148,8 @@ def test_app_runs_startup_purge_through_maintenance_and_reports_status(tmp_path)
     assert status["ready"] is True
     assert status["startup_purge_failed"] is False
     assert status["last_purge_at"] is not None
-    assert status["interval_seconds"] == 86400
+    assert status["run_at"] == "03:00 UTC"
+    assert datetime.fromisoformat(status["next_run_at"]) > datetime.now(timezone.utc)
 
 
 def test_health_reports_startup_purge_failure(tmp_path, monkeypatch) -> None:

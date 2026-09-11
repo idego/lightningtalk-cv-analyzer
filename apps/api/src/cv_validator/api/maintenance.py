@@ -11,14 +11,14 @@ import asyncio
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from starlette.concurrency import run_in_threadpool
 
 from cv_validator.errors import PersistenceError
 from cv_validator.operations import safe_log
 
-PURGE_INTERVAL = timedelta(days=1)
+DAILY_RUN_AT = time(hour=3, minute=0, tzinfo=timezone.utc)
 
 
 def _utc_now() -> datetime:
@@ -27,11 +27,11 @@ def _utc_now() -> datetime:
 
 @dataclass
 class RetentionMaintenance:
-    """Runs a retention purge followed by a vacuum on a fixed interval."""
+    """Runs a retention purge followed by a vacuum once a day at a fixed UTC time."""
 
     purgers: Sequence[Callable[[], object]]
     vacuum: Callable[[], None]
-    interval: timedelta = PURGE_INTERVAL
+    run_at: time = DAILY_RUN_AT
     clock: Callable[[], datetime] = _utc_now
     startup_purge_failed: bool = False
     last_purge_failed: bool = False
@@ -76,11 +76,19 @@ class RetentionMaintenance:
             self.last_vacuum_failed = False
             self.last_vacuum_at = self.clock()
 
+    def next_run(self, now: datetime | None = None) -> datetime:
+        """The next ``run_at`` wall-clock moment strictly after ``now``."""
+        current = (now or self.clock()).astimezone(timezone.utc)
+        candidate = datetime.combine(current.date(), self.run_at).astimezone(timezone.utc)
+        if candidate <= current:
+            candidate += timedelta(days=1)
+        return candidate
+
     async def run_forever(self, stop: asyncio.Event) -> None:
-        interval_seconds = self.interval.total_seconds()
         while not stop.is_set():
+            delay = (self.next_run() - self.clock()).total_seconds()
             try:
-                await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+                await asyncio.wait_for(stop.wait(), timeout=max(delay, 0))
             except asyncio.TimeoutError:
                 pass
             if stop.is_set():
@@ -101,5 +109,6 @@ class RetentionMaintenance:
                 "last_purge_at": self.last_purge_at.isoformat() if self.last_purge_at else None,
                 "last_vacuum_failed": self.last_vacuum_failed,
                 "last_vacuum_at": self.last_vacuum_at.isoformat() if self.last_vacuum_at else None,
-                "interval_seconds": int(self.interval.total_seconds()),
+                "run_at": self.run_at.strftime("%H:%M UTC"),
+                "next_run_at": self.next_run().isoformat(),
             }
