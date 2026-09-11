@@ -36,8 +36,9 @@ pages. `GET /operations/status` exposes the loop state under
 `retention.maintenance`. A failed startup or scheduled purge sets the
 `retention_purge` capability on `GET /health` to not ready with reason
 `retention_purge_failed`, which also flips top-level `ready` to false so the
-Compose healthcheck marks the container unhealthy; the flag clears on the
-next successful purge.
+Compose healthcheck marks the container unhealthy. The flag clears on the
+next successful analysis purge from any path: the scheduled run, a history
+list, a persisted report, or a retention change.
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.

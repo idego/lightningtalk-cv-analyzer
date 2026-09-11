@@ -216,6 +216,52 @@ def test_health_reports_startup_purge_failure(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_request_path_purge_clears_the_startup_failure_flag(tmp_path, monkeypatch) -> None:
+    from cv_validator.api import persistence
+
+    real_purge = persistence.PersistenceStore._purge_expired
+    attempts = {"count": 0}
+
+    def flaky_purge(self):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_purge(self)
+
+    monkeypatch.setattr(persistence.PersistenceStore, "_purge_expired", flaky_purge)
+    app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    with TestClient(app) as client:
+        assert client.get("/health").json()["ready"] is False
+
+        assert client.get("/analyses", headers={"X-Analysis-Owner-Id": "owner"}).status_code == 200
+
+        health = client.get("/health").json()
+        status = client.get("/operations/status").json()["retention"]["maintenance"]
+
+    assert health["capabilities"]["retention_purge"] == {"ready": True, "reason": None}
+    assert status["startup_purge_failed"] is False
+    assert status["last_purge_failed"] is False
+
+
+def test_request_path_purge_failure_sets_the_flag(tmp_path, monkeypatch) -> None:
+    from cv_validator.api import persistence
+
+    app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    with TestClient(app) as client:
+        assert client.get("/health").json()["capabilities"]["retention_purge"]["ready"] is True
+
+        def broken(self):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(persistence.PersistenceStore, "_purge_expired", broken)
+        with pytest.raises(PersistenceError):
+            client.get("/analyses", headers={"X-Analysis-Owner-Id": "owner"})
+
+        health = client.get("/health").json()
+
+    assert health["capabilities"]["retention_purge"]["ready"] is False
+
+
 def test_health_reports_retention_purge_ready_after_successful_startup(tmp_path) -> None:
     app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
     with TestClient(app) as client:

@@ -282,6 +282,9 @@ def create_app(
         vacuum=store.vacuum,
         run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
     )
+    # Request-path purges (list, persist, retention change) also report their
+    # outcome, so a successful one clears a stale failure flag before 03:00.
+    store.purge_listeners.append(maintenance.record_purge_outcome)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

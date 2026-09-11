@@ -69,12 +69,16 @@ class RetentionMaintenance:
             except (OSError, PersistenceError, sqlite3.Error):
                 failed = True
                 safe_log("retention_purge_failed", error_code="scheduled_purge_failed")
-        with self._lock:
-            self.last_purge_failed = failed
-            self.last_purge_at = self.clock()
-            if not failed:
-                self.startup_purge_failed = False
+        self.record_purge_outcome(not failed)
         return not failed
+
+    def record_purge_outcome(self, succeeded: bool) -> None:
+        """Record a purge attempt from any code path; a success clears the health flag."""
+        with self._lock:
+            self.last_purge_failed = not succeeded
+            self.last_purge_at = self.clock()
+            if succeeded:
+                self.startup_purge_failed = False
 
     def run_cycle(self) -> None:
         """One maintenance tick: purge, then vacuum so freed pages leave the file."""

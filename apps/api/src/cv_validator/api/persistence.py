@@ -44,6 +44,8 @@ class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
         self._event_write_lock = threading.Lock()
+        # Called with True/False after every purge attempt, on any code path.
+        self.purge_listeners: list[Callable[[bool], None]] = []
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.config.retention_days = self.get_retention_days()
@@ -978,9 +980,16 @@ class PersistenceStore:
         maintenance loop can record them instead of crashing.
         """
         try:
-            return self._purge_expired()
+            result = self._purge_expired()
         except sqlite3.Error as exc:
+            self._notify_purge(False)
             raise PersistenceError("retention purge failed") from exc
+        self._notify_purge(True)
+        return result
+
+    def _notify_purge(self, succeeded: bool) -> None:
+        for listener in list(self.purge_listeners):
+            listener(succeeded)
 
     def _purge_expired(self) -> dict[str, int | tuple[str, ...]]:
         now_iso = _utc_now()
