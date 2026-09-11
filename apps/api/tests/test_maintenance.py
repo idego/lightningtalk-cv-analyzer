@@ -125,3 +125,29 @@ def test_app_runs_startup_purge_through_maintenance_and_reports_status(tmp_path)
     assert status["startup_purge_failed"] is False
     assert status["last_purge_at"] is not None
     assert status["interval_seconds"] == 86400
+
+
+def test_health_reports_startup_purge_failure(tmp_path, monkeypatch) -> None:
+    from cv_validator.api import persistence
+
+    def broken_purge(self):
+        raise PersistenceError("locked")
+
+    monkeypatch.setattr(persistence.PersistenceStore, "purge_expired", broken_purge)
+    app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    with TestClient(app) as client:
+        health = client.get("/health").json()
+
+    assert health["ready"] is False
+    assert health["capabilities"]["retention_purge"] == {
+        "ready": False,
+        "reason": "retention_purge_failed",
+    }
+
+
+def test_health_reports_retention_purge_ready_after_successful_startup(tmp_path) -> None:
+    app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    with TestClient(app) as client:
+        health = client.get("/health").json()
+
+    assert health["capabilities"]["retention_purge"] == {"ready": True, "reason": None}

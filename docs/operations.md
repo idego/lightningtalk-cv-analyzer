@@ -24,7 +24,11 @@ startup and then every 24 hours while running; on Saturdays it also runs one
 SQLite `VACUUM` so freed pages leave the database file. All connections set
 `PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
 pages. `GET /operations/status` exposes the loop state under
-`retention.maintenance`.
+`retention.maintenance`. A failed startup or scheduled purge sets the
+`retention_purge` capability on `GET /health` to not ready with reason
+`retention_purge_failed`, which also flips top-level `ready` to false so the
+Compose healthcheck marks the container unhealthy; the flag clears on the
+next successful purge.
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.

@@ -370,6 +370,10 @@ def create_app(
             "profile_builder": {"ready": settings.enabled},
             "profile_pdf_export": {"ready": shutil.which("soffice") is not None or shutil.which("libreoffice") is not None},
             "database": {"ready": True},
+            "retention_purge": {
+                "ready": maintenance.healthy,
+                "reason": None if maintenance.healthy else "retention_purge_failed",
+            },
             "feedback": {"ready": True, "enabled": True},
             "feedback_inbox": {"ready": True, "enabled": True},
         }
@@ -486,7 +490,11 @@ def create_app(
     @app.get("/health")
     def health() -> dict:
         current = capabilities()
-        required_ready = current["database"]["ready"] and current["base_analysis"]["ready"]
+        required_ready = (
+            current["database"]["ready"]
+            and current["retention_purge"]["ready"]
+            and current["base_analysis"]["ready"]
+        )
         if require_location_resolver:
             required_ready = (
                 required_ready
