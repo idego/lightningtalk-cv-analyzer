@@ -741,6 +741,7 @@ class PersistenceStore:
                 "analysis_share_tokens",
                 "source_documents",
                 "audit_log",
+                "processed_report_events",
             ):
                 conn.execute(
                     f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})",
@@ -983,6 +984,7 @@ class PersistenceStore:
                     "source_documents",
                     "audit_log",
                     "diagnostic_events",
+                    "processed_report_events",
                 ):
                     deleted[table] = conn.execute(
                         f"DELETE FROM {table} WHERE analysis_id IN ({placeholders})",

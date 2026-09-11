@@ -198,3 +198,50 @@ def test_owner_schema_migration_removes_legacy_token_columns_and_allows_new_runs
     assert "access_token_hash" not in report_columns
     assert "access_token_hash" not in run_columns
     assert store.analysis_owned_by("new-analysis", "owner-1") is True
+
+
+def _processed_event_count(store: PersistenceStore, analysis_id: str) -> int:
+    with store._connect() as connection:
+        return connection.execute(
+            "SELECT COUNT(*) FROM processed_report_events WHERE analysis_id = ?",
+            (analysis_id,),
+        ).fetchone()[0]
+
+
+def test_retention_purge_removes_processed_report_events(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db", retention_days=1))
+    payload = valid_report()
+    payload["analysis_id"] = "analysis-expired-event"
+    store.persist_report(
+        payload["source"]["sha256"],
+        payload,
+        analysis_id="analysis-expired-event",
+        owner_user_id="owner-1",
+        source_filename="candidate.pdf",
+    )
+    assert _processed_event_count(store, "analysis-expired-event") == 1
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE reports SET created_at = '2000-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            ("analysis-expired-event",),
+        )
+
+    store.purge_expired()
+
+    assert _processed_event_count(store, "analysis-expired-event") == 0
+
+
+def test_delete_analysis_removes_processed_report_events(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    payload = valid_report()
+    payload["analysis_id"] = "analysis-deleted-event"
+    store.persist_report(
+        payload["source"]["sha256"],
+        payload,
+        analysis_id="analysis-deleted-event",
+        owner_user_id="owner-1",
+        source_filename="candidate.pdf",
+    )
+
+    assert store.delete_analysis("analysis-deleted-event", "owner-1") is True
+    assert _processed_event_count(store, "analysis-deleted-event") == 0

@@ -126,10 +126,12 @@ is used and historical rows are never repriced when code/config changes. The
 pricing catalog can be overridden with `CV_VALIDATOR_PRICING_PATH`; changing it
 must use a new catalog version.
 
-Normal report deletion and retention intentionally preserve `ai_usage_events`
-and `processed_report_events`. Their retained `analysis_id` is only a
-pseudonymous accounting correlation key; report/audit/research rows are still
-deleted according to normal lifecycle rules. The ledger must never contain CV
+Normal report deletion and retention intentionally preserve `ai_usage_events`;
+its retained `analysis_id` is only a pseudonymous accounting correlation key.
+`processed_report_events` is deleted together with the analysis, so the
+Dashboard's processed-report count and per-report averages cover retained
+analyses only. Report/audit/research rows are deleted according to normal
+lifecycle rules. The ledger must never contain CV
 text, evidence, prompts, model responses, candidate data, e-mail addresses, or
 other PII. The API is internal-only; browser access to deployment totals goes
 through the authenticated web route, and per-report totals additionally require the
