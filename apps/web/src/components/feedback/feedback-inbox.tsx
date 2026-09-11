@@ -193,12 +193,6 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                           <ReportModule report={moduleReport} category={moduleCategory} />
                         </div>
                       </details>
-                    ) : moduleCategory && item.analysis_available === false ? (
-                      <div className="border-t pt-3">
-                        <p className="flex items-center gap-2 py-1 text-sm font-medium text-muted-foreground"><FileText className="size-4" />{t("showReportModule")}</p>
-                        <p className="mt-1 text-sm">{sameLabel(context.section, context.subject) ? context.section : `${context.section} · ${context.subject}`}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{t("reportModuleAnalysisDeleted")}</p>
-                      </div>
                     ) : item.context_text ? (
                       <details className="group border-t pt-3">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg py-1 text-sm font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
@@ -209,6 +203,12 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                           <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.context_text}</p>
                         </div>
                       </details>
+                    ) : moduleCategory && item.analysis_available === false ? (
+                      <div className="border-t pt-3">
+                        <p className="flex items-center gap-2 py-1 text-sm font-medium text-muted-foreground"><FileText className="size-4" />{t("showReportModule")}</p>
+                        <p className="mt-1 text-sm">{sameLabel(context.section, context.subject) ? context.section : `${context.section} · ${context.subject}`}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{t("reportModuleAnalysisDeleted")}</p>
+                      </div>
                     ) : null}
                     {item.failure ? <details className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{t("errorDetails")}</summary><pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">{JSON.stringify(item.failure, null, 2)}</pre></details> : null}
                   </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime, time, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -21,12 +22,17 @@ class _Clock:
         return self.now
 
 
-def _tick_time() -> datetime:
+def _scheduled_moment() -> datetime:
+    """2026-09-12 03:00 UTC, the default daily run time on a fixed date."""
     return datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
 
 
+def _maintenance_at(now: datetime) -> RetentionMaintenance:
+    return RetentionMaintenance(purgers=(), vacuum=lambda: None, clock=_Clock(now))
+
+
 def test_cycle_purges_then_vacuums_every_tick() -> None:
-    clock = _Clock(_tick_time())
+    clock = _Clock(_scheduled_moment())
     calls: list[str] = []
     maintenance = RetentionMaintenance(
         purgers=(lambda: calls.append("purge"),),
@@ -83,7 +89,7 @@ def test_vacuum_failure_is_recorded_without_stopping_purges() -> None:
         raise PersistenceError("busy")
 
     maintenance = RetentionMaintenance(
-        purgers=(lambda: None,), vacuum=failing_vacuum, clock=_Clock(_tick_time())
+        purgers=(lambda: None,), vacuum=failing_vacuum, clock=_Clock(_scheduled_moment())
     )
 
     maintenance.run_cycle()
@@ -94,36 +100,29 @@ def test_vacuum_failure_is_recorded_without_stopping_purges() -> None:
 
 
 def test_next_run_is_today_at_three_utc_when_still_ahead() -> None:
-    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+    maintenance = _maintenance_at(datetime(2026, 9, 12, 1, 30, tzinfo=timezone.utc))
 
-    now = datetime(2026, 9, 12, 1, 30, tzinfo=timezone.utc)
-
-    assert maintenance.next_run(now) == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    assert maintenance.next_run() == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
 
 
 def test_next_run_rolls_to_tomorrow_once_three_utc_has_passed() -> None:
-    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+    exactly = _maintenance_at(datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc))
+    later = _maintenance_at(datetime(2026, 9, 12, 17, 45, tzinfo=timezone.utc))
 
-    exactly = datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 9, 12, 17, 45, tzinfo=timezone.utc)
-
-    assert maintenance.next_run(exactly) == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
-    assert maintenance.next_run(later) == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
+    assert exactly.next_run() == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
+    assert later.next_run() == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
 
 
-def test_next_run_uses_utc_regardless_of_caller_timezone() -> None:
-    maintenance = RetentionMaintenance(purgers=(), vacuum=lambda: None)
+def test_next_run_uses_utc_regardless_of_clock_timezone() -> None:
     warsaw = timezone(timedelta(hours=2))
+    maintenance = _maintenance_at(datetime(2026, 9, 12, 4, 30, tzinfo=warsaw))  # 02:30 UTC
 
-    now = datetime(2026, 9, 12, 4, 30, tzinfo=warsaw)  # 02:30 UTC
-
-    assert maintenance.next_run(now) == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    assert maintenance.next_run() == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
 
 
 def test_run_forever_fires_at_the_scheduled_time_and_stops() -> None:
     calls: list[str] = []
-    real_now = datetime.now(timezone.utc)
-    soon = (real_now + timedelta(milliseconds=200)).timetz()
+    soon = (datetime.now(timezone.utc) + timedelta(milliseconds=150)).timetz()
     maintenance = RetentionMaintenance(
         purgers=(lambda: calls.append("purge"),),
         vacuum=lambda: calls.append("vacuum"),
@@ -133,13 +132,28 @@ def test_run_forever_fires_at_the_scheduled_time_and_stops() -> None:
     async def scenario() -> None:
         stop = asyncio.Event()
         task = asyncio.create_task(maintenance.run_forever(stop))
-        await asyncio.sleep(0.7)
+        deadline = asyncio.get_running_loop().time() + 5
+        while not calls and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.02)
         stop.set()
         await asyncio.wait_for(task, timeout=1)
 
     asyncio.run(scenario())
 
+    # One tick ran purge then vacuum; the next tick is a day away so nothing else fires.
     assert calls == ["purge", "vacuum"]
+
+
+def test_purge_records_raw_sqlite_errors_instead_of_raising() -> None:
+    def locked() -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    maintenance = RetentionMaintenance(purgers=(locked,), vacuum=lambda: None)
+
+    assert maintenance.run_startup() is False
+    assert maintenance.healthy is False
+    maintenance.run_cycle()
+    assert maintenance.status()["last_purge_failed"] is True
 
 
 @pytest.mark.parametrize(
@@ -156,7 +170,7 @@ def test_parse_maintenance_time_accepts_hh_mm_utc(value, expected) -> None:
     assert parse_maintenance_time(value) == expected
 
 
-@pytest.mark.parametrize("value", ["3am", "25:00", "03:00:30", "03:00+02:00", "3"])
+@pytest.mark.parametrize("value", ["3am", "25:00", "03:00:30", "03:00:00", "03:00+02:00", "3", "03", "3:00"])
 def test_parse_maintenance_time_rejects_other_formats(value) -> None:
     with pytest.raises(ValueError, match="CV_VALIDATOR_MAINTENANCE_TIME_UTC"):
         parse_maintenance_time(value)

@@ -8,6 +8,8 @@ every failure is recorded here so ``/health`` can report it.
 from __future__ import annotations
 
 import asyncio
+import re
+import sqlite3
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -20,19 +22,17 @@ from cv_validator.operations import safe_log
 
 DAILY_RUN_AT = time(hour=3, minute=0, tzinfo=timezone.utc)
 MAINTENANCE_TIME_ENV = "CV_VALIDATOR_MAINTENANCE_TIME_UTC"
+_HH_MM = re.compile(r"^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d)$")
 
 
 def parse_maintenance_time(value: str | None) -> time:
     """Parse ``HH:MM`` (24-hour, UTC) into the daily run time; empty means the default."""
     if value is None or not value.strip():
         return DAILY_RUN_AT
-    try:
-        parsed = time.fromisoformat(value.strip())
-    except ValueError as exc:
-        raise ValueError(f"{MAINTENANCE_TIME_ENV} must be HH:MM in 24-hour UTC time") from exc
-    if parsed.tzinfo is not None or parsed.second or parsed.microsecond:
+    match = _HH_MM.match(value.strip())
+    if match is None:
         raise ValueError(f"{MAINTENANCE_TIME_ENV} must be HH:MM in 24-hour UTC time")
-    return parsed.replace(tzinfo=timezone.utc)
+    return time(int(match["hour"]), int(match["minute"]), tzinfo=timezone.utc)
 
 
 def _utc_now() -> datetime:
@@ -66,7 +66,7 @@ class RetentionMaintenance:
         for purger in self.purgers:
             try:
                 purger()
-            except (OSError, PersistenceError):
+            except (OSError, PersistenceError, sqlite3.Error):
                 failed = True
                 safe_log("retention_purge_failed", error_code="scheduled_purge_failed")
         with self._lock:
@@ -81,7 +81,7 @@ class RetentionMaintenance:
         self.purge()
         try:
             self.vacuum()
-        except (OSError, PersistenceError):
+        except (OSError, PersistenceError, sqlite3.Error):
             with self._lock:
                 self.last_vacuum_failed = True
             safe_log("retention_vacuum_failed", error_code="scheduled_vacuum_failed")
@@ -90,9 +90,9 @@ class RetentionMaintenance:
             self.last_vacuum_failed = False
             self.last_vacuum_at = self.clock()
 
-    def next_run(self, now: datetime | None = None) -> datetime:
-        """The next ``run_at`` wall-clock moment strictly after ``now``."""
-        current = (now or self.clock()).astimezone(timezone.utc)
+    def next_run(self) -> datetime:
+        """The next ``run_at`` wall-clock moment strictly after the clock's now."""
+        current = self.clock().astimezone(timezone.utc)
         candidate = datetime.combine(current.date(), self.run_at).astimezone(timezone.utc)
         if candidate <= current:
             candidate += timedelta(days=1)
@@ -115,9 +115,10 @@ class RetentionMaintenance:
             return not (self.startup_purge_failed or self.last_purge_failed)
 
     def status(self) -> dict[str, object]:
+        ready = self.healthy
         with self._lock:
             return {
-                "ready": not (self.startup_purge_failed or self.last_purge_failed),
+                "ready": ready,
                 "startup_purge_failed": self.startup_purge_failed,
                 "last_purge_failed": self.last_purge_failed,
                 "last_purge_at": self.last_purge_at.isoformat() if self.last_purge_at else None,
