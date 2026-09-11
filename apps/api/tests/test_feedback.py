@@ -289,6 +289,7 @@ def test_feedback_survives_retention_purge(tmp_path):
     assert len(inbox["items"]) == 1
     item = inbox["items"][0]
     assert item["analysis_id"] == aid
+    assert item["analysis_available"] is False
     assert item["comment"] == "LLM call timed out"
     assert item["context_label"] == "Failure diagnostic"
     assert item["context_text"] == "Execution failed with timeout"

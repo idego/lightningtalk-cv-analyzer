@@ -49,7 +49,9 @@ retain the signed-in author's email and a snapshot of the displayed CV/report
 section (label up to 200 characters, text up to 12000 characters, and the
 report JSON up to 400000 serialized characters) so the inbox can re-render the
 referenced report section with the same components as the analysis view, even
-after the analysis itself is gone. Comments are 12 to 300 characters; team
+after the analysis itself is gone. Each inbox item carries
+`analysis_available`; when the analysis was deleted and no report snapshot
+exists, the inbox shows the section name in place of the report section. Comments are 12 to 300 characters; team
 notes are limited to 500 characters; contact details and URLs are rejected from
 both. The web proxy caps a feedback write at 512 KiB and a triage note at 2
 KiB. The inbox never stores the uploaded original, raw model output, raw
