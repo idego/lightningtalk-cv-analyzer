@@ -273,11 +273,11 @@ def test_feedback_survives_retention_purge(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(
-            "UPDATE reports SET created_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            "UPDATE reports SET expires_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
             (aid,),
         )
         conn.execute(
-            "UPDATE analysis_runs SET created_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
+            "UPDATE analysis_runs SET expires_at = '2020-01-01T00:00:00+00:00' WHERE analysis_id = ?",
             (aid,),
         )
 

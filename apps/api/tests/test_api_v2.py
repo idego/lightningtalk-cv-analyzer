@@ -295,12 +295,11 @@ def test_share_links_expire_after_two_days_or_at_retention_deadline(tmp_path) ->
     purged = store.purge_expired()
     assert purged["expired_share_tokens"] == 1
 
-    # An analysis close to its retention deadline caps the link at that deadline.
-    store.set_retention_days(3)
+    # An analysis close to its stored retention deadline caps the link at that deadline.
     with store._connect() as conn:
         conn.execute(
-            "UPDATE reports SET created_at = ? WHERE analysis_id = ?",
-            ((datetime.now(timezone.utc) - timedelta(days=2, hours=12)).isoformat(), analysis_id),
+            "UPDATE reports SET expires_at = ? WHERE analysis_id = ?",
+            ((datetime.now(timezone.utc) + timedelta(hours=12)).isoformat(), analysis_id),
         )
     capped = client.post(f"/analyses/{analysis_id}/share", headers=owner_headers).json()
     remaining = datetime.fromisoformat(capped["expires_at"]) - datetime.now(timezone.utc)
@@ -351,11 +350,11 @@ def test_source_document_is_purged_with_expired_analysis(tmp_path) -> None:
     owner_headers = {"X-Analysis-Owner-Id": "owner-token"}
     analysis_id = _analyze(client, owner_headers)
     store = app.state.store
-    stale = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     with store._connect() as conn:
-        for table in ("reports", "audit_log", "analysis_runs", "source_documents"):
+        for table in ("reports", "analysis_runs"):
             conn.execute(
-                f"UPDATE {table} SET created_at = ? WHERE analysis_id = ?",
+                f"UPDATE {table} SET expires_at = ? WHERE analysis_id = ?",
                 (stale, analysis_id),
             )
 

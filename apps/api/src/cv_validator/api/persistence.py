@@ -42,6 +42,7 @@ class PersistenceStore:
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.config.retention_days = self.get_retention_days()
+        self._ensure_expiry_schema()
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -64,6 +65,20 @@ class PersistenceStore:
             raise PersistenceError("database vacuum failed") from exc
         finally:
             conn.close()
+
+    def _deadline(self) -> str:
+        """Retention deadline for a row written now."""
+        return (
+            datetime.now(timezone.utc) + timedelta(days=self.config.retention_days)
+        ).isoformat()
+
+    def _ensure_expiry_schema(self) -> None:
+        try:
+            with self._connect() as conn:
+                for table in ("reports", "analysis_runs"):
+                    _ensure_expires_at_column(conn, table, "created_at", self.config.retention_days)
+        except sqlite3.Error as exc:
+            raise PersistenceError("retention deadline migration failed") from exc
 
     @staticmethod
     def _require_report_parent(conn: sqlite3.Connection, analysis_id: str) -> None:
@@ -314,9 +329,9 @@ class PersistenceStore:
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO analysis_runs
-                   (analysis_id, correlation_id, status, created_at, owner_user_id)
-                   VALUES (?, ?, 'running', ?, ?)""",
-                (analysis_id, correlation_id, _utc_now(), owner_user_id),
+                   (analysis_id, correlation_id, status, created_at, owner_user_id, expires_at)
+                   VALUES (?, ?, 'running', ?, ?, ?)""",
+                (analysis_id, correlation_id, _utc_now(), owner_user_id, self._deadline()),
             )
 
     def complete_analysis_run(
@@ -513,9 +528,9 @@ class PersistenceStore:
                     INSERT INTO reports (
                         input_hash, contract_version, strategy_name,
                         strategy_version, status, created_at, analysis_id,
-                        owner_user_id, source_filename
+                        owner_user_id, source_filename, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -527,6 +542,7 @@ class PersistenceStore:
                         selected_analysis_id,
                         owner_user_id,
                         source_filename,
+                        self._deadline(),
                     ),
                 )
                 conn.execute(
@@ -616,7 +632,8 @@ class PersistenceStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT reports.analysis_id, reports.source_filename,
-                          reports.status, reports.created_at, audit_log.output_json,
+                          reports.status, reports.created_at, reports.expires_at,
+                          audit_log.output_json,
                           EXISTS (
                             SELECT 1 FROM source_documents
                             WHERE source_documents.analysis_id = reports.analysis_id
@@ -638,6 +655,7 @@ class PersistenceStore:
                     "status": row["status"],
                     "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
+                    "expires_at": row["expires_at"],
                     "has_document": bool(row["has_document"]),
                 }
             )
@@ -670,12 +688,12 @@ class PersistenceStore:
         now = datetime.now(timezone.utc)
         with self._connect() as conn:
             report = conn.execute(
-                "SELECT created_at FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
+                "SELECT expires_at FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
                 (analysis_id, owner_user_id),
             ).fetchone()
             if report is None:
                 return None
-            expires_at = _share_token_expiry(now, str(report["created_at"]), self.config.retention_days)
+            expires_at = _share_token_expiry(now, report["expires_at"])
             conn.execute(
                 """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at, expires_at)
                    VALUES (?, ?, ?, ?)""",
@@ -780,6 +798,7 @@ class PersistenceStore:
         return value if RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX else self.config.retention_days
 
     def set_retention_days(self, days: int) -> dict[str, int | tuple[str, ...]]:
+        """Change the window for rows written from now on; stored deadlines are kept."""
         if not RETENTION_DAYS_MIN <= days <= RETENTION_DAYS_MAX:
             raise ValueError("retention_days_out_of_range")
         with self._connect() as conn:
@@ -956,17 +975,20 @@ class PersistenceStore:
             raise PersistenceError("linkedin research persistence failed") from exc
 
     def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
-        cutoff_iso = (
-            datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
-        ).isoformat()
+        """Delete rows whose stored ``expires_at`` deadline has passed.
+
+        The deadline is fixed when a row is written, so changing the retention
+        setting later never shortens or extends already stored analyses.
+        """
+        now_iso = _utc_now()
         deleted: dict[str, int | tuple[str, ...]] = {}
         with self._connect() as conn:
             expired_ids = sorted(
                 {
                     row[0]
                     for row in conn.execute(
-                        "SELECT analysis_id FROM reports WHERE created_at < ?",
-                        (cutoff_iso,),
+                        "SELECT analysis_id FROM reports WHERE expires_at <= ?",
+                        (now_iso,),
                     ).fetchall()
                     if isinstance(row[0], str)
                 }
@@ -976,8 +998,8 @@ class PersistenceStore:
                         """SELECT analysis_runs.analysis_id
                            FROM analysis_runs
                            LEFT JOIN reports USING (analysis_id)
-                           WHERE reports.analysis_id IS NULL AND analysis_runs.created_at < ?""",
-                        (cutoff_iso,),
+                           WHERE reports.analysis_id IS NULL AND analysis_runs.expires_at <= ?""",
+                        (now_iso,),
                     ).fetchall()
                     if isinstance(row[0], str)
                 }
@@ -1022,17 +1044,45 @@ class PersistenceStore:
 SHARE_TOKEN_TTL = timedelta(days=2)
 
 
-def _share_token_expiry(now: datetime, report_created_at: str, retention_days: int) -> str:
-    """Earlier of the fixed share TTL and the analysis retention deadline."""
+def _share_token_expiry(now: datetime, report_expires_at: str | None) -> str:
+    """Earlier of the fixed share TTL and the analysis' stored retention deadline."""
     expires_at = now + SHARE_TOKEN_TTL
     try:
-        created_at = datetime.fromisoformat(report_created_at)
+        retention_deadline = datetime.fromisoformat(str(report_expires_at))
     except ValueError:
         return expires_at.isoformat()
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    retention_deadline = created_at + timedelta(days=retention_days)
+    if retention_deadline.tzinfo is None:
+        retention_deadline = retention_deadline.replace(tzinfo=timezone.utc)
     return min(expires_at, retention_deadline).isoformat()
+
+
+def _ensure_expires_at_column(
+    conn: sqlite3.Connection, table: str, since_column: str, retention_days: int
+) -> None:
+    """Add a stored retention deadline and backfill it from the row's own timestamp.
+
+    Rows keep the deadline they were stored with; later retention changes only
+    apply to rows written afterwards.
+    """
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if not columns:
+        return
+    if "expires_at" not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN expires_at TEXT")
+    for row in conn.execute(
+        f"SELECT rowid AS row_id, {since_column} AS since FROM {table} WHERE expires_at IS NULL"
+    ).fetchall():
+        try:
+            since = datetime.fromisoformat(str(row["since"]))
+        except ValueError:
+            since = datetime.now(timezone.utc)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        conn.execute(
+            f"UPDATE {table} SET expires_at = ? WHERE rowid = ?",
+            ((since + timedelta(days=retention_days)).isoformat(), row["row_id"]),
+        )
+    conn.execute(f"CREATE INDEX IF NOT EXISTS {table}_expires_at ON {table}(expires_at)")
 
 
 def _ensure_share_token_expiry_schema(conn: sqlite3.Connection) -> None:

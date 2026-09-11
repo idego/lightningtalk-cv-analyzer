@@ -18,6 +18,13 @@
 - Configure retention with `CV_VALIDATOR_RETENTION_DAYS` (1-3650 days; the
   API refuses to start outside that range).
 
+Every report, analysis run, and saved Profile Builder profile stores an
+`expires_at` deadline computed when the row is written (each profile edit
+renews it). Purge deletes rows whose stored deadline has passed, so changing
+the retention setting only affects rows written afterwards; existing rows
+keep their deadline. Databases created before the column existed are
+backfilled on startup from each row's own timestamp plus the current window.
+
 Retention is enforced by a background maintenance loop, not only on request
 paths. The API purges expired analyses and Profile Builder profiles once at
 startup and then every 24 hours while running; on Saturdays it also runs one
@@ -191,8 +198,8 @@ copied into `public/pdfjs` during `pnpm dev` / `pnpm build`; generated vendor fi
 are not committed. Include `public` when distributing standalone builds, as the
 existing Docker build already does. No CDN receives profile data.
 
-Profile retention follows the existing configured retention period, using the
-profile's last-updated timestamp. Deleting an analysis does not delete a separately
+Profile retention follows the existing configured retention period through a
+stored `expires_at` deadline that every save renews. Deleting an analysis does not delete a separately
 saved editable profile. Back up the existing API database to include profiles,
 templates, custom fields, and preferences. No new database service is required.
 

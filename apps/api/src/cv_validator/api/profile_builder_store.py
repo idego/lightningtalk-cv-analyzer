@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import uuid4
-from cv_validator.api.persistence import PersistenceStore
+from cv_validator.api.persistence import PersistenceStore, _ensure_expires_at_column
 from cv_validator.errors import PersistenceError
 from cv_validator.profile_builder import (
     CandidateProfile,
@@ -33,6 +33,7 @@ class ProfileBuilderStore:
         with self._connect() as conn:
             conn.executescript('CREATE TABLE IF NOT EXISTS candidate_profiles (\n                    profile_id TEXT PRIMARY KEY,\n                    access_token_hash TEXT NOT NULL,\n                    source_filename TEXT NOT NULL,\n                    profile_json TEXT NOT NULL,\n                    anonymization_json TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE INDEX IF NOT EXISTS candidate_profiles_owner_updated\n                    ON candidate_profiles(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_templates (\n                    access_token_hash TEXT NOT NULL,\n                    template_id TEXT NOT NULL,\n                    name TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL,\n                    PRIMARY KEY (access_token_hash, template_id)\n                );\n                CREATE INDEX IF NOT EXISTS profile_templates_owner_updated\n                    ON profile_templates(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_custom_fields (\n                    field_id TEXT PRIMARY KEY,\n                    field_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE TABLE IF NOT EXISTS profile_builder_preferences (\n                    access_token_hash TEXT PRIMARY KEY,\n                    preferences_json TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                ')
             _sanitize_profile_builder_storage(conn)
+            _ensure_expires_at_column(conn, "candidate_profiles", "updated_at", self._retention_days())
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -46,9 +47,12 @@ class ProfileBuilderStore:
             conn.close()
 
     def purge_expired(self) -> None:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=self._retention_days())).isoformat()
+        """Delete profiles whose stored deadline has passed; each edit renews it."""
         with self._connect() as conn:
-            conn.execute("DELETE FROM candidate_profiles WHERE updated_at < ?", (cutoff,))
+            conn.execute("DELETE FROM candidate_profiles WHERE expires_at <= ?", (_utc_now(),))
+
+    def _deadline(self) -> str:
+        return (datetime.now(timezone.utc) + timedelta(days=self._retention_days())).isoformat()
 
     def create_candidate_profile(
         self,
@@ -68,8 +72,8 @@ class ProfileBuilderStore:
                     """
                     INSERT INTO candidate_profiles (
                         profile_id, access_token_hash, source_filename, profile_json,
-                        anonymization_json, template_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        anonymization_json, template_json, created_at, updated_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -80,6 +84,7 @@ class ProfileBuilderStore:
                         json.dumps(payload["template"]),
                         now,
                         now,
+                        self._deadline(),
                     ),
                 )
         except (OSError, sqlite3.Error) as exc:
@@ -180,7 +185,7 @@ class ProfileBuilderStore:
                     """
                     UPDATE candidate_profiles
                     SET source_filename = ?, profile_json = ?, anonymization_json = ?,
-                        template_json = ?, updated_at = ?
+                        template_json = ?, updated_at = ?, expires_at = ?
                     WHERE profile_id = ? AND access_token_hash = ?
                     """,
                     (
@@ -189,6 +194,7 @@ class ProfileBuilderStore:
                         json.dumps(payload["anonymization"]),
                         json.dumps(payload["template"]),
                         _utc_now(),
+                        self._deadline(),
                         profile_id,
                         _token_hash(access_token),
                     ),
