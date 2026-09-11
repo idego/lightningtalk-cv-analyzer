@@ -27,8 +27,10 @@ backfilled on startup from each row's own timestamp plus the current window.
 
 Retention is enforced by a background maintenance loop, not only on request
 paths. The API purges expired analyses and Profile Builder profiles once at
-startup and then every day at 03:00 UTC while running; each scheduled purge
-is followed by a SQLite `VACUUM` so freed pages leave the database file. All connections set
+startup and then once a day at `CV_VALIDATOR_MAINTENANCE_TIME_UTC` (`HH:MM`,
+24-hour UTC, default `03:00`; the API refuses to start on any other format)
+while running; each scheduled purge is followed by a SQLite `VACUUM` so freed
+pages leave the database file. All connections set
 `PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
 pages. `GET /operations/status` exposes the loop state under
 `retention.maintenance`. A failed startup or scheduled purge sets the

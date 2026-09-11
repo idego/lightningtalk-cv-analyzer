@@ -6,7 +6,9 @@ from datetime import datetime, time, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from cv_validator.api.app import create_app
-from cv_validator.api.maintenance import RetentionMaintenance
+import pytest
+
+from cv_validator.api.maintenance import RetentionMaintenance, parse_maintenance_time
 from cv_validator.errors import PersistenceError
 from cv_validator.openai_config import OpenAISettings
 
@@ -138,6 +140,36 @@ def test_run_forever_fires_at_the_scheduled_time_and_stops() -> None:
     asyncio.run(scenario())
 
     assert calls == ["purge", "vacuum"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, time(3, 0, tzinfo=timezone.utc)),
+        ("", time(3, 0, tzinfo=timezone.utc)),
+        ("05:30", time(5, 30, tzinfo=timezone.utc)),
+        (" 23:59 ", time(23, 59, tzinfo=timezone.utc)),
+        ("00:00", time(0, 0, tzinfo=timezone.utc)),
+    ],
+)
+def test_parse_maintenance_time_accepts_hh_mm_utc(value, expected) -> None:
+    assert parse_maintenance_time(value) == expected
+
+
+@pytest.mark.parametrize("value", ["3am", "25:00", "03:00:30", "03:00+02:00", "3"])
+def test_parse_maintenance_time_rejects_other_formats(value) -> None:
+    with pytest.raises(ValueError, match="CV_VALIDATOR_MAINTENANCE_TIME_UTC"):
+        parse_maintenance_time(value)
+
+
+def test_app_reads_maintenance_time_from_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_MAINTENANCE_TIME_UTC", "05:30")
+    app = create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
+    with TestClient(app) as client:
+        status = client.get("/operations/status").json()["retention"]["maintenance"]
+
+    assert status["run_at"] == "05:30 UTC"
+    assert datetime.fromisoformat(status["next_run_at"]).timetz() == time(5, 30, tzinfo=timezone.utc)
 
 
 def test_app_runs_startup_purge_through_maintenance_and_reports_status(tmp_path) -> None:

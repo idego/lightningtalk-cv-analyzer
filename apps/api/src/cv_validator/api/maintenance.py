@@ -19,6 +19,20 @@ from cv_validator.errors import PersistenceError
 from cv_validator.operations import safe_log
 
 DAILY_RUN_AT = time(hour=3, minute=0, tzinfo=timezone.utc)
+MAINTENANCE_TIME_ENV = "CV_VALIDATOR_MAINTENANCE_TIME_UTC"
+
+
+def parse_maintenance_time(value: str | None) -> time:
+    """Parse ``HH:MM`` (24-hour, UTC) into the daily run time; empty means the default."""
+    if value is None or not value.strip():
+        return DAILY_RUN_AT
+    try:
+        parsed = time.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{MAINTENANCE_TIME_ENV} must be HH:MM in 24-hour UTC time") from exc
+    if parsed.tzinfo is not None or parsed.second or parsed.microsecond:
+        raise ValueError(f"{MAINTENANCE_TIME_ENV} must be HH:MM in 24-hour UTC time")
+    return parsed.replace(tzinfo=timezone.utc)
 
 
 def _utc_now() -> datetime:

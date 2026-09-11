@@ -31,7 +31,11 @@ from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.maintenance import RetentionMaintenance
+from cv_validator.api.maintenance import (
+    MAINTENANCE_TIME_ENV,
+    RetentionMaintenance,
+    parse_maintenance_time,
+)
 from cv_validator.api.persistence import (
     RETENTION_DAYS_MAX,
     RETENTION_DAYS_MIN,
@@ -276,6 +280,7 @@ def create_app(
     maintenance = RetentionMaintenance(
         purgers=(store.purge_expired, ProfileBuilderStore(store).purge_expired),
         vacuum=store.vacuum,
+        run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
     )
 
     @asynccontextmanager
