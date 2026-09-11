@@ -93,8 +93,8 @@ def test_materializes_feedback_for_each_visible_signal(tmp_path):
         "mechanical": {
             "location_resolution": [{
                 "subject": "declared_location",
-                "status": "resolved",
-                "city_country_relationship": "same",
+                "status": "unresolved",
+                "city_country_relationship": "unresolved",
                 "evidence": evidence,
             }],
             "comparisons": [{
@@ -109,8 +109,14 @@ def test_materializes_feedback_for_each_visible_signal(tmp_path):
 
     targets = store.materialize("analysis-1", payload)
     locations = {(target["source_category"], target["source_key"]) for target in targets}
-    assert ("worth_knowing", "location-resolved-same") in locations
+    assert ("what_to_check", "section") in locations
+    assert ("what_to_check", "location-unresolved-unresolved") in locations
     assert ("remaining", "comparison-same-0") not in locations
+    assert not any(target["source_category"] in {"attention", "worth_knowing"} for target in targets)
+
+    payload["mechanical"]["location_resolution"][0].update({"status": "resolved", "city_country_relationship": "same"})
+    resolved = {(target["source_category"], target["source_key"]) for target in store.materialize("analysis-2", payload)}
+    assert ("what_to_check", "location-resolved-same") not in resolved
 
 
 def test_withdrawal_and_analysis_delete_preserves_feedback_graph(tmp_path):

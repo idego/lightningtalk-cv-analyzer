@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
 import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
@@ -53,6 +54,7 @@ function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchPro
 
 export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: string | null }) {
   const { settings, t } = useCopy();
+  const routedAnalysisId = useSearchParams().get("analysis");
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -64,6 +66,11 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const routeRequest = useRef(0);
   const openedFromHistoryPush = useRef(false);
+  const openedAnalysisId = useRef<string | null>(null);
+  const openedId = opened && "report" in opened.result ? opened.result.report.analysis_id : null;
+  useEffect(() => {
+    openedAnalysisId.current = openedId;
+  }, [openedId]);
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
   const historyVersion = sessionIds.size;
@@ -129,12 +136,14 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
         setRouteLoading(false);
         return;
       }
+      if (analysisId === openedAnalysisId.current) return;
       void openRoutedAnalysis(analysisId, shareToken);
     }
     syncFromLocation();
     window.addEventListener("popstate", syncFromLocation);
     return () => window.removeEventListener("popstate", syncFromLocation);
-  }, [openRoutedAnalysis]);
+    // Re-sync on client-side navigations (e.g. the sidebar "Analyze" link) that change the query without a popstate.
+  }, [openRoutedAnalysis, routedAnalysisId]);
 
   const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
   const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);

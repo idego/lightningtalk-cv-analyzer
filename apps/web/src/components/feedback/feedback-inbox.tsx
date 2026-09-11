@@ -181,7 +181,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
               <div className="border-t px-4 py-4 sm:px-5">
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
                   <div className="min-w-0 space-y-3">
-                    {item.comment ? <div><p className="text-xs font-medium text-muted-foreground">{t("commentFrom", { author: item.actor_email || t("unknownAuthor") })}</p><p className="mt-1.5 text-sm leading-relaxed">{item.comment}</p></div> : null}
+                    {item.comment ? <div><p className="text-xs font-medium text-muted-foreground">{t("commentFrom", { author: item.actor_email || t("unknownAuthor") })}</p><p className="mt-1.5 text-sm leading-relaxed break-words">{item.comment}</p></div> : null}
                     {moduleReport && moduleCategory ? (
                       <details className="group border-t pt-3">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg py-1 text-sm font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
@@ -199,7 +199,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                         </summary>
                         <div className="mt-3 max-h-80 overflow-auto rounded-lg bg-muted/45 p-3">
                           {!sameLabel(item.context_label, context.section) && !sameLabel(item.context_label, context.subject) ? <p className="mb-2 text-xs font-semibold text-muted-foreground">{item.context_label}</p> : null}
-                          <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.context_text}</p>
+                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.context_text}</p>
                         </div>
                       </details>
                     ) : null}

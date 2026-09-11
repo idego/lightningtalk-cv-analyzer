@@ -436,7 +436,7 @@ class FeedbackStore:
 def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
-    yield TargetKind.REPORT_OVERALL, "worth_knowing", "section", versions, None
+    yield TargetKind.REPORT_OVERALL, "what_to_check", "section", versions, None
     yield TargetKind.COMPANY_RESEARCH_RESULT, "company_research", "section", versions, None
     yield TargetKind.EDUCATION_RESEARCH_RESULT, "education_research", "section", versions, None
     yield TargetKind.LINKEDIN_RESEARCH_RESULT, "linkedin_discovery", "section", versions, None
@@ -479,8 +479,8 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
     location = next((item for item in locations if isinstance(item, dict) and item.get("subject") == "declared_location"), None)
     if isinstance(location, dict) and location.get("status") not in {None, "unavailable"} and evidence(location):
         relationship = location.get("city_country_relationship") if isinstance(location.get("city_country_relationship"), str) else "null"
-        section = "attention" if relationship == "different" else "worth_knowing"
-        yield TargetKind.REVIEW_FINDING, section, f"location-{location['status']}-{relationship}", versions, None
+        if location.get("status") != "resolved" or relationship == "different":
+            yield TargetKind.REVIEW_FINDING, "what_to_check", f"location-{location['status']}-{relationship}", versions, None
 
     comparisons = mechanical.get("comparisons") if isinstance(mechanical.get("comparisons"), list) else []
     seen_comparisons: set[tuple[Any, ...]] = set()
@@ -498,20 +498,7 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         seen_comparisons.add(key)
         different.append(item)
     for index, _item in enumerate(different):
-        yield TargetKind.REVIEW_FINDING, "attention", f"comparison-different-{index}", versions, None
-
-    email_findings = mechanical.get("email_findings") if isinstance(mechanical.get("email_findings"), list) else []
-    seen_emails: set[tuple[Any, ...]] = set()
-    email_index = 0
-    for item in email_findings:
-        if not isinstance(item, dict) or not evidence(item):
-            continue
-        key = (item.get("kind"), item.get("observed_domain"), item.get("suggested_domain"))
-        if key in seen_emails:
-            continue
-        seen_emails.add(key)
-        yield TargetKind.REVIEW_FINDING, "attention", f"email-{email_index}", versions, None
-        email_index += 1
+        yield TargetKind.REVIEW_FINDING, "what_to_check", f"comparison-different-{index}", versions, None
 
     gaps = review.get("coverage_gaps") if isinstance(review.get("coverage_gaps"), list) else []
     seen_gaps: set[tuple[Any, ...]] = set()
@@ -526,13 +513,13 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         if key in seen_gaps:
             continue
         seen_gaps.add(key)
-        yield TargetKind.REVIEW_FINDING, "worth_knowing", f"gap-{gap_index}", versions, None
+        yield TargetKind.REVIEW_FINDING, "what_to_check", f"gap-{gap_index}", versions, None
         gap_index += 1
 
     linkedin = payload.get("linkedin_discovery")
     candidate = profile.get("candidate_name") if isinstance(profile.get("candidate_name"), dict) else {}
     if isinstance(linkedin, dict) and linkedin.get("status") == "completed" and linkedin.get("linkedin_not_found") and evidence(candidate):
-        yield TargetKind.REVIEW_FINDING, "attention", "linkedin-not-found", versions, None
+        yield TargetKind.REVIEW_FINDING, "what_to_check", "linkedin-not-found", versions, None
 
 
 def _failure(operation: str, value: dict[str, Any], versions: dict[str, str]) -> dict[str, Any]:

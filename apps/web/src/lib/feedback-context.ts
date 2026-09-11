@@ -16,6 +16,7 @@ export function feedbackContext(item: FeedbackContextInput, t: Translate) {
   const key = String(item.source_key ?? "");
   const section = ({
     report: t("extracted"),
+    what_to_check: t("whatToCheck"),
     attention: t("needsAttention"),
     worth_knowing: t("worthKnowing"),
     company_research: t("companyResearch"),

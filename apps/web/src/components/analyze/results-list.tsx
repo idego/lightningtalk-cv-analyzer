@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { Award, BriefcaseBusiness, FileUser, Globe2, GraduationCap, Link as LinkIcon, ListChecks, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import { GitHubIcon, LinkedInIcon } from "@/components/analyze/search-provider-icon";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { OverviewLink, ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
@@ -15,7 +15,7 @@ import { EducationResearchPanel } from "@/components/analyze/education-research"
 import { LinkedInResearchPanel } from "@/components/analyze/linkedin-research";
 import { useCopy } from "@/lib/app-settings";
 import { GoogleSearchAction } from "@/components/analyze/google-search-action";
-import { companyGoogleSearchUrl, educationGoogleSearchUrl } from "@/lib/google-search";
+import { educationGoogleSearchUrl } from "@/lib/google-search";
 import { FeedbackControl } from "@/components/analyze/feedback-control";
 import { feedbackTarget, type FeedbackManifest } from "@/lib/feedback-types";
 import { ResearchSources } from "@/components/analyze/research-sources";
@@ -126,7 +126,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.euStatus);
-  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
+  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
   const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
     if (sectionStatus === "not_present") return t("noEntriesFound");
@@ -155,12 +155,6 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
     <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen action={!readOnly && overviewFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={overviewFeedbackTarget} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
-          {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
-            <h4 id="overview-attention" className="mb-2 text-xs font-semibold text-foreground">{t("dataNeedingAttention")}</h4>
-            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.attentionRecords.map((item) => <OverviewRow key={item.id} icon={<CircleAlert className="size-4" />} label={reviewLabel} value={item.value} detail={item.detail} tone="bg-rose-500/10 text-rose-700 dark:text-rose-300" />)}
-            </div>
-          </section> : null}
           {hasContact || hasLocation ? <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
             {hasContact ? <section aria-labelledby="overview-contact">
               <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">{t("contact")}</h4>
@@ -185,18 +179,14 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
           {overview.education.length || overview.educationStatus ? <section aria-labelledby="overview-education" className="border-t pt-4">
             <h4 id="overview-education" className="mb-2 text-xs font-semibold text-foreground">{t("education")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.education.map((item) => {
-                const href = educationGoogleSearchUrl({ institution: item.searchSubject, program: item.searchContext });
-                return <OverviewRow
-                  key={item.id}
-                  icon={<GraduationCap className="size-4" />}
-                  label={t("educationEntry")}
-                  value={item.value}
-                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
-                  tone={educationTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
-                />;
-              })}
+              {overview.education.map((item) => <OverviewRow
+                key={item.id}
+                icon={<GraduationCap className="size-4" />}
+                label={t("educationEntry")}
+                value={item.value}
+                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                tone={educationTone}
+              />)}
             </div>
             {!overview.education.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.educationStatus)}</p> : null}
           </section> : null}
@@ -222,18 +212,14 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
           {overview.employment.length || overview.employmentStatus ? <section aria-labelledby="overview-employment" className="border-t pt-4">
             <h4 id="overview-employment" className="mb-2 text-xs font-semibold text-foreground">{t("experience")}</h4>
             <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.employment.map((item) => {
-                const href = companyGoogleSearchUrl({ organization: item.searchSubject, location: item.searchContext });
-                return <OverviewRow
-                  key={item.id}
-                  icon={<BriefcaseBusiness className="size-4" />}
-                  label={t("employmentEntry")}
-                  value={item.value}
-                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
-                  tone={employmentTone}
-                  action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
-                />;
-              })}
+              {overview.employment.map((item) => <OverviewRow
+                key={item.id}
+                icon={<BriefcaseBusiness className="size-4" />}
+                label={t("employmentEntry")}
+                value={item.value}
+                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                tone={employmentTone}
+              />)}
             </div>
             {!overview.employment.length ? <p className="text-xs text-muted-foreground">{emptySection(overview.employmentStatus)}</p> : null}
           </section> : null}
@@ -317,10 +303,10 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
         const report = reportOverrides[item.report.analysis_id] ?? item.report;
         const presentation = adaptReportInterface(report, settings.uiLanguage);
         const reportFeedbackManifest = feedback[report.analysis_id];
-        const worthKnowingFeedbackTarget = feedbackTarget(
+        const whatToCheckFeedbackTarget = feedbackTarget(
           reportFeedbackManifest,
           "report_overall",
-          "worth_knowing",
+          "what_to_check",
           "section",
         );
         return (
@@ -338,12 +324,8 @@ export function ResultsList({ items, onActiveIndex, readOnly = false }: { items:
               {!readOnly ? <CardAction className="max-w-full"><ReportAiCost analysisId={report.analysis_id} /></CardAction> : null}
             </CardHeader>
             <CardContent className="space-y-3">
-              {presentation.attention.length ? <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} contentClassName="pt-3">
-                <FlagList flags={presentation.attention} />
-              </HoverDisclosure> : null}
-
-              {presentation.worthKnowing.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} feedbackSnapshotLabel={t("worthKnowing")} action={!readOnly && worthKnowingFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={worthKnowingFeedbackTarget} /> : null} contentClassName="pt-3">
-                <FlagList flags={presentation.worthKnowing} />
+              {presentation.whatToCheck.length ? <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("whatToCheck")} ({presentation.whatToCheck.length})</SectionTitle>} feedbackSnapshotLabel={t("whatToCheck")} action={!readOnly && whatToCheckFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={whatToCheckFeedbackTarget} /> : null} contentClassName="pt-3">
+                <FlagList flags={presentation.whatToCheck} />
               </HoverDisclosure> : null}
 
               <StructuredFacts overview={presentation.overview} report={report} feedbackManifest={reportFeedbackManifest} readOnly={readOnly} />

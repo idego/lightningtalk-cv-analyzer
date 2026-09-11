@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { LayoutDashboard, MessageSquareText, Search, Settings, UserRoundPen } from "lucide-react";
+import { PROFILE_BUILDER_ENABLED } from "../../lib/feature-flags.js";
 
 export type NavItem = {
   title: string;
@@ -18,7 +19,7 @@ export function buildSidebarNav(showFeedback = false): NavGroup[] {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
-        { title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen },
+        ...(PROFILE_BUILDER_ENABLED ? [{ title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen }] : []),
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         ...(showFeedback ? [{ title: "Feedback", url: "/feedback", icon: MessageSquareText }] : []),
         { title: "Settings", url: "/settings", icon: Settings },

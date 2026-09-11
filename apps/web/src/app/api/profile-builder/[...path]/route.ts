@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { profileBuilderOwnerToken } from "@/lib/profile-builder-owner";
 import { getWebUser } from "@/lib/web-user";
+import { PROFILE_BUILDER_ENABLED } from "@/lib/feature-flags";
 import { ProfileBodyTooLarge, readProfileBody } from "@/lib/profile-request-body";
 
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
@@ -10,6 +11,7 @@ const privateHeaders = { "Cache-Control": "private, no-store", "X-Content-Type-O
 type Context = { params: Promise<{ path: string[] }> };
 
 async function proxy(request: Request, context: Context) {
+  if (!PROFILE_BUILDER_ENABLED) return NextResponse.json({ error: "Profile Builder is disabled" }, { status: 404, headers: privateHeaders });
   const user = await getWebUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: privateHeaders });
   const { path } = await context.params;
