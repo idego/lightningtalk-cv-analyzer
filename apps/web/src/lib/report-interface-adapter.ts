@@ -143,7 +143,6 @@ function localized(language: ReportLanguage) {
     outsideEuCheck: "Potwierdź deklarowaną lokalizację i numer telefonu bezpośrednio z kandydatem.",
     declaredSource: "deklarowana lokalizacja",
     phoneSource: "prefiks telefonu",
-    locationResolved: "GeoNames rozpoznał deklarowane miasto i kraj.",
     locationAmbiguous: "Deklarowane miasto jest niejednoznaczne w indeksie GeoNames.",
     locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie GeoNames.",
     locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje w GeoNames.",
@@ -173,7 +172,6 @@ function localized(language: ReportLanguage) {
     outsideEuCheck: "Confirm the stated location and phone number directly with the candidate.",
     declaredSource: "declared location",
     phoneSource: "phone prefix",
-    locationResolved: "GeoNames resolved the declared city and country.",
     locationAmbiguous: "The declared city is ambiguous in the GeoNames index.",
     locationUnresolved: "The declared city was not confirmed in the limited GeoNames index.",
     locationMismatch: "The declared city and country point to different countries in GeoNames.",
@@ -366,16 +364,15 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
   const cityCountryRelationship = text(location?.city_country_relationship);
   const locationFinding = locationStatus
     && locationStatus !== "unavailable"
+    && (locationStatus !== "resolved" || cityCountryRelationship === "different")
     && locationEvidence.length > 0
     ? findingFromEvidence(
         `location-${locationStatus}-${cityCountryRelationship}`,
         cityCountryRelationship === "different"
           ? copy.locationMismatch
-          : locationStatus === "resolved"
-            ? copy.locationResolved
-            : locationStatus === "ambiguous"
-              ? copy.locationAmbiguous
-              : copy.locationUnresolved,
+          : locationStatus === "ambiguous"
+            ? copy.locationAmbiguous
+            : copy.locationUnresolved,
         copy.locationWhy,
         copy.locationCheck,
         locationEvidence,
