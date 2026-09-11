@@ -312,3 +312,12 @@ def test_existing_rows_without_deadline_are_backfilled_from_created_at(tmp_path)
             "SELECT expires_at FROM analysis_runs WHERE analysis_id = 'analysis-legacy'"
         ).fetchone()
     assert run["expires_at"] == "2026-01-11T00:00:00+00:00"
+
+
+def test_purge_wraps_sqlite_errors_in_persistence_error(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    with sqlite3.connect(tmp_path / "reports.db") as connection:
+        connection.execute("DROP TABLE analysis_runs")
+
+    with pytest.raises(PersistenceError, match="retention purge failed"):
+        store.purge_expired()

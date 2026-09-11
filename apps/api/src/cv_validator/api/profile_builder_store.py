@@ -7,7 +7,12 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import uuid4
-from cv_validator.api.persistence import PersistenceStore, _ensure_expires_at_column
+from cv_validator.api.persistence import PersistenceStore
+from cv_validator.api.sqlite_support import (
+    ensure_expires_at_column,
+    open_connection,
+    retention_deadline,
+)
 from cv_validator.errors import PersistenceError
 from cv_validator.profile_builder import (
     CandidateProfile,
@@ -33,26 +38,23 @@ class ProfileBuilderStore:
         with self._connect() as conn:
             conn.executescript('CREATE TABLE IF NOT EXISTS candidate_profiles (\n                    profile_id TEXT PRIMARY KEY,\n                    access_token_hash TEXT NOT NULL,\n                    source_filename TEXT NOT NULL,\n                    profile_json TEXT NOT NULL,\n                    anonymization_json TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE INDEX IF NOT EXISTS candidate_profiles_owner_updated\n                    ON candidate_profiles(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_templates (\n                    access_token_hash TEXT NOT NULL,\n                    template_id TEXT NOT NULL,\n                    name TEXT NOT NULL,\n                    template_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL,\n                    PRIMARY KEY (access_token_hash, template_id)\n                );\n                CREATE INDEX IF NOT EXISTS profile_templates_owner_updated\n                    ON profile_templates(access_token_hash, updated_at DESC);\n                CREATE TABLE IF NOT EXISTS profile_custom_fields (\n                    field_id TEXT PRIMARY KEY,\n                    field_json TEXT NOT NULL,\n                    created_at TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                CREATE TABLE IF NOT EXISTS profile_builder_preferences (\n                    access_token_hash TEXT PRIMARY KEY,\n                    preferences_json TEXT NOT NULL,\n                    updated_at TEXT NOT NULL\n                );\n                ')
             _sanitize_profile_builder_storage(conn)
-            _ensure_expires_at_column(conn, "candidate_profiles", "updated_at", self._retention_days())
+            ensure_expires_at_column(conn, "candidate_profiles", "updated_at", self._retention_days())
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.config.db_path)
-        conn.execute("PRAGMA secure_delete = ON")
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with open_connection(self.config.db_path, foreign_keys=False) as conn:
+            yield conn
 
     def purge_expired(self) -> None:
         """Delete profiles whose stored deadline has passed; each edit renews it."""
-        with self._connect() as conn:
-            conn.execute("DELETE FROM candidate_profiles WHERE expires_at <= ?", (_utc_now(),))
+        try:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM candidate_profiles WHERE expires_at <= ?", (_utc_now(),))
+        except sqlite3.Error as exc:
+            raise PersistenceError("candidate profile purge failed") from exc
 
     def _deadline(self) -> str:
-        return (datetime.now(timezone.utc) + timedelta(days=self._retention_days())).isoformat()
+        return retention_deadline(self._retention_days())
 
     def create_candidate_profile(
         self,

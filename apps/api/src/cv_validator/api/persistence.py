@@ -21,6 +21,11 @@ from cv_validator.research.versions import (
     EDUCATION_RESEARCH_VERSION,
     LINKEDIN_DISCOVERY_VERSION,
 )
+from cv_validator.api.sqlite_support import (
+    ensure_expires_at_column,
+    open_connection,
+    retention_deadline,
+)
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
@@ -46,15 +51,8 @@ class PersistenceStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.config.db_path)
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA secure_delete = ON")
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with open_connection(self.config.db_path) as conn:
+            yield conn
 
     def vacuum(self) -> None:
         """Rebuild the database file so freed pages of purged rows leave the file."""
@@ -67,16 +65,13 @@ class PersistenceStore:
             conn.close()
 
     def _deadline(self) -> str:
-        """Retention deadline for a row written now."""
-        return (
-            datetime.now(timezone.utc) + timedelta(days=self.config.retention_days)
-        ).isoformat()
+        return retention_deadline(self.config.retention_days)
 
     def _ensure_expiry_schema(self) -> None:
         try:
             with self._connect() as conn:
                 for table in ("reports", "analysis_runs"):
-                    _ensure_expires_at_column(conn, table, "created_at", self.config.retention_days)
+                    ensure_expires_at_column(conn, table, "created_at", self.config.retention_days)
         except sqlite3.Error as exc:
             raise PersistenceError("retention deadline migration failed") from exc
 
@@ -979,7 +974,15 @@ class PersistenceStore:
 
         The deadline is fixed when a row is written, so changing the retention
         setting later never shortens or extends already stored analyses.
+        Database errors surface as ``PersistenceError`` so callers such as the
+        maintenance loop can record them instead of crashing.
         """
+        try:
+            return self._purge_expired()
+        except sqlite3.Error as exc:
+            raise PersistenceError("retention purge failed") from exc
+
+    def _purge_expired(self) -> dict[str, int | tuple[str, ...]]:
         now_iso = _utc_now()
         deleted: dict[str, int | tuple[str, ...]] = {}
         with self._connect() as conn:
@@ -1054,35 +1057,6 @@ def _share_token_expiry(now: datetime, report_expires_at: str | None) -> str:
     if retention_deadline.tzinfo is None:
         retention_deadline = retention_deadline.replace(tzinfo=timezone.utc)
     return min(expires_at, retention_deadline).isoformat()
-
-
-def _ensure_expires_at_column(
-    conn: sqlite3.Connection, table: str, since_column: str, retention_days: int
-) -> None:
-    """Add a stored retention deadline and backfill it from the row's own timestamp.
-
-    Rows keep the deadline they were stored with; later retention changes only
-    apply to rows written afterwards.
-    """
-    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if not columns:
-        return
-    if "expires_at" not in columns:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN expires_at TEXT")
-    for row in conn.execute(
-        f"SELECT rowid AS row_id, {since_column} AS since FROM {table} WHERE expires_at IS NULL"
-    ).fetchall():
-        try:
-            since = datetime.fromisoformat(str(row["since"]))
-        except ValueError:
-            since = datetime.now(timezone.utc)
-        if since.tzinfo is None:
-            since = since.replace(tzinfo=timezone.utc)
-        conn.execute(
-            f"UPDATE {table} SET expires_at = ? WHERE rowid = ?",
-            ((since + timedelta(days=retention_days)).isoformat(), row["row_id"]),
-        )
-    conn.execute(f"CREATE INDEX IF NOT EXISTS {table}_expires_at ON {table}(expires_at)")
 
 
 def _ensure_share_token_expiry_schema(conn: sqlite3.Connection) -> None:
