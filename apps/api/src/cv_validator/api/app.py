@@ -30,7 +30,12 @@ from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.persistence import (
+    RETENTION_DAYS_MAX,
+    RETENTION_DAYS_MIN,
+    PersistenceConfig,
+    PersistenceStore,
+)
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
 from cv_validator.api.report_view import public_report_view
@@ -115,7 +120,12 @@ def _db_path_from_env() -> Path:
 
 
 def _retention_days_from_env() -> int:
-    return int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    value = int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    if not RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX:
+        raise ValueError(
+            f"CV_VALIDATOR_RETENTION_DAYS must be between {RETENTION_DAYS_MIN} and {RETENTION_DAYS_MAX}"
+        )
+    return value
 
 
 def _positive_int_env(name: str, default: int) -> int:

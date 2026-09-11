@@ -24,6 +24,10 @@ from cv_validator.research.versions import (
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
 
 
+RETENTION_DAYS_MIN = 1
+RETENTION_DAYS_MAX = 3650
+
+
 @dataclass
 class PersistenceConfig:
     db_path: Path
@@ -762,10 +766,10 @@ class PersistenceStore:
             value = int(row["value"])
         except (TypeError, ValueError):
             return self.config.retention_days
-        return value if 1 <= value <= 3650 else self.config.retention_days
+        return value if RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX else self.config.retention_days
 
     def set_retention_days(self, days: int) -> dict[str, int | tuple[str, ...]]:
-        if not 1 <= days <= 3650:
+        if not RETENTION_DAYS_MIN <= days <= RETENTION_DAYS_MAX:
             raise ValueError("retention_days_out_of_range")
         with self._connect() as conn:
             conn.execute(

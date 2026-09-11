@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import valid_report
-from cv_validator.api.app import create_app
+from cv_validator.api.app import _retention_days_from_env, create_app
 from cv_validator.errors import PersistenceError
 from cv_validator.openai_config import OpenAISettings
 
@@ -560,3 +561,15 @@ def test_sensitive_analysis_endpoints_hide_reports_from_non_owners(tmp_path) -> 
 
     assert client.delete(f"/analyses/{analysis_id}", headers=other_headers).status_code == 404
     assert client.get(f"/analyses/{analysis_id}/feedback", headers=owner_headers).status_code == 200
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "3651"])
+def test_retention_env_var_outside_range_is_rejected(monkeypatch, value) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_RETENTION_DAYS", value)
+    with pytest.raises(ValueError, match="CV_VALIDATOR_RETENTION_DAYS"):
+        _retention_days_from_env()
+
+
+def test_retention_env_var_within_range_is_accepted(monkeypatch) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_RETENTION_DAYS", "1")
+    assert _retention_days_from_env() == 1
