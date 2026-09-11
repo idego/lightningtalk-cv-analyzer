@@ -149,9 +149,8 @@ test("CV overview includes accepted and annotated records and intentionally omit
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
   assert.equal(overview.employment[0].detail, "2020 – 2024 · Example Systems · Warsaw");
-  assert.equal(overview.employment.length, 1);
-  assert.equal(overview.attentionRecords[0].value, "MongoDB");
-  assert.equal(overview.attentionRecords[0].needsReview, true);
+  assert.equal(overview.employment.length, 2);
+  assert.equal(overview.employment[1].value, "MongoDB");
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 
@@ -174,14 +173,14 @@ test("CV overview renders certificates, including certificate-only education rec
   assert.equal(overview.certifications[0].value, "Azure Fundamentals");
 });
 
-test("CV overview renders when optional review annotations are absent", () => {
+test("CV overview ignores review annotations", () => {
   const value = report();
   delete value.base_analysis.review.annotations;
 
   const overview = adaptReportInterface(value, "en").overview;
 
   assert.equal(overview.employment.length, 2);
-  assert.equal(overview.attentionRecords.length, 0);
+  assert.equal(Object.hasOwn(overview, "attentionRecords"), false);
 });
 
 test("completed LinkedIn not-found result becomes one cautious checklist finding", () => {

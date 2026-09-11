@@ -46,7 +46,6 @@ export type ReportOverview = {
   education: OverviewRecord[];
   certifications: OverviewRecord[];
   employment: OverviewRecord[];
-  attentionRecords: OverviewRecord[];
   educationStatus?: string;
   employmentStatus?: string;
 };
@@ -282,11 +281,6 @@ function overview(report: AnalysisReport): ReportOverview {
     .map(record)
     .find((item) => item?.subject === "declared_location") ?? null;
   const eu = record(report.mechanical.eu_status);
-  const suspectedIds = new Set(
-    (report.base_analysis.review.annotations ?? [])
-      .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
-      .map((item) => item.record_id),
-  );
   const declaredSource = Array.isArray(eu?.sources)
     ? eu.sources.map(record).find((item) => item?.kind === "declared_location")
     : null;
@@ -304,18 +298,12 @@ function overview(report: AnalysisReport): ReportOverview {
     resolvedCountry: text(resolution?.country_code),
     euStatus: declaredCountry && outsideEu.includes(declaredCountry) ? "outside" : declaredCountry && insideEu.includes(declaredCountry) ? "inside" : "unknown",
     education: report.base_analysis.education
-      .filter((item) => !suspectedIds.has(item.id) && value(item.institution))
+      .filter((item) => value(item.institution))
       .map(educationRecord),
     certifications: report.base_analysis.education
-      .filter((item) => !suspectedIds.has(item.id) && !value(item.institution) && value(item.certificate))
+      .filter((item) => !value(item.institution) && value(item.certificate))
       .map(educationRecord),
-    employment: report.base_analysis.employment.filter((item) => !suspectedIds.has(item.id)).map(employmentRecord),
-    attentionRecords: [
-      ...report.base_analysis.education
-        .filter((item) => suspectedIds.has(item.id) && (value(item.institution) || value(item.certificate)))
-        .map(educationRecord),
-      ...report.base_analysis.employment.filter((item) => suspectedIds.has(item.id)).map(employmentRecord),
-    ],
+    employment: report.base_analysis.employment.map(employmentRecord),
     educationStatus: report.base_analysis.pass_statuses.education?.section_status,
     employmentStatus: report.base_analysis.pass_statuses.employment?.section_status,
   };

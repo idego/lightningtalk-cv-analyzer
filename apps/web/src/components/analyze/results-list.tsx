@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Award, BriefcaseBusiness, CircleAlert, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
+import { Award, BriefcaseBusiness, FileUser, Globe2, GraduationCap, Lightbulb, Link as LinkIcon, Mail, Map as MapIcon, MapPin, Phone, UserRound } from "lucide-react";
 import { GitHubIcon, LinkedInIcon } from "@/components/analyze/search-provider-icon";
 import type { AnalysisReport, AnalyzeItemResult } from "@/lib/analyze-types";
 import type { OverviewLink, ReportFinding, ReportOverview } from "@/lib/report-interface-adapter";
@@ -126,7 +126,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const { settings, t } = useCopy();
   const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.euStatus);
-  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || overview.attentionRecords.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
+  const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
   const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
     if (sectionStatus === "not_present") return t("noEntriesFound");
@@ -155,12 +155,6 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
     <HoverDisclosure className="rounded-md border p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<FileUser className="size-4" />}>{t("extracted")}</SectionTitle>} feedbackSnapshotLabel={t("extracted")} defaultOpen action={!readOnly && overviewFeedbackTarget ? <FeedbackControl analysisId={report.analysis_id} report={report} target={overviewFeedbackTarget} /> : null} contentClassName="pt-4">
       {hasFacts ? (
         <div className="space-y-5">
-          {overview.attentionRecords.length ? <section aria-labelledby="overview-attention" className="rounded border border-rose-500/30 bg-rose-500/5 p-3">
-            <h4 id="overview-attention" className="mb-2 text-xs font-semibold text-foreground">{t("dataNeedingAttention")}</h4>
-            <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
-              {overview.attentionRecords.map((item) => <OverviewRow key={item.id} icon={<CircleAlert className="size-4" />} label={reviewLabel} value={item.value} detail={item.detail} tone="bg-rose-500/10 text-rose-700 dark:text-rose-300" />)}
-            </div>
-          </section> : null}
           {hasContact || hasLocation ? <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
             {hasContact ? <section aria-labelledby="overview-contact">
               <h4 id="overview-contact" className="mb-2 text-xs font-semibold text-foreground">{t("contact")}</h4>
