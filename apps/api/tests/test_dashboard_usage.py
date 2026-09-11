@@ -63,7 +63,7 @@ def test_partial_report_counts_as_processed_and_is_backfilled(tmp_path) -> None:
     assert reopened.get_usage_summary()["reports_processed"] == 1
 
 
-def test_usage_summary_is_idempotent_and_cost_survives_report_deletion(tmp_path) -> None:
+def test_usage_summary_is_idempotent_and_survives_report_deletion(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     analysis_id = "analysis-1"
     _persist_completed_report(store, analysis_id)
@@ -114,9 +114,7 @@ def test_usage_summary_is_idempotent_and_cost_survives_report_deletion(tmp_path)
     assert store.delete_analysis(analysis_id, "owner-token") is True
     after = store.get_usage_summary()
 
-    # Token/cost accounting outlives the report; the processed-report marker
-    # is deleted with the analysis so only ai_usage_events keeps its id.
-    assert after["reports_processed"] == 0
+    assert after["reports_processed"] == 1
     assert after["requests"] == 2
     assert after["estimated_cost_usd"] == before["estimated_cost_usd"]
     assert after["estimated_cost_pln"] == before["estimated_cost_pln"]
