@@ -27,22 +27,25 @@ Every displayed research source SHALL be a safe external link labeled with a rea
 - **THEN** the link label uses its normalized hostname and the link remains keyboard accessible
 
 ### Requirement: EU status is neutral overview information
-Inside/outside-EU classification SHALL appear as a separate informational row in the CV overview and MUST NOT create a "What to check" finding by itself. The row MUST state that it classifies supplied CV information and does not determine residence, nationality, or work eligibility.
+Inside/outside-EU classification SHALL appear as a separate informational row in the CV overview (`Inside the EU`, `Outside the EU`, or `Location unknown`) and MUST NOT create a "What to check" finding by itself. The row classifies supplied CV information only; the UI MUST NOT present it as a determination of residence, nationality, or work eligibility.
 
 #### Scenario: Mechanical evidence points outside the EU
 - **WHEN** the accepted declared-location or phone evidence is classified outside the EU
 - **THEN** the overview shows a neutral outside-EU row and no outside-EU finding is added
 
-### Requirement: Postal consistency uses locality and country
-When the offline postal resolver returns a supported result, the CV overview SHALL state whether the postal code is consistent with the accepted locality and country. Missing reference data or ambiguous evidence MUST remain unavailable or inconclusive and MUST NOT be presented as a mismatch.
+### Requirement: Postal codes are not presented as a consistency result
+The CV overview SHALL NOT render a postal-code row or a postal consistency verdict. Postal evidence remains available to the backend location resolution and to the report payload, but the recruiter-facing overview shows the resolved location (locality and localized full country name) only.
 
-#### Scenario: Postal code resolves to the stated locality and country
-- **WHEN** accepted postal, locality, and country evidence matches one offline reference record
-- **THEN** the overview shows a neutral consistent postal result
+#### Scenario: Report contains postal evidence
+- **WHEN** the base analysis contains an accepted postal code
+- **THEN** the overview shows the resolved location without a postal row and without claiming consistency or mismatch
 
-#### Scenario: Postal reference data is unavailable
-- **WHEN** no configured offline reference data can evaluate the accepted postal code
-- **THEN** the UI does not claim either consistency or mismatch
+### Requirement: What to check consolidates review findings
+The report SHALL present a single "What to check" list instead of separate "Needs attention" and "Worth knowing" groups. Entries SHALL be ordered: research contradictions, then location and phone mismatches, then coverage gaps, then the ambiguous-record findings described above. A declared location that resolves successfully SHALL NOT produce a finding, and a LinkedIn discovery that finds no profile SHALL NOT produce a finding. Feedback stored under the legacy `attention` and `worth_knowing` categories SHALL still render in the inbox.
+
+#### Scenario: Resolved location
+- **WHEN** the declared city resolves against the stated country
+- **THEN** no location finding appears in What to check
 
 ### Requirement: Report hierarchy uses consistent typography
 Report and research sections touched by this change SHALL reuse the existing heading, body, secondary, and action styles with no additional arbitrary font sizes or semantic colors. Redundant action text MAY be replaced by an accessible icon and tooltip when the meaning remains clear.

@@ -191,7 +191,7 @@ old pilot reports. Never delete an existing database implicitly.
 
 ## Profile Builder runtime
 
-Rebuild the API image when enabling the restored Profile Builder; it installs
+The web tier ships with Profile Builder switched off (`PROFILE_BUILDER_ENABLED = false` in `apps/web/src/lib/feature-flags.js`); the API routes remain deployed and profile rows are still retention-purged. Rebuild the web image after flipping the flag. Rebuild the API image when enabling the restored Profile Builder; it installs
 `libreoffice-writer` and `fonts-liberation`. Non-container installs need a `soffice`
 or `libreoffice` executable on PATH for PDF output. Conversion uses a fresh
 LibreOffice user directory per request and a 30-second timeout. No external

@@ -44,7 +44,7 @@ target.
 
 #### Scenario: Analyze route
 - **WHEN** a user opens the app shell
-- **THEN** an `Analyze` navigation item and corresponding analysis screen are present
+- **THEN** `Analyze`, `Profile Builder` (disabled and dimmed while `PROFILE_BUILDER_ENABLED` is false), `Dashboard`, and `Settings` navigation items are present, and the header shows the sidebar trigger, the localized page title, the theme toggle, and sign-out
 
 #### Scenario: Role-gated Feedback route
 - **WHEN** the signed-in user holds an active feedback `owner` or `reviewer` role

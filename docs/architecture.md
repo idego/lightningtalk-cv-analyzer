@@ -117,6 +117,12 @@ ownership and research hardening remain separate concerns. Profile conversion is
 - Saved profiles include the exact template and visibility snapshot. Private
   templates remain owner scoped; explicitly shared templates and custom-field
   definitions retain the existing internal-organization scope.
+- Saved profiles carry an `expires_at` deadline from the shared retention window,
+  renewed on every edit, and are purged by the same maintenance loop as analyses.
+  Templates, preferences, and custom fields are not retention-purged.
+- The web tier gates the whole workflow behind `PROFILE_BUILDER_ENABLED` in
+  `apps/web/src/lib/feature-flags.js` (currently `false`): pages redirect to
+  `/analyze`, the proxy answers 404, and the sidebar entry is disabled.
 
 Profile Builder availability is independent of the per-browser switch for optional
 public-company/education/LinkedIn research. Missing PDF conversion does not make

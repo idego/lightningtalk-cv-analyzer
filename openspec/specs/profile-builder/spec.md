@@ -41,15 +41,19 @@ The system SHALL generate an IDEGO-style DOCX from the explicit current profile 
 - **THEN** Word/LibreOffice can edit its text and the exported values match the submitted current snapshot
 
 ### Requirement: Additive authenticated web workflow
-Profile Builder SHALL be available as `/profile-builder` inside the existing authenticated application shell and SHALL NOT change Analyze behavior.
+Profile Builder SHALL be available as `/profile-builder` inside the existing authenticated application shell and SHALL NOT change Analyze behavior. Its availability is governed by the web build-time flag `PROFILE_BUILDER_ENABLED` in `apps/web/src/lib/feature-flags.js`. While the flag is off, the sidebar SHALL show the Profile Builder item as an inert, dimmed entry; `/profile-builder`, `/profiles`, and template pages SHALL redirect to `/analyze`; the Settings page SHALL hide the Profile Builder section; and the `/api/profile-builder/*` proxy SHALL answer 404. The API routes remain deployed.
 
-#### Scenario: Authenticated recruiter opens the app
-- **WHEN** navigation is rendered
-- **THEN** Analyze, Profile Builder, and Settings are available as separate destinations
+#### Scenario: Authenticated recruiter opens the app with the flag on
+- **WHEN** navigation is rendered and `PROFILE_BUILDER_ENABLED` is true
+- **THEN** Analyze, Profile Builder, Dashboard, and Settings are available as separate destinations
+
+#### Scenario: Flag is off
+- **WHEN** `PROFILE_BUILDER_ENABLED` is false
+- **THEN** the sidebar entry is disabled, Profile Builder pages redirect to `/analyze`, and the web proxy returns 404
 
 
 ### Requirement: Recent candidate profiles
-The system SHALL persist authenticated owner-scoped Profile Builder snapshots containing the current canonical profile, anonymization policy, selected template snapshot, source filename, and timestamps. It MUST NOT persist the original uploaded CV bytes for this workflow.
+The system SHALL persist authenticated owner-scoped Profile Builder snapshots containing the current canonical profile, anonymization policy, selected template snapshot, source filename, timestamps, and an `expires_at` deadline derived from the shared analysis retention window. Each profile update renews the deadline. Expired profiles are purged by the shared retention maintenance loop and on Profile Builder request paths; templates, preferences, and custom fields are not retention-purged. It MUST NOT persist the original uploaded CV bytes for this workflow.
 
 #### Scenario: Profile extraction succeeds
 - **WHEN** an authenticated recruiter extracts a supported CV
@@ -132,7 +136,7 @@ The system SHALL let HR run a prompt against selected professional profile secti
 Each authenticated user SHALL have persisted Profile Builder conversion preferences covering default anonymization, optional automatic Summary generation and prompt, safe technology aggregation, date-format normalization, default template, and output filename convention.
 
 ### Requirement: Controlled template sharing
-Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible and editable inside the internal organization. Saving a new template MUST NOT share it by default.
+Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible, editable, and deletable by any authenticated user inside the internal organization; the built-in IDEGO Default is always Shared, any user's save overwrites it for everyone, and deleting it resets it to the built-in definition. Saving a private template as Shared removes the owner's private copy; saving a Shared template as Private creates a private override and leaves the shared copy in place. Saving a new template MUST NOT share it by default.
 
 ### Requirement: Batch conversion flow
 Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot. The upload card SHALL follow the Analyze upload flow: selected files wait in a removable queue until the recruiter starts the conversion, and a progress card with elapsed time, per-file status, and Cancel replaces the card while the batch runs.
@@ -157,7 +161,7 @@ Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose que
 The system SHALL translate selected professional profile sections to a supported target language with GPT-5.6 Luna, preserve names/URLs/technology identifiers, and require preview plus selective acceptance before changing canonical state.
 
 ### Requirement: Profiles catalog
-The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository, and SHALL match Recent analyses in layout and behaviour: inline search, five rows with Show more, New badges for profiles created in this browser session, inline delete, and a Retry action when loading fails. The catalog SHALL remain reachable at `/profiles`, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
+The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository, and SHALL match Recent analyses in layout and behaviour: inline search, five rows with Show more, New badges for profiles created in this browser session, inline delete, and a Retry action when loading fails. The catalog SHALL remain reachable at `/profiles` while Profile Builder is enabled, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
 
 
 ### Requirement: Latency-bounded AI profile transforms
