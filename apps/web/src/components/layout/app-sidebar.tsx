@@ -89,7 +89,11 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
                 return (
                   <SidebarMenuItem key={item.title}>
                     {item.disabled ? (
-                      <SidebarMenuButton disabled tooltip={label} className={buttonClassName}>
+                      <SidebarMenuButton
+                        disabled
+                        aria-disabled="true"
+                        className={`${buttonClassName} cursor-default text-[var(--sidebar-muted)] opacity-100 hover:bg-transparent hover:text-[var(--sidebar-muted)] active:bg-transparent active:text-[var(--sidebar-muted)] disabled:opacity-100`}
+                      >
                         {content}
                       </SidebarMenuButton>
                     ) : (
