@@ -61,6 +61,10 @@ documents fail explicitly; OCR is not attempted. OpenAI response storage is
 disabled. Upload bytes are processed in memory during analysis; after a report
 commits, the original PDF/DOCX is retained only for the analysis-retention
 window. Raw CV text, evidence, model output, and secrets must not enter logs.
+Analyses run in the request threadpool and are bounded, not serialized: a
+process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 3) caps
+how many run at once because of the two-core container, OpenAI rate limits,
+and the four model calls each analysis fans out to.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`

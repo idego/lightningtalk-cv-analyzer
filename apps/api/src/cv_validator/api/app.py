@@ -116,6 +116,7 @@ from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/cv_analyzer.db")
 DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_ANALYSIS_CONCURRENCY = 3
 
 
 class _RetentionUpdate(BaseModel):
@@ -157,6 +158,7 @@ def create_app(
     openai_settings: OpenAISettings | None = None,
     analysis_strategy: AnalysisStrategy | None = None,
     upload_max_bytes: int | None = None,
+    analysis_concurrency: int | None = None,
     company_researcher=None,
     education_researcher=None,
     linkedin_researcher=None,
@@ -270,9 +272,18 @@ def create_app(
         else _positive_int_env("CV_VALIDATOR_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
     )
     research_locks = ResearchLockRegistry()
-    # Analyses run off the event loop so reads stay responsive, but the shared
-    # strategy (one document converter) still processes one CV at a time.
-    analysis_lock = threading.Lock()
+    analysis_concurrency_limit = (
+        analysis_concurrency
+        if analysis_concurrency is not None
+        else _positive_int_env("CV_VALIDATOR_ANALYSIS_CONCURRENCY", DEFAULT_ANALYSIS_CONCURRENCY)
+    )
+    # Analyses run off the event loop so reads stay responsive, but they are
+    # bounded rather than unbounded: the container has two CPU cores for
+    # document conversion, OpenAI enforces per-key rate limits, and each
+    # analysis already fans out to four model calls. The limit is per process;
+    # the cancellation registry, research locks, telemetry, and the retention
+    # scheduler are in-memory, so scaling must stay single-process.
+    analysis_slots = threading.BoundedSemaphore(analysis_concurrency_limit)
     cancellations = AnalysisCancellationRegistry()
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
@@ -547,7 +558,7 @@ def create_app(
         correlation_id: str,
         request_id: str | None = None,
     ) -> dict:
-        with analysis_lock:
+        with analysis_slots:
             try:
                 return _analyze_upload(
                     content, filename, report_language, owner_user_id, correlation_id, request_id

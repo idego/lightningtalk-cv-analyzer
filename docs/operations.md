@@ -17,6 +17,10 @@
 - Persist and back up the API and authentication SQLite volumes.
 - Configure retention with `CV_VALIDATOR_RETENTION_DAYS` (1-3650 days; the
   API refuses to start outside that range).
+- Bound simultaneous analyses with `CV_VALIDATOR_ANALYSIS_CONCURRENCY`
+  (default 3, minimum 1). Extra `/analyze` requests wait for a free slot. Do
+  not scale with uvicorn `--workers`: cancellation, research locks, telemetry,
+  and the retention scheduler are per-process in-memory state.
 
 Every report, analysis run, and saved Profile Builder profile stores an
 `expires_at` deadline computed when the row is written (each profile edit
