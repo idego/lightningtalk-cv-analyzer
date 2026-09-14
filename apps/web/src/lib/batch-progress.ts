@@ -2,24 +2,32 @@ import type { AnalysisHistoryItem, AnalyzeItemResult, DocumentSource } from "@/l
 
 export type BatchFileStatus = "waiting" | "analyzing" | "completed" | "failed";
 
-/** Sequential batch state: `results` holds one entry per finished file, in upload order. */
+/**
+ * Batch state: `results[i]` is set once file `i` finishes (files run a few at a
+ * time, so they finish out of order); `active` lists the indexes in flight.
+ */
 export type BatchProgress = {
   filenames: string[];
-  results: AnalyzeItemResult[];
+  results: (AnalyzeItemResult | null)[];
+  active: number[];
   startedAt: number;
   phase: "running" | "complete";
 };
 
-export function deriveBatchStatuses(batch: Pick<BatchProgress, "filenames" | "results" | "phase">): BatchFileStatus[] {
+export function deriveBatchStatuses(batch: Pick<BatchProgress, "filenames" | "results" | "active" | "phase">): BatchFileStatus[] {
   return batch.filenames.map((_, index) => {
     const result = batch.results[index];
     if (result) return result.status === "error" ? "failed" : "completed";
-    return index === batch.results.length && batch.phase === "running" ? "analyzing" : "waiting";
+    return batch.phase === "running" && batch.active.includes(index) ? "analyzing" : "waiting";
   });
 }
 
-export function completedBatchIds(results: AnalyzeItemResult[]) {
-  return results.flatMap((result) => (result.status === "error" ? [] : [result.report.analysis_id]));
+export function finishedCount(results: readonly (AnalyzeItemResult | null)[]) {
+  return results.filter((result) => result !== null).length;
+}
+
+export function completedBatchIds(results: readonly (AnalyzeItemResult | null)[]) {
+  return results.flatMap((result) => (!result || result.status === "error" ? [] : [result.report.analysis_id]));
 }
 
 export function isSupportedCvFilename(filename: string) {
@@ -50,7 +58,7 @@ export type BatchSession = {
   sessionFiles: ReadonlyMap<string, File>;
 };
 
-export type CancelledBatch = { requestId: string | null };
+export type CancelledBatch = { requestIds: string[] };
 
 type Listener = () => void;
 
@@ -58,7 +66,7 @@ export class BatchSessionStore {
   private state: BatchSession = { queue: [], batch: null, sessionIds: new Set(), sessionFiles: new Map() };
   private listeners = new Set<Listener>();
   private running: File[] = [];
-  private inFlight: { file: File; requestId: string } | null = null;
+  private inFlight = new Map<number, string>();
   private generation = 0;
 
   getSnapshot = (): BatchSession => this.state;
@@ -83,32 +91,38 @@ export class BatchSessionStore {
   /** Begin a batch; the returned token identifies it so a cancelled batch cannot record into a later one. */
   start(files: File[], startedAt = Date.now()): number {
     this.running = files;
-    this.inFlight = null;
+    this.inFlight = new Map();
     this.generation += 1;
-    this.update({ queue: [], batch: { filenames: files.map((file) => file.name), results: [], startedAt, phase: "running" } });
+    this.update({
+      queue: [],
+      batch: { filenames: files.map((file) => file.name), results: files.map(() => null), active: [], startedAt, phase: "running" },
+    });
     return this.generation;
   }
 
   /** Mark the file whose request is about to be sent, so a cancel can name it to the API. */
-  beginFile(token: number, file: File, requestId: string) {
-    if (token === this.generation) this.inFlight = { file, requestId };
+  beginFile(token: number, index: number, requestId: string) {
+    const { batch } = this.state;
+    if (token !== this.generation || !batch) return;
+    this.inFlight.set(index, requestId);
+    this.update({ batch: { ...batch, active: [...batch.active, index] } });
   }
 
   /**
-   * Stop the running batch. Every unfinished file, including the one in flight,
+   * Stop the running batch. Every unfinished file, including those in flight,
    * returns to the queue in upload order; the caller forwards the returned
-   * request id to the API so that analysis is discarded before persistence.
+   * request ids to the API so those analyses are discarded before persistence.
    */
   cancel(): CancelledBatch {
     const { batch, queue } = this.state;
-    if (!batch || batch.phase !== "running") return { requestId: null };
-    const remaining = this.running.slice(batch.results.length);
-    const requestId = this.inFlight?.requestId ?? null;
+    if (!batch || batch.phase !== "running") return { requestIds: [] };
+    const remaining = this.running.filter((_, index) => batch.results[index] === null);
+    const requestIds = [...this.inFlight.values()];
     this.generation += 1;
     this.running = [];
-    this.inFlight = null;
+    this.inFlight = new Map();
     this.update({ batch: null, queue: [...remaining, ...queue] });
-    return { requestId };
+    return { requestIds };
   }
 
   /**
@@ -116,15 +130,16 @@ export class BatchSessionStore {
    * A success that slipped through before the cancel took effect is still
    * highlighted, and its file leaves the queue so it is not analyzed twice.
    */
-  record(result: AnalyzeItemResult, file: File, token: number): boolean {
+  record(result: AnalyzeItemResult, file: File, token: number, index: number): boolean {
     const { batch, queue, sessionIds, sessionFiles } = this.state;
     const current = token === this.generation && batch !== null;
     if (!current && result.status === "error") return false;
-    const results = current ? [...batch.results, result] : [result];
+    const results = current ? batch.results.map((existing, position) => (position === index ? result : existing)) : [result];
+    if (current) this.inFlight.delete(index);
     const nextFiles = new Map(sessionFiles);
     if (result.status !== "error") nextFiles.set(result.report.analysis_id, file);
     this.update({
-      batch: current ? { ...batch, results } : batch,
+      batch: current ? { ...batch, results, active: batch.active.filter((position) => position !== index) } : batch,
       queue: current ? queue : queue.filter((queued) => queued !== file),
       sessionIds: new Set([...sessionIds, ...completedBatchIds(results)]),
       sessionFiles: nextFiles,

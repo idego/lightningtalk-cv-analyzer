@@ -116,7 +116,7 @@ from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/cv_analyzer.db")
 DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
-DEFAULT_ANALYSIS_CONCURRENCY = 3
+DEFAULT_ANALYSIS_CONCURRENCY = 4
 
 
 class _RetentionUpdate(BaseModel):
