@@ -38,9 +38,10 @@ export function researchEligibility(report: AnalysisReport) {
       && supported(record.organization)
       && !isSelfEmploymentLabel(record.organization?.value ?? ""),
   );
+  // A supported institution is a public subject on its own; an ambiguous relation
+  // (for example dates far from the entry) must not block institution research.
   const education = report.base_analysis.education.some(
-    (record) => acceptedRelation(record)
-      && supported(record.institution),
+    (record) => supported(record.institution),
   );
   const linkedin = supported(report.base_analysis.profile.candidate_name);
   return {

@@ -8,7 +8,7 @@ Defines optional cited public-web research after a validated base analysis.
 
 ### Requirement: Research only accepted base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use accepted education records with a supported relation and supported institution. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
+Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
 Ambiguous records, ambiguous fields, self-employment labels, skills, raw
 extractor candidates, reviewer-rejected candidates, and unvalidated model
@@ -19,6 +19,11 @@ output MUST NOT become research subjects.
 - **WHEN** the reviewer adds an employment record and the shared evidence and
   relation validator accepts it
 - **THEN** the employer can become a company-research subject
+
+#### Scenario: Education dates sit far from the institution
+
+- **WHEN** an education record is ambiguous because its fields could not be related, but its institution is supported
+- **THEN** education research still checks the institution, without the program or dates
 
 #### Scenario: Technology resembles an employer
 

@@ -78,3 +78,40 @@ def test_certificate_is_not_sent_even_when_an_institution_is_present() -> None:
     facts = build_education_research_request(report).input_facts
     assert all("certificate" not in fact for fact in facts)
     assert facts[0]["institution"] == "Example University"
+
+
+def test_ambiguous_education_record_still_researches_its_supported_institution() -> None:
+    report = valid_report()
+    report["base_analysis"]["education"].append({
+        "id": "dates-far-away",
+        "status": "ambiguous",
+        "relation_status": "ambiguous",
+        "added_by_reviewer": False,
+        "institution": supported("Far University"),
+        "program": supported("Mathematics"),
+        "degree": None,
+        "certificate": None,
+        "start_date": supported("2010"),
+        "end_date": supported("2014"),
+        "location": None,
+    })
+    report["base_analysis"]["education"].append({
+        "id": "ambiguous-institution",
+        "status": "ambiguous",
+        "relation_status": "ambiguous",
+        "added_by_reviewer": False,
+        "institution": {**supported("Unsure University"), "status": "ambiguous"},
+        "program": None,
+        "degree": None,
+        "certificate": None,
+        "start_date": None,
+        "end_date": None,
+        "location": None,
+    })
+
+    facts = build_education_research_request(report).input_facts
+
+    assert facts == (
+        {"institution": "Example University", "program": "Computer Science"},
+        {"institution": "Far University"},
+    )

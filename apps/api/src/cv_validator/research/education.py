@@ -14,7 +14,7 @@ from cv_validator.location import Ambiguous, LocationResolver, Resolved, Resolut
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.versions import EDUCATION_RESEARCH_VERSION
-from cv_validator.research.subjects import accepted_records, safe_public_subject, supported_field
+from cv_validator.research.subjects import institution_records, safe_public_subject, supported_field
 
 RESEARCH_VERSION = EDUCATION_RESEARCH_VERSION
 PROMPT_VERSION = "education-research-prompt-v9"
@@ -142,9 +142,10 @@ def apply_owner_scoped_education_context(
 def build_education_research_request(stored_report: dict[str, Any], *, report_language: str = "en") -> EducationResearchRequest:
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for record in accepted_records(stored_report, "education"):
+    for record in institution_records(stored_report):
         institution = supported_field(record, "institution")
-        program = supported_field(record, "program")
+        # Only a supported relation proves the program belongs to this institution.
+        program = supported_field(record, "program") if record.get("relation_status") == "supported" else None
         if institution is None or not safe_public_subject(institution):
             continue
         fact: dict[str, Any] = {"institution": institution}

@@ -37,7 +37,7 @@ PDF or DOCX upload
   compares high-confidence, unambiguous business bounds with accepted employment
   start dates using date intervals. Unclear continuity, missing evidence and
   ambiguous entities produce no flag. These comparisons are never cached publicly.
-- Company, education, and LinkedIn research receives only accepted subjects.
+- Company and LinkedIn research receives only accepted subjects; education research also accepts a supported institution from an ambiguous record, without its program.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.
 - The overview EU row classifies only the declared location. A phone prefix alone
