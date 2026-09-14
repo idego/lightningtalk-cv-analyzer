@@ -40,18 +40,18 @@ def accepted_records(
     )
 
 
-def institution_records(stored_report: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    """Education records whose institution field is literally supported.
+def subject_records(stored_report: dict[str, Any], category: str, field: str) -> tuple[dict[str, Any], ...]:
+    """Records whose named subject field (institution or organization) is literally supported.
 
-    The institution name is a public subject on its own, so a record whose other
-    fields (typically dates) sit too far away to prove they belong together still
+    The subject name is public on its own, so a record whose other fields
+    (typically dates) sit too far away to prove they belong together still
     qualifies. Callers must not pair such a record's other fields with the
-    institution unless its relation is supported.
+    subject unless its relation is supported.
     """
     base_analysis = stored_report.get("base_analysis")
     if not isinstance(base_analysis, dict):
         return ()
-    records = base_analysis.get("education")
+    records = base_analysis.get(category)
     if not isinstance(records, list):
         return ()
     return tuple(
@@ -59,7 +59,7 @@ def institution_records(stored_report: dict[str, Any]) -> tuple[dict[str, Any], 
         for record in records
         if isinstance(record, dict)
         and record.get("status") in {"accepted", "ambiguous"}
-        and supported_field(record, "institution") is not None
+        and supported_field(record, field) is not None
     )
 
 

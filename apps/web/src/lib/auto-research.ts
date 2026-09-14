@@ -25,21 +25,16 @@ function safePublicSubject(value: string) {
     && /[^\W\d_]/u.test(normalized);
 }
 
-function acceptedRelation(record: { status: string; relation_status?: string }) {
-  return record.status === "accepted" && record.relation_status === "supported";
-}
-
 export function researchEligibility(report: AnalysisReport) {
   if (report.base_analysis.status === "failed" || report.base_analysis.status === "unavailable") {
     return { company: false, education: false, linkedin: false };
   }
+  // A supported organization or institution is a public subject on its own; an
+  // ambiguous relation (for example dates far from the entry) must not block it.
   const employment = report.base_analysis.employment.some(
-    (record) => acceptedRelation(record)
-      && supported(record.organization)
+    (record) => supported(record.organization)
       && !isSelfEmploymentLabel(record.organization?.value ?? ""),
   );
-  // A supported institution is a public subject on its own; an ambiguous relation
-  // (for example dates far from the entry) must not block institution research.
   const education = report.base_analysis.education.some(
     (record) => supported(record.institution),
   );

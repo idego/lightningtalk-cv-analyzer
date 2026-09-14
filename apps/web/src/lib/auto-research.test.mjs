@@ -117,15 +117,17 @@ test("non-LinkedIn links do not skip any automatic research", () => {
   assert.deepEqual([...automaticallySkippedKinds(withLinks([PERSONAL_LINK]))], []);
 });
 
-test("ambiguous records are not research subjects, except a supported institution", () => {
+test("ambiguous records still research their supported organization or institution", () => {
   const value = report();
   value.base_analysis.employment[0].status = "ambiguous";
+  value.base_analysis.employment[0].relation_status = "ambiguous";
   value.base_analysis.education[0].status = "ambiguous";
   value.base_analysis.education[0].relation_status = "ambiguous";
   value.base_analysis.profile.candidate_name.status = "ambiguous";
 
-  assert.deepEqual([...eligibleAutoResearchKinds(value)], ["education"]);
+  assert.deepEqual([...eligibleAutoResearchKinds(value)], ["company", "education"]);
 
+  value.base_analysis.employment[0].organization.status = "ambiguous";
   value.base_analysis.education[0].institution.status = "ambiguous";
   assert.deepEqual([...eligibleAutoResearchKinds(value)], []);
 });

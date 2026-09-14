@@ -25,7 +25,7 @@ Old pilot reports are not a compatibility requirement.
   relation validation accepts it.
 - A postal-looking token remains a candidate until supported address context
   accepts it.
-- Public research receives only evidence-supported subjects: accepted records, plus a supported institution name on its own.
+- Public research receives only evidence-supported subjects: accepted records, plus a supported organization or institution name on its own.
 - Never log or commit private CV content, excerpts, model output, or secrets.
 - OpenAI response storage remains disabled.
 

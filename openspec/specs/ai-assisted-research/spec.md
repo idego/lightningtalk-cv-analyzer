@@ -8,11 +8,12 @@ Defines optional cited public-web research after a validated base analysis.
 
 ### Requirement: Research only accepted base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
+Company research SHALL use employment records whose organization field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; employment-date timeline comparisons SHALL still use only accepted records with a supported relation. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
-Ambiguous records, ambiguous fields, self-employment labels, skills, raw
-extractor candidates, reviewer-rejected candidates, and unvalidated model
-output MUST NOT become research subjects.
+Ambiguous fields, self-employment labels, skills, raw extractor candidates,
+reviewer-rejected candidates, and unvalidated model output MUST NOT become
+research subjects. An ambiguous record contributes only its supported
+organization or institution name.
 
 #### Scenario: Reviewer adds a missing supported employer
 
@@ -27,8 +28,8 @@ output MUST NOT become research subjects.
 
 #### Scenario: Technology resembles an employer
 
-- **WHEN** a technology name is ambiguous or lacks an accepted employment
-  relation
+- **WHEN** a technology name has no supported organization evidence or was
+  rejected by the reviewer
 - **THEN** company research omits it
 
 ### Requirement: Automatic and manual category starts

@@ -4,7 +4,7 @@ from cv_validator.research.education import build_education_research_request
 from cv_validator.research.linkedin import build_discovery_request
 
 
-def test_research_uses_only_accepted_supported_records() -> None:
+def test_research_uses_supported_subjects_and_skips_self_employment() -> None:
     report = valid_report()
     report["base_analysis"]["employment"].extend([
         {
@@ -37,7 +37,7 @@ def test_research_uses_only_accepted_supported_records() -> None:
     education = build_education_research_request(report)
     linkedin = build_discovery_request(report)
 
-    assert company.input_facts == ({"organization": "Example Systems"},)
+    assert company.input_facts == ({"organization": "Example Systems"}, {"organization": "MongoDB"})
     assert education.input_facts[0]["institution"] == "Example University"
     assert linkedin.candidate["name"] == "Jane Example"
     assert linkedin.candidate["search_hints"][0] == {

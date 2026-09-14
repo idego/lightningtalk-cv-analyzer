@@ -18,7 +18,7 @@ from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.company_timeline import date_bounds
 from cv_validator.research.versions import COMPANY_RESEARCH_VERSION
 from cv_validator.research.subjects import (
-    accepted_records,
+    subject_records,
     safe_public_subject,
     subject_key,
     supported_field,
@@ -68,7 +68,7 @@ class CompanyResearchService:
 def build_company_research_request(stored_report: dict[str, Any], *, report_language: str = "en") -> CompanyResearchRequest:
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for record in accepted_records(stored_report, "employment"):
+    for record in subject_records(stored_report, "employment", "organization"):
         subject = supported_field(record, "organization")
         if subject is None or not safe_public_subject(subject) or _is_self_employment_label(subject):
             continue
