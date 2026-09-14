@@ -19,6 +19,10 @@ The analyze page SHALL process selected files with at most two requests in fligh
 - **WHEN** the final file completes with a result or an error
 - **THEN** the Analyzing card briefly shows a complete state pointing to Recent analyses and then disappears, leaving the upload form and Recent analyses
 
+#### Scenario: Some files failed
+- **WHEN** one or more files in the batch ended with an error
+- **THEN** after the complete state those files return to the upload queue and the form shows each failure as `filename: message`, so the recruiter can retry or remove them
+
 ### Requirement: Batch state survives navigation within the app
 The upload queue, the in-flight batch, the session's new-analysis markers, and the in-memory uploads SHALL live outside the analyze page so that leaving through the sidebar and returning while files are still processing shows the Analyzing card, its statuses, and the new markers again. A finished result MUST NOT be lost because the analyze page was unmounted while its request was pending.
 
@@ -60,6 +64,10 @@ The analyze page SHALL open a report only from a Recent analyses row, showing a 
 #### Scenario: Open a finished report during a batch
 - **WHEN** the recruiter opens a Recent analyses row while later files are still processing
 - **THEN** the single report opens at its analysis URL, and pressing browser Back shows the upload page with the Analyzing card still tracking the remaining files
+
+#### Scenario: Sidebar Analyze link while a report is open
+- **WHEN** the recruiter clicks the sidebar `Analyze` item while `/analyze?analysis={id}` is open
+- **THEN** the page re-syncs from the URL and closes the report without remounting the analyze page
 
 #### Scenario: Refresh an opened owner report
 - **WHEN** the owning recruiter refreshes `/analyze?analysis={analysis_id}` for a persisted analysis

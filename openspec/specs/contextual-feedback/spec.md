@@ -47,7 +47,7 @@ Analysis data is transient and recruiter-owned. Feedback is long-lived platform 
 Users holding an active `owner` or `reviewer` role SHALL see the `/feedback` inbox listing responses with filters for rating, reason, kind, triage status, source, version, operation, error code, and date range. They SHALL be able to set a triage status (`new`, `reviewing`, `planned`, `resolved`, `wont_fix`) with a team note of up to 500 characters (2 KiB request cap, same contact-data rule as comments) and delete a response. The API SHALL record the acting maintainer from the `X-Feedback-Maintainer` header that only the web proxy sets. Every `/internal/feedback*` API route SHALL require the web-to-API internal secret (`X-Internal-Admin-Secret`, compared in constant time) and SHALL respond 403 `internal_secret_required` without it, or 503 `internal_secret_unconfigured` when no secret is configured. The web proxy SHALL return the author's email only to `owner` role holders; `reviewer` role holders receive pseudonymous `actor_hash` values only. The inbox MUST NOT store the uploaded original, raw model output, raw exceptions, request bodies, or logs.
 
 #### Scenario: Triage without maintainer identity
-- **WHEN** a triage request reaches the API without `X-Feedback-Maintainer`
+- **WHEN** a triage request (`PUT /internal/feedback/{target_id}/{actor_hash}/triage`) or a response deletion (`DELETE /internal/feedback/{target_id}/{actor_hash}`) reaches the API without `X-Feedback-Maintainer`
 - **THEN** the API responds 400 `maintainer_required`
 
 #### Scenario: Inbox reached without the internal secret

@@ -110,7 +110,9 @@ ownership and research hardening remain separate concerns. Profile conversion is
   invariant. It does not introduce a masking pass into CV Analyzer.
 - `api/profile_builder_routes.py` and `api/profile_builder_store.py` own the
   separate API and owner-scoped profile tables in the existing database. Existing
-  profile/template/preferences rows from the old branch remain readable.
+  profile/template/preferences rows from the old branch remain readable; a
+  one-time startup migration (`profile_builder_storage_sanitized_v1` marker)
+  re-sanitizes stored rows.
 - The authenticated Next.js catch-all proxy derives the owner capability server
   side, bounds multipart/JSON bytes before parsing, and marks responses private
   and non-cacheable. Keep the FastAPI service private behind this proxy.

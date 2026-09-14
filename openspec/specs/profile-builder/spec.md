@@ -5,7 +5,7 @@ Ported from `origin/feature/profile-builder` at `5f4b934`. Analyzer contracts ar
 ## ADDED Requirements
 
 ### Requirement: Structured profile extraction
-The system SHALL accept a text-extractable PDF or DOCX of at most 5 pages (PDF page count is checked before any text extraction; over-limit uploads fail with 422 `document_page_limit_exceeded`) and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
+The system SHALL accept a text-extractable PDF or DOCX. A PDF SHALL have at most 5 pages (the page count is checked before any text extraction; over-limit uploads fail with 422 `document_page_limit_exceeded`); DOCX files have no page check and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
 
 #### Scenario: CV contains ordinary candidate data
 - **WHEN** HR uploads a supported CV to Profile Builder
@@ -28,6 +28,8 @@ The Profile Builder UI SHALL keep one canonical current profile. Editor controls
 
 ### Requirement: Reversible anonymization
 Anonymization SHALL be a deterministic output policy and SHALL NOT destructively mutate the canonical profile.
+
+Anonymization controls cover personal/contact fields, employer names, links, and education institutions (`institution_mode` `show` or `hide`; the default policy hides institutions).
 
 #### Scenario: Recruiter hides email and employer names
 - **WHEN** those anonymization controls are enabled
@@ -91,7 +93,7 @@ The Template Creator SHALL let HR visually assemble a template from supported do
 
 
 ### Requirement: Promptable AI Summary
-The Profile Builder SHALL allow HR to generate or regenerate the one canonical profile Summary using the current professional profile plus an optional recruiter instruction or pasted job description. Generation SHALL use the pinned GPT-5.6 Luna model with no reasoning and a small output limit, and SHALL NOT send personal/contact fields or the existing Summary as generation input.
+The Profile Builder SHALL allow HR to generate or regenerate the one canonical profile Summary using the current professional profile plus an optional recruiter instruction or pasted job description. Personal/contact data, the existing Summary, and organization custom fields are removed from the model input. When the automatic-summary preference is on and generation fails during extraction, the profile is returned without a summary and the failure is logged with a safe error code; extraction itself does not fail. Generation SHALL use the pinned GPT-5.6 Luna model with no reasoning and a small output limit, and SHALL NOT send personal/contact fields or the existing Summary as generation input.
 
 #### Scenario: Recruiter generates a role-focused summary
 - **WHEN** HR enters an optional instruction or job description and chooses Generate or Regenerate
@@ -176,7 +178,7 @@ AI Actions and Translation SHALL avoid unnecessary model work by using GPT-5.6 L
 - **THEN** the stable prompt prefix/cache key remains unchanged while the instruction is appended after that cached context
 
 ### Requirement: Defense-in-depth Profile Builder privacy
-The Profile Builder SHALL treat national-ID masking as an invariant across the whole structured-profile lifecycle rather than only an upload-time operation. Supported identifiers MUST NOT be persisted, returned from AI-generated text, sent in recruiter AI instructions, rendered into DOCX/PDF, or emitted in a download filename when introduced after extraction. Candidate/profile content supplied to AI SHALL be explicitly treated as untrusted data rather than model instructions.
+The Profile Builder SHALL treat national-ID masking as an invariant across the whole structured-profile lifecycle rather than only an upload-time operation. Supported identifiers MUST NOT be persisted, returned from AI-generated text, sent in recruiter AI instructions, rendered into DOCX/PDF, or emitted in a download filename when introduced after extraction. The export endpoints always answer with the fixed `candidate-profile.docx` / `candidate-profile.pdf` disposition; the preference-driven filename is composed in the browser from server-masked profile fields and the sanitized filename pattern. Candidate/profile content supplied to AI SHALL be explicitly treated as untrusted data rather than model instructions.
 
 #### Scenario: Recruiter manually enters a national identifier
 - **WHEN** a supported national identifier is typed into editable profile data after extraction
@@ -187,7 +189,7 @@ The Profile Builder SHALL treat national-ID masking as an invariant across the w
 - **THEN** those strings remain candidate data and the provider instruction explicitly tells the model not to follow embedded candidate instructions
 
 ### Requirement: Bounded Profile Builder uploads
-Each Profile Builder PDF/DOCX file SHALL be limited to 10 MiB before ingestion. The browser SHALL reject larger selections for immediate feedback, and the authenticated proxy/backend SHALL independently enforce the limit so clients cannot bypass it.
+Each Profile Builder PDF/DOCX file SHALL be limited to 10 MiB before ingestion. The browser SHALL reject larger selections for immediate feedback, and the authenticated proxy/backend SHALL independently enforce the limit so clients cannot bypass it. The proxy reads at most 10 MiB plus 128 KiB of multipart overhead for extraction and 4 MiB for JSON bodies.
 
 ### Requirement: Unified authenticated Profile Builder boundary
 Every Profile Builder API action SHALL require the authenticated user's derived Profile Builder access token at the FastAPI boundary, including extraction, Summary, AI Actions/Translation, exports, profiles, templates, preferences, and custom fields.
@@ -200,7 +202,7 @@ The browser SHALL preserve the latest canonical profile edit when the recruiter 
 - **THEN** the latest snapshot is persisted or the navigation is blocked when an explicit pre-navigation save fails; full browser unload warns while unsaved state exists
 
 ### Requirement: Authoritative default template preference
-The persisted per-user `default_template_id` SHALL be the only durable source for the template used by the next conversion. Browser local storage SHALL NOT maintain a competing selected-template value. Inaccessible stale defaults SHALL fall back to the built-in IDEGO template.
+The persisted per-user `default_template_id` SHALL be the only durable source for the template used by the next conversion. Browser local storage SHALL NOT maintain a competing selected-template value. When the stored default is inaccessible, reading preferences SHALL rewrite the stored `default_template_id` to `idego-default` and return that; `PUT` of preferences naming an unknown template is rejected with 400 `default_template_not_found`.
 
 
 ### Requirement: Accurate A4 export and preview

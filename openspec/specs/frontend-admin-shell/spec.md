@@ -34,8 +34,12 @@ The frontend SHALL support light/dark mode with early theme bootstrap to prevent
 - **THEN** the selected theme is preserved and applied on initial paint
 
 #### Scenario: No flash on load
-- **WHEN** the app first loads
-- **THEN** theme class is applied before visible paint to avoid flash of incorrect theme
+- **WHEN** the app loads with a `theme` cookie set by an earlier toggle
+- **THEN** the server applies the theme class before visible paint
+
+#### Scenario: First visit without a cookie
+- **WHEN** no `theme` cookie exists
+- **THEN** the client bootstrap applies the system preference after hydration, so a first visit MAY briefly paint the default theme
 
 ### Requirement: Admin shell layout baseline
 The frontend SHALL provide a reusable admin shell with sidebar, sticky header,

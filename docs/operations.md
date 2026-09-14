@@ -49,6 +49,35 @@ list, a persisted report, or a retention change.
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.
 
+## Environment variables
+
+`.env.example` lists every supported variable. The ones the API and web tier read at runtime:
+
+| Variable | Read by | Meaning |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | API | Required when `CV_VALIDATOR_AI_ENABLED` is true. |
+| `CV_VALIDATOR_AI_ENABLED` | API | Default `true`. `false` disables every model call (analysis strategy, research, Profile Builder AI); reports carry `ai_features_enabled: false` and the browser starts no research. |
+| `CV_VALIDATOR_UPLOAD_MAX_BYTES` | API | Analyze upload cap, default 20 MiB. The web proxy enforces the same 20 MB limit. |
+| `CV_VALIDATOR_ANALYSIS_CONCURRENCY` | API | Concurrent analyses, default 4, minimum 1. |
+| `CV_VALIDATOR_RETENTION_DAYS` | API | Initial retention window (1-3650, default 10); a value saved in Settings overrides it on later starts. |
+| `CV_VALIDATOR_MAINTENANCE_TIME_UTC` | API | Daily purge time, `HH:MM` UTC, default `03:00`. |
+| `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` | API | Reusable research cache lifetime, default 30. |
+| `CV_VALIDATOR_LINKEDIN_MAX_PROFILES`, `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` | API | LinkedIn discovery limits, defaults 3 (1-20) and 500. |
+| `CV_VALIDATOR_DB_PATH`, `CV_VALIDATOR_PRICING_PATH` | API | SQLite file and optional pricing override. |
+| `CV_VALIDATOR_REFERENCE_DATA_DIR`, `CV_VALIDATOR_LOCATION_*_PATH`, `CV_VALIDATOR_POSTAL_*_PATH`, `CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER` | API | GeoNames index locations; the last one (default `false`) makes startup fail when the resolver is missing. See `docs/reference-data/geonames.md`. |
+| `INTERNAL_API_SECRET` (API side: `CV_VALIDATOR_INTERNAL_API_SECRET`, falling back to `INTERNAL_API_SECRET`) | web, API | Shared secret the web proxy sends as `X-Internal-Admin-Secret` for `/internal/*` routes and the retention write. The web tier falls back to `BETTER_AUTH_SECRET` when unset. |
+| `CV_VALIDATOR_LEGACY_OWNER_SECRET` | API | Falls back to `BETTER_AUTH_SECRET`; used once to migrate pre-auth analysis ownership. |
+| `INTERNAL_API_URL` | web | Private API base URL, default `http://api:8000` in Compose. |
+| `BASE_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_DB_PATH` | web | Public origin, auth origin, session secret, auth SQLite path. |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `ALLOWED_EMAIL_DOMAINS` | web | Google sign-in and the verified-email domain allowlist. |
+| `LOCAL_DEV_AUTH_BYPASS` | web | `true` only for loopback development; preflight rejects anything but `false` in production. |
+| `WEB_PORT`, `API_DEV_PORT`, `COMPOSE_PROJECT_NAME`, `WEB_*`/`API_*`/`GEONAMES_INIT_*`/`FEEDBACK_INIT_*` cpu and memory limits | compose | Host port, dev-only API port (default 8001), project name, and per-service resource limits. |
+| `GEONAMES_SNAPSHOT_VERSION`, `GEONAMES_*_URL`, `REFERENCE_DATA_MODE` | geonames-init, Makefile | Snapshot pin and HTTPS download overrides; `operator` mode uses the offline overlay. |
+
+`OPENAI_MODEL` and `OPENAI_REQUEST_TIMEOUT_SECONDS` in `.env.example` are not read by any code; the model is pinned in `openai_config.py`.
+
+Readiness for scripts: `GET /api/health/readiness` on the web app mirrors the API `ready` flag (200 `ready`, 503 `degraded` or `unavailable`); `scripts/verify-stack.sh` polls it, and `ALLOW_DEGRADED=true` accepts a degraded stack.
+
 ## Contextual feedback rollout
 
 Feedback is decision-neutral and never edits a report, analysis output,
@@ -248,7 +277,7 @@ Do not replace it with world-writable permissions or expose the API.
 Custom database paths must stay within their respective `/app/data` mounts.
 
 The GeoNames version must match `config/geonames.lock` (`2026-08-21` for this
-snapshot); update old environment files that still use `2026-09-02`, or intentionally
+snapshot); update any environment file that pins a different version, or intentionally
 refresh both the approved data and lock together. The web host port remains 3000
 by default and the container still listens on 3000.
 
