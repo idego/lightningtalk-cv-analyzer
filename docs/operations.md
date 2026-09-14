@@ -39,7 +39,7 @@ backfilled on startup from each row's own timestamp plus the current window.
 Retention is enforced by a background maintenance loop, not only on request
 paths. The API purges expired analyses and Profile Builder profiles once at
 startup and then once a day at `CV_VALIDATOR_MAINTENANCE_TIME_UTC` (`HH:MM`,
-24-hour UTC, default `03:00`; the API refuses to start on any other format)
+24-hour UTC, default `18:00`; the API refuses to start on any other format)
 while running; each scheduled purge is followed by a SQLite `VACUUM` so freed
 pages leave the database file. All connections set
 `PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
@@ -66,7 +66,7 @@ research. It does not disable the selected base-analysis strategy.
 | `CV_VALIDATOR_ANALYSIS_CONCURRENCY` | API | Concurrent analyses, default 4, minimum 1. |
 | `CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS` | API | How long a SQLite connection waits for a lock held by a parallel writer before failing, default 10000 ms, minimum 1. |
 | `CV_VALIDATOR_RETENTION_DAYS` | API | Initial retention window (1-3650, default 10); a value saved in Settings overrides it on later starts. |
-| `CV_VALIDATOR_MAINTENANCE_TIME_UTC` | API | Daily purge time, `HH:MM` UTC, default `03:00`. |
+| `CV_VALIDATOR_MAINTENANCE_TIME_UTC` | API | Daily purge time, `HH:MM` UTC, default `18:00`. |
 | `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` | API | Reusable research cache lifetime, default 30. |
 | `CV_VALIDATOR_LINKEDIN_MAX_PROFILES`, `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` | API | LinkedIn discovery limits, defaults 3 (1-20) and 500. |
 | `CV_VALIDATOR_DB_PATH`, `CV_VALIDATOR_PRICING_PATH` | API | SQLite file and optional pricing override. |
