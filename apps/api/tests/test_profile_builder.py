@@ -1585,6 +1585,9 @@ def test_profile_builder_startup_sanitizes_legacy_profile_builder_rows(
                 "2026-08-31T00:00:00+00:00",
             ),
         )
+    # The store runs in WAL mode: closing the last connection checkpoints the
+    # log into the main file so the raw bytes below include these rows.
+    conn.close()
 
     raw_before = db_path.read_bytes()
     assert b"123-45-6789" in raw_before

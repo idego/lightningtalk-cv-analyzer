@@ -20,7 +20,12 @@
 - Bound simultaneous analyses with `CV_VALIDATOR_ANALYSIS_CONCURRENCY`
   (default 4, minimum 1). Extra `/analyze` requests wait for a free slot. The
   analyze page sends at most two files at once per batch, so one recruiter
-  never fills every slot. Do not scale with uvicorn `--workers`: cancellation,
+  never fills every slot. The API database runs in SQLite WAL mode with a
+  busy timeout (`CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS`, default 10 s) so
+  parallel analyses queue on the write lock instead of failing; expect
+  `cv_analyzer.db-wal` and `-shm` files next to the database on the volume,
+  and back them up together with it. The daily vacuum checkpoints and
+  truncates the WAL. Do not scale with uvicorn `--workers`: cancellation,
   research locks, telemetry, and the retention scheduler are per-process
   in-memory state.
 
@@ -59,6 +64,7 @@ research. It does not disable the selected base-analysis strategy.
 | `CV_VALIDATOR_AI_ENABLED` | API | Default `true`. `false` disables every model call (analysis strategy, research, Profile Builder AI); reports carry `ai_features_enabled: false` and the browser starts no research. |
 | `CV_VALIDATOR_UPLOAD_MAX_BYTES` | API | Analyze upload cap, default 20 MiB. The web proxy enforces the same 20 MB limit. |
 | `CV_VALIDATOR_ANALYSIS_CONCURRENCY` | API | Concurrent analyses, default 4, minimum 1. |
+| `CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS` | API | How long a SQLite connection waits for a lock held by a parallel writer before failing, default 10000 ms, minimum 1. |
 | `CV_VALIDATOR_RETENTION_DAYS` | API | Initial retention window (1-3650, default 10); a value saved in Settings overrides it on later starts. |
 | `CV_VALIDATOR_MAINTENANCE_TIME_UTC` | API | Daily purge time, `HH:MM` UTC, default `03:00`. |
 | `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` | API | Reusable research cache lifetime, default 30. |

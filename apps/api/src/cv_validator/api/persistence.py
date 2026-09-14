@@ -22,6 +22,8 @@ from cv_validator.research.versions import (
     LINKEDIN_DISCOVERY_VERSION,
 )
 from cv_validator.api.sqlite_support import (
+    checkpoint,
+    connect as sqlite_connect,
     ensure_expires_at_column,
     open_connection,
     retention_deadline,
@@ -57,10 +59,16 @@ class PersistenceStore:
             yield conn
 
     def vacuum(self) -> None:
-        """Rebuild the database file so freed pages of purged rows leave the file."""
-        conn = sqlite3.connect(self.config.db_path)
+        """Rebuild the database file so freed pages of purged rows leave the file.
+
+        VACUUM under WAL writes the rebuilt pages through the ``-wal`` file, so
+        the checkpoint afterwards moves them into the main file and truncates
+        the log; otherwise it would keep a copy of the database on the volume.
+        """
+        conn = sqlite_connect(self.config.db_path)
         try:
             conn.execute("VACUUM")
+            checkpoint(conn)
         except sqlite3.Error as exc:
             raise PersistenceError("database vacuum failed") from exc
         finally:
