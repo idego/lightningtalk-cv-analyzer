@@ -23,8 +23,8 @@ class _Clock:
 
 
 def _scheduled_moment() -> datetime:
-    """2026-09-12 03:00 UTC, the default daily run time on a fixed date."""
-    return datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    """2026-09-12 18:00 UTC, the default daily run time on a fixed date."""
+    return datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc)
 
 
 def _maintenance_at(now: datetime) -> RetentionMaintenance:
@@ -45,7 +45,7 @@ def test_cycle_purges_then_vacuums_every_tick() -> None:
     maintenance.run_cycle()
 
     assert calls == ["purge", "vacuum", "purge", "vacuum"]
-    assert maintenance.status()["last_vacuum_at"] == "2026-09-13T03:00:00+00:00"
+    assert maintenance.status()["last_vacuum_at"] == "2026-09-13T18:00:00+00:00"
 
 
 def test_startup_only_purges() -> None:
@@ -99,25 +99,25 @@ def test_vacuum_failure_is_recorded_without_stopping_purges() -> None:
     assert maintenance.status()["last_vacuum_at"] is None
 
 
-def test_next_run_is_today_at_three_utc_when_still_ahead() -> None:
+def test_next_run_is_today_at_eighteen_utc_when_still_ahead() -> None:
     maintenance = _maintenance_at(datetime(2026, 9, 12, 1, 30, tzinfo=timezone.utc))
 
-    assert maintenance.next_run() == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    assert maintenance.next_run() == datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc)
 
 
-def test_next_run_rolls_to_tomorrow_once_three_utc_has_passed() -> None:
-    exactly = _maintenance_at(datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc))
-    later = _maintenance_at(datetime(2026, 9, 12, 17, 45, tzinfo=timezone.utc))
+def test_next_run_rolls_to_tomorrow_once_eighteen_utc_has_passed() -> None:
+    exactly = _maintenance_at(datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc))
+    later = _maintenance_at(datetime(2026, 9, 12, 18, 45, tzinfo=timezone.utc))
 
-    assert exactly.next_run() == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
-    assert later.next_run() == datetime(2026, 9, 13, 3, 0, tzinfo=timezone.utc)
+    assert exactly.next_run() == datetime(2026, 9, 13, 18, 0, tzinfo=timezone.utc)
+    assert later.next_run() == datetime(2026, 9, 13, 18, 0, tzinfo=timezone.utc)
 
 
 def test_next_run_uses_utc_regardless_of_clock_timezone() -> None:
     warsaw = timezone(timedelta(hours=2))
     maintenance = _maintenance_at(datetime(2026, 9, 12, 4, 30, tzinfo=warsaw))  # 02:30 UTC
 
-    assert maintenance.next_run() == datetime(2026, 9, 12, 3, 0, tzinfo=timezone.utc)
+    assert maintenance.next_run() == datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc)
 
 
 def test_run_forever_fires_at_the_scheduled_time_and_stops() -> None:
@@ -159,8 +159,8 @@ def test_purge_records_raw_sqlite_errors_instead_of_raising() -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        (None, time(3, 0, tzinfo=timezone.utc)),
-        ("", time(3, 0, tzinfo=timezone.utc)),
+        (None, time(18, 0, tzinfo=timezone.utc)),
+        ("", time(18, 0, tzinfo=timezone.utc)),
         ("05:30", time(5, 30, tzinfo=timezone.utc)),
         (" 23:59 ", time(23, 59, tzinfo=timezone.utc)),
         ("00:00", time(0, 0, tzinfo=timezone.utc)),
@@ -194,7 +194,7 @@ def test_app_runs_startup_purge_through_maintenance_and_reports_status(tmp_path)
     assert status["ready"] is True
     assert status["startup_purge_failed"] is False
     assert status["last_purge_at"] is not None
-    assert status["run_at"] == "03:00 UTC"
+    assert status["run_at"] == "18:00 UTC"
     assert datetime.fromisoformat(status["next_run_at"]) > datetime.now(timezone.utc)
 
 
