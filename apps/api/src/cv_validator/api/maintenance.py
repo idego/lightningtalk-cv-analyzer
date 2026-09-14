@@ -20,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from cv_validator.errors import PersistenceError
 from cv_validator.operations import safe_log
 
-DAILY_RUN_AT = time(hour=3, minute=0, tzinfo=timezone.utc)
+DAILY_RUN_AT = time(hour=18, minute=0, tzinfo=timezone.utc)
 MAINTENANCE_TIME_ENV = "CV_VALIDATOR_MAINTENANCE_TIME_UTC"
 _HH_MM = re.compile(r"^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d)$")
 
