@@ -294,7 +294,7 @@ def create_app(
         run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
     )
     # Request-path purges (list, persist, retention change) also report their
-    # outcome, so a successful one clears a stale failure flag before 03:00.
+    # outcome, so a successful one clears a stale failure flag before 18:00 UTC.
     store.purge_listeners.append(maintenance.record_purge_outcome)
 
     @asynccontextmanager
