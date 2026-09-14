@@ -6,6 +6,7 @@ export type NavItem = {
   title: string;
   url: string;
   icon?: LucideIcon;
+  disabled?: boolean;
 };
 
 export type NavGroup = {
@@ -19,7 +20,7 @@ export function buildSidebarNav(showFeedback = false): NavGroup[] {
       title: "Analysis",
       items: [
         { title: "Analyze", url: "/analyze", icon: Search },
-        ...(PROFILE_BUILDER_ENABLED ? [{ title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen }] : []),
+        { title: "Profile Builder", url: "/profile-builder", icon: UserRoundPen, disabled: !PROFILE_BUILDER_ENABLED },
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         ...(showFeedback ? [{ title: "Feedback", url: "/feedback", icon: MessageSquareText }] : []),
         { title: "Settings", url: "/settings", icon: Settings },
