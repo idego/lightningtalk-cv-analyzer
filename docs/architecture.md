@@ -27,7 +27,7 @@ PDF or DOCX upload
 - A postal-looking token is not a candidate address until supported context
   accepts that relation.
 - Education research distinguishes supported institution existence, cited conflicts,
-  and insufficient evidence. Only a sourced institution conflict creates an attention
+  and insufficient evidence. Only a sourced institution conflict creates a "What to check"
   finding; missing research evidence remains a panel status. Older results without
   this assessment remain readable and need fresh research for a new verdict.
 - Company research lowers overstated aggregate confidence and drops empty or
@@ -37,12 +37,12 @@ PDF or DOCX upload
   compares high-confidence, unambiguous business bounds with accepted employment
   start dates using date intervals. Unclear continuity, missing evidence and
   ambiguous entities produce no flag. These comparisons are never cached publicly.
-- Company, education, and LinkedIn research receives only accepted subjects.
+- LinkedIn research receives only accepted subjects; company and education research also accept a supported organization or institution name from an ambiguous record, without its other fields.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.
 - The overview EU row classifies only the declared location. A phone prefix alone
-  leaves location unknown; a phone/location country difference is worth knowing,
-  not an attention finding.
+  leaves location unknown; a phone/location country difference is listed under "What to check"
+  as a consistency signal, not a judgment.
 - The system does not perform identity, honesty, residence, nationality, work
   eligibility, or automatic hiring verification.
 
@@ -61,6 +61,17 @@ documents fail explicitly; OCR is not attempted. OpenAI response storage is
 disabled. Upload bytes are processed in memory during analysis; after a report
 commits, the original PDF/DOCX is retained only for the analysis-retention
 window. Raw CV text, evidence, model output, and secrets must not enter logs.
+Analyses run in the request threadpool and are bounded, not serialized: a
+process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 4) caps
+how many run at once because of the two-core container, OpenAI rate limits,
+and the four model calls each analysis fans out to. The analyze page runs a
+batch with at most two files in flight, leaving slots for other recruiters.
+Cancel requests are not in-memory state: `POST /analyze/cancel` stores the
+(owner, client request id) pair in `analysis_cancel_requests` with a one-hour
+TTL, the running analysis consults that table before it starts and before it
+persists, stamps `analysis_runs.cancel_requested_at`, and deletes the request
+when it exits. Research locks, telemetry, and the retention scheduler remain
+per-process.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`
@@ -105,13 +116,21 @@ ownership and research hardening remain separate concerns. Profile conversion is
   invariant. It does not introduce a masking pass into CV Analyzer.
 - `api/profile_builder_routes.py` and `api/profile_builder_store.py` own the
   separate API and owner-scoped profile tables in the existing database. Existing
-  profile/template/preferences rows from the old branch remain readable.
+  profile/template/preferences rows from the old branch remain readable; a
+  one-time startup migration (`profile_builder_storage_sanitized_v1` marker)
+  re-sanitizes stored rows.
 - The authenticated Next.js catch-all proxy derives the owner capability server
   side, bounds multipart/JSON bytes before parsing, and marks responses private
   and non-cacheable. Keep the FastAPI service private behind this proxy.
 - Saved profiles include the exact template and visibility snapshot. Private
   templates remain owner scoped; explicitly shared templates and custom-field
   definitions retain the existing internal-organization scope.
+- Saved profiles carry an `expires_at` deadline from the shared retention window,
+  renewed on every edit, and are purged by the same maintenance loop as analyses.
+  Templates, preferences, and custom fields are not retention-purged.
+- The web tier gates the whole workflow behind `PROFILE_BUILDER_ENABLED` in
+  `apps/web/src/lib/feature-flags.js` (currently `false`): pages redirect to
+  `/analyze`, the proxy answers 404, and the sidebar entry is disabled.
 
 Profile Builder availability is independent of the per-browser switch for optional
 public-company/education/LinkedIn research. Missing PDF conversion does not make

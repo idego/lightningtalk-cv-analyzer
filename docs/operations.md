@@ -15,10 +15,74 @@
   network in production; `make dev` adds `docker-compose.dev.yml`, which
   publishes it on `127.0.0.1:8001` for Swagger only.
 - Persist and back up the API and authentication SQLite volumes.
-- Configure retention with `CV_VALIDATOR_RETENTION_DAYS`.
+- Configure retention with `CV_VALIDATOR_RETENTION_DAYS` (1-3650 days; the
+  API refuses to start outside that range).
+- Bound simultaneous analyses with `CV_VALIDATOR_ANALYSIS_CONCURRENCY`
+  (default 4, minimum 1). Extra `/analyze` requests wait for a free slot. The
+  analyze page sends at most two files at once per batch, so one recruiter
+  never fills every slot. The API database runs in SQLite WAL mode with a
+  busy timeout (`CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS`, default 10 s) so
+  parallel analyses queue on the write lock instead of failing; expect
+  `cv_analyzer.db-wal` and `-shm` files next to the database on the volume,
+  and back them up together with it. The daily vacuum checkpoints and
+  truncates the WAL. Do not scale with uvicorn `--workers`:
+  research locks, telemetry, and the retention scheduler are per-process
+  in-memory state.
+
+Every report, analysis run, and saved Profile Builder profile stores an
+`expires_at` deadline computed when the row is written (each profile edit
+renews it). Purge deletes rows whose stored deadline has passed, so changing
+the retention setting only affects rows written afterwards; existing rows
+keep their deadline. Databases created before the column existed are
+backfilled on startup from each row's own timestamp plus the current window.
+
+Retention is enforced by a background maintenance loop, not only on request
+paths. The API purges expired analyses and Profile Builder profiles once at
+startup and then once a day at `CV_VALIDATOR_MAINTENANCE_TIME_UTC` (`HH:MM`,
+24-hour UTC, default `03:00`; the API refuses to start on any other format)
+while running; each scheduled purge is followed by a SQLite `VACUUM` so freed
+pages leave the database file. All connections set
+`PRAGMA secure_delete` so deleted rows are zeroed rather than left in free
+pages. `GET /operations/status` exposes the loop state under
+`retention.maintenance`. A failed startup or scheduled purge sets the
+`retention_purge` capability on `GET /health` to not ready with reason
+`retention_purge_failed`, which also flips top-level `ready` to false so the
+Compose healthcheck marks the container unhealthy. The flag clears on the
+next successful analysis purge from any path: the scheduled run, a history
+list, a persisted report, or a retention change.
 
 The browser setting controls optional public company, education, and LinkedIn
 research. It does not disable the selected base-analysis strategy.
+
+## Environment variables
+
+`.env.example` lists every supported variable. The ones the API and web tier read at runtime:
+
+| Variable | Read by | Meaning |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | API | Required when `CV_VALIDATOR_AI_ENABLED` is true. |
+| `CV_VALIDATOR_AI_ENABLED` | API | Default `true`. `false` disables every model call (analysis strategy, research, Profile Builder AI); reports carry `ai_features_enabled: false` and the browser starts no research. |
+| `CV_VALIDATOR_UPLOAD_MAX_BYTES` | API | Analyze upload cap, default 20 MiB. The web proxy enforces the same 20 MB limit. |
+| `CV_VALIDATOR_ANALYSIS_CONCURRENCY` | API | Concurrent analyses, default 4, minimum 1. |
+| `CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS` | API | How long a SQLite connection waits for a lock held by a parallel writer before failing, default 10000 ms, minimum 1. |
+| `CV_VALIDATOR_RETENTION_DAYS` | API | Initial retention window (1-3650, default 10); a value saved in Settings overrides it on later starts. |
+| `CV_VALIDATOR_MAINTENANCE_TIME_UTC` | API | Daily purge time, `HH:MM` UTC, default `03:00`. |
+| `CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` | API | Reusable research cache lifetime, default 30. |
+| `CV_VALIDATOR_LINKEDIN_MAX_PROFILES`, `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD` | API | LinkedIn discovery limits, defaults 3 (1-20) and 500. |
+| `CV_VALIDATOR_DB_PATH`, `CV_VALIDATOR_PRICING_PATH` | API | SQLite file and optional pricing override. |
+| `CV_VALIDATOR_REFERENCE_DATA_DIR`, `CV_VALIDATOR_LOCATION_*_PATH`, `CV_VALIDATOR_POSTAL_*_PATH`, `CV_VALIDATOR_REQUIRE_LOCATION_RESOLVER` | API | GeoNames index locations; the last one (default `false`) makes startup fail when the resolver is missing. See `docs/reference-data/geonames.md`. |
+| `INTERNAL_API_SECRET` (API side: `CV_VALIDATOR_INTERNAL_API_SECRET`, falling back to `INTERNAL_API_SECRET`) | web, API | Shared secret the web proxy sends as `X-Internal-Admin-Secret` for `/internal/*` routes and the retention write. The web tier falls back to `BETTER_AUTH_SECRET` when unset. |
+| `CV_VALIDATOR_LEGACY_OWNER_SECRET` | API | Falls back to `BETTER_AUTH_SECRET`; used once to migrate pre-auth analysis ownership. |
+| `INTERNAL_API_URL` | web | Private API base URL, default `http://api:8000` in Compose. |
+| `BASE_URL`, `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_DB_PATH` | web | Public origin, auth origin, session secret, auth SQLite path. |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `ALLOWED_EMAIL_DOMAINS` | web | Google sign-in and the verified-email domain allowlist. |
+| `LOCAL_DEV_AUTH_BYPASS` | web | `true` only for loopback development; preflight rejects anything but `false` in production. |
+| `WEB_PORT`, `API_DEV_PORT`, `COMPOSE_PROJECT_NAME`, `WEB_*`/`API_*`/`GEONAMES_INIT_*`/`FEEDBACK_INIT_*` cpu and memory limits | compose | Host port, dev-only API port (default 8001), project name, and per-service resource limits. |
+| `GEONAMES_SNAPSHOT_VERSION`, `GEONAMES_*_URL`, `REFERENCE_DATA_MODE` | geonames-init, Makefile | Snapshot pin and HTTPS download overrides; `operator` mode uses the offline overlay. |
+
+`OPENAI_MODEL` and `OPENAI_REQUEST_TIMEOUT_SECONDS` in `.env.example` are not read by any code; the model is pinned in `openai_config.py`.
+
+Readiness for scripts: `GET /api/health/readiness` on the web app mirrors the API `ready` flag (200 `ready`, 503 `degraded` or `unavailable`); `scripts/verify-stack.sh` polls it, and `ALLOW_DEGRADED=true` accepts a degraded stack.
 
 ## Contextual feedback rollout
 
@@ -36,7 +100,10 @@ retain the signed-in author's email and a snapshot of the displayed CV/report
 section (label up to 200 characters, text up to 12000 characters, and the
 report JSON up to 400000 serialized characters) so the inbox can re-render the
 referenced report section with the same components as the analysis view, even
-after the analysis itself is gone. Comments are 12 to 180 characters; team
+after the analysis itself is gone. Each inbox item carries
+`analysis_available`; when the analysis was deleted and neither a report
+snapshot nor a CV excerpt exists, the inbox shows the section name in place of
+the report section. Comments are 12 to 300 characters; team
 notes are limited to 500 characters; contact details and URLs are rejected from
 both. The web proxy caps a feedback write at 512 KiB and a triage note at 2
 KiB. The inbox never stores the uploaded original, raw model output, raw
@@ -159,7 +226,7 @@ old pilot reports. Never delete an existing database implicitly.
 
 ## Profile Builder runtime
 
-Rebuild the API image when enabling the restored Profile Builder; it installs
+The web tier ships with Profile Builder switched off (`PROFILE_BUILDER_ENABLED = false` in `apps/web/src/lib/feature-flags.js`); the API routes remain deployed and profile rows are still retention-purged. Rebuild the web image after flipping the flag. Rebuild the API image when enabling the restored Profile Builder; it installs
 `libreoffice-writer` and `fonts-liberation`. Non-container installs need a `soffice`
 or `libreoffice` executable on PATH for PDF output. Conversion uses a fresh
 LibreOffice user directory per request and a 30-second timeout. No external
@@ -176,8 +243,8 @@ copied into `public/pdfjs` during `pnpm dev` / `pnpm build`; generated vendor fi
 are not committed. Include `public` when distributing standalone builds, as the
 existing Docker build already does. No CDN receives profile data.
 
-Profile retention follows the existing configured retention period, using the
-profile's last-updated timestamp. Deleting an analysis does not delete a separately
+Profile retention follows the existing configured retention period through a
+stored `expires_at` deadline that every save renews. Deleting an analysis does not delete a separately
 saved editable profile. Back up the existing API database to include profiles,
 templates, custom fields, and preferences. No new database service is required.
 
@@ -216,7 +283,7 @@ Do not replace it with world-writable permissions or expose the API.
 Custom database paths must stay within their respective `/app/data` mounts.
 
 The GeoNames version must match `config/geonames.lock` (`2026-08-21` for this
-snapshot); update old environment files that still use `2026-09-02`, or intentionally
+snapshot); update any environment file that pins a different version, or intentionally
 refresh both the approved data and lock together. The web host port remains 3000
 by default and the container still listens on 3000.
 

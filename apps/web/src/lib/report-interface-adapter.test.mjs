@@ -89,8 +89,15 @@ function report() {
     },
     mechanical: {
       phones: [{ value: "+48 123 456 789", country_code: "PL", evidence: field("+48 123 456 789").evidence }],
-      emails: [],
-      literal_links: [],
+      emails: [{ value: "alex@example.com", evidence: field("alex@example.com").evidence }],
+      literal_links: [
+        { value: "linkedin.com/in/alex", normalized_url: "https://linkedin.com/in/alex", known_host: "linkedin", evidence: field("linkedin.com/in/alex").evidence },
+        { value: "https://www.github.com/alex/", normalized_url: "https://www.github.com/alex/", known_host: "github", evidence: field("https://www.github.com/alex/").evidence },
+        { value: "www.alex.dev", normalized_url: "https://www.alex.dev", known_host: "personal", evidence: field("www.alex.dev").evidence },
+        { value: "https://www.github.com/alex/", normalized_url: "https://www.github.com/alex/", known_host: "github", evidence: field("https://www.github.com/alex/").evidence },
+        { value: "github.com/alex/project", normalized_url: "https://github.com/alex/project", known_host: "github", section: "employment", evidence: field("github.com/alex/project").evidence },
+        { value: "https://credly.com/badges/1", normalized_url: "https://credly.com/badges/1", known_host: "personal", section: "certification", evidence: field("https://credly.com/badges/1").evidence },
+      ],
       postal_candidates: [],
       accepted_postal_addresses: [{ value: "00-001", possible_country_codes: ["PL"] }],
       email_findings: [
@@ -116,11 +123,10 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.attention.length, 1);
-  assert.equal(presentation.worthKnowing.length, 2);
-  assert.equal(presentation.attention[0].evidence[0].source_id, "block-1");
+  assert.equal(presentation.whatToCheck.length, 3);
+  assert.equal(presentation.whatToCheck[0].evidence[0].source_id, "block-1");
   assert.equal(
-    [...presentation.attention, ...presentation.worthKnowing]
+    presentation.whatToCheck
       .every((item) => item.evidence.length > 0),
     true,
   );
@@ -133,12 +139,17 @@ test("CV overview includes accepted and annotated records and intentionally omit
 
   assert.equal(overview.candidateName, "Alex Example");
   assert.equal(overview.phoneCountry, "PL");
+  assert.equal(overview.email, "alex@example.com");
+  assert.deepEqual(overview.links, [
+    { kind: "linkedin", value: "linkedin.com/in/alex", url: "https://linkedin.com/in/alex" },
+    { kind: "github", value: "github.com/alex", url: "https://www.github.com/alex/" },
+    { kind: "personal", value: "alex.dev", url: "https://www.alex.dev" },
+  ]);
   assert.equal(overview.education[0].value, "Example University");
   assert.equal(overview.employment[0].value, "Engineer");
   assert.equal(overview.employment[0].detail, "2020 – 2024 · Example Systems · Warsaw");
-  assert.equal(overview.employment.length, 1);
-  assert.equal(overview.attentionRecords[0].value, "MongoDB");
-  assert.equal(overview.attentionRecords[0].needsReview, true);
+  assert.equal(overview.employment.length, 2);
+  assert.equal(overview.employment[1].value, "MongoDB");
   assert.equal(Object.hasOwn(overview, "skills"), false);
 });
 
@@ -161,17 +172,17 @@ test("CV overview renders certificates, including certificate-only education rec
   assert.equal(overview.certifications[0].value, "Azure Fundamentals");
 });
 
-test("CV overview renders when optional review annotations are absent", () => {
+test("CV overview ignores review annotations", () => {
   const value = report();
   delete value.base_analysis.review.annotations;
 
   const overview = adaptReportInterface(value, "en").overview;
 
   assert.equal(overview.employment.length, 2);
-  assert.equal(overview.attentionRecords.length, 0);
+  assert.equal(Object.hasOwn(overview, "attentionRecords"), false);
 });
 
-test("completed LinkedIn not-found result becomes one cautious checklist finding", () => {
+test("completed LinkedIn not-found result stays out of the checklist", () => {
   const value = report();
   value.linkedin_discovery = {
     status: "completed",
@@ -184,11 +195,19 @@ test("completed LinkedIn not-found result becomes one cautious checklist finding
   };
 
   const presentation = adaptReportInterface(value, "en");
-  const linkedin = presentation.attention.find((item) => item.id === "linkedin-not-found");
 
-  assert.match(linkedin.whatWeFound, /limited search/i);
-  assert.match(linkedin.whyItMatters, /does not mean.*does not exist/i);
-  assert.equal(linkedin.evidence[0].excerpt, "Alex Example");
+  assert.equal(presentation.whatToCheck.find((item) => item.id === "linkedin-not-found"), undefined);
+});
+
+test("ambiguous records become What to check findings without overview labels", () => {
+  const presentation = adaptReportInterface(report(), "en");
+  const finding = presentation.whatToCheck.find((item) => item.id === "record-employment-ambiguous");
+
+  assert.match(finding.whatWeFound, /could not be fully confirmed: MongoDB/);
+  assert.match(finding.whyItMatters, /may not belong together/);
+  assert.equal(finding.evidence[0].excerpt, "MongoDB");
+  assert.equal(presentation.whatToCheck.some((item) => item.id === "record-employment-1"), false);
+  assert.equal(presentation.overview.employment.some((item) => "needsReview" in item), false);
 });
 
 test("outside-EU status is neutral overview information, not a finding", () => {
@@ -212,8 +231,7 @@ test("outside-EU status is neutral overview information, not a finding", () => {
 
   const presentation = adaptReportInterface(value, "en");
   assert.equal(presentation.overview.euStatus, "outside");
-  assert.equal(presentation.attention.some((item) => item.id === "outside-eu"), false);
-  assert.equal(presentation.worthKnowing.some((item) => item.id === "outside-eu"), false);
+  assert.equal(presentation.whatToCheck.some((item) => item.id === "outside-eu"), false);
 
   value.mechanical.eu_status.sources[0].country_code = "PL";
   value.mechanical.eu_status.inside_eu = ["PL"];
@@ -227,7 +245,7 @@ test("outside-EU status is neutral overview information, not a finding", () => {
   assert.equal(adaptReportInterface(value, "en").overview.euStatus, "unknown");
 });
 
-test("GeoNames and postal outcomes use evidence and cautious status-specific copy", () => {
+test("location outcomes use evidence and cautious status-specific copy", () => {
   const value = report();
   value.mechanical.location_resolution = [{
     subject: "declared_location",
@@ -249,18 +267,14 @@ test("GeoNames and postal outcomes use evidence and cautious status-specific cop
 
   const presentation = adaptReportInterface(value, "en");
 
-  assert.match(presentation.attention.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
-  assert.equal(presentation.overview.postalConsistency, null);
-  assert.equal(presentation.worthKnowing.some((item) => item.id.startsWith("postal-")), false);
-
-  value.mechanical.accepted_postal_addresses[0].validation.status = "resolved";
-  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "consistent");
-  value.mechanical.accepted_postal_addresses[0].validation.status = "mismatch";
-  assert.equal(adaptReportInterface(value, "en").overview.postalConsistency, "mismatch");
+  assert.match(presentation.whatToCheck.find((item) => item.id.startsWith("location-")).whatWeFound, /different countries/i);
+  assert.equal(presentation.whatToCheck.some((item) => item.id.startsWith("postal-")), false);
+  assert.equal(presentation.whatToCheck.some((item) => item.id.startsWith("email-")), false);
+  assert.doesNotMatch(JSON.stringify(presentation), /GeoNames/);
 
   value.mechanical.location_resolution[0].status = "unresolved";
   value.mechanical.location_resolution[0].city_country_relationship = "unresolved";
-  const unresolved = adaptReportInterface(value, "en").worthKnowing.find((item) => item.id.startsWith("location-"));
-  assert.match(unresolved.whatWeFound, /not confirmed in the limited GeoNames index/i);
+  const unresolved = adaptReportInterface(value, "en").whatToCheck.find((item) => item.id.startsWith("location-"));
+  assert.match(unresolved.whatWeFound, /not confirmed in the limited location index/i);
   assert.doesNotMatch(unresolved.whatWeFound, /does not exist/i);
 });

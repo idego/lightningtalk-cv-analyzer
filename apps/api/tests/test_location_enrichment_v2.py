@@ -108,7 +108,7 @@ def test_city_country_mismatch_and_ambiguous_and_unresolved_are_explicit():
         mechanical(), profile("Berlin, Poland"), resolver()
     )["location_resolution"][0]
     ambiguous = _enrich_mechanical(
-        mechanical(), profile("Paris, United States"), resolver()
+        mechanical(), profile("Paris"), resolver()
     )["location_resolution"][0]
     unresolved = _enrich_mechanical(
         mechanical(), profile("Atlantis, Poland"), resolver()
@@ -117,9 +117,44 @@ def test_city_country_mismatch_and_ambiguous_and_unresolved_are_explicit():
     assert mismatch["status"] == "resolved"
     assert mismatch["city_country_relationship"] == "different"
     assert ambiguous["status"] == "ambiguous"
-    assert ambiguous["city_country_relationship"] == "ambiguous"
+    assert ambiguous["candidate_country_codes"] == ["FR", "US"]
+    assert ambiguous["city_country_relationship"] == "not_applicable"
     assert unresolved["status"] == "unresolved"
     assert unresolved["city_country_relationship"] == "unresolved"
+
+
+def test_declared_country_narrows_city_homonyms_to_one_resolution():
+    result = _enrich_mechanical(
+        mechanical(), profile("Paris, United States"), resolver()
+    )
+    item = result["location_resolution"][0]
+
+    assert item["status"] == "resolved"
+    assert item["canonical_name"] == "Paris"
+    assert item["city_country_code"] == "US"
+    assert item["country_code"] == "US"
+    assert item["city_country_relationship"] == "same"
+    assert item["narrowed_by"] == "declared_country"
+    assert "candidate_country_codes" not in item
+    assert result["eu_status"]["countries"] == ["US"]
+
+
+def test_declared_country_keeps_ambiguity_when_several_homonyms_share_it():
+    two_in_us = InMemoryLocationResolver(
+        records=(
+            location("city:paris-us-tx", "Paris", "US", ResolutionLevel.LOCALITY),
+            location("city:paris-us-tn", "Paris", "US", ResolutionLevel.LOCALITY),
+            location("country:usa", "United States", "US", ResolutionLevel.COUNTRY),
+        ),
+        reference_data_version=VERSION,
+    )
+    item = _enrich_mechanical(
+        mechanical(), profile("Paris, United States"), two_in_us
+    )["location_resolution"][0]
+
+    assert item["status"] == "ambiguous"
+    assert item["city_country_relationship"] == "ambiguous"
+    assert "canonical_name" not in item
 
 
 def test_postal_validation_is_unavailable_without_index_and_rejects_loose_number():

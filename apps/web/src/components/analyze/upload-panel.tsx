@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
 import { Check, CircleAlert, Clock3, LoaderCircle, X } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AnalysisHistoryItem, AnalysisReport, AnalyzeItemResult, DocumentSource } from "@/lib/analyze-types";
@@ -11,10 +12,12 @@ import { AnalysisWorkspace, type AnalyzedFile } from "@/components/analyze/analy
 import { RecentAnalyses } from "@/components/analyze/recent-analyses";
 import { useCopy } from "@/lib/app-settings";
 import { getAutoResearchOrchestrator } from "@/lib/auto-research";
-import { type BatchProgress, deriveBatchStatuses, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
+import { type BatchProgress, deriveBatchStatuses, finishedCount, getBatchSessionStore, isSupportedCvFilename, resolveDocumentSource } from "@/lib/batch-progress";
 import { parseAnalysisRoute, relativeHref, withAnalysisRoute, withoutAnalysisRoute } from "@/lib/analysis-route";
 
 const ESTIMATED_SECONDS_PER_CV = 35;
+// Files in flight per batch. Kept below the API's analysis slots so one recruiter never blocks the others.
+const BATCH_CONCURRENCY = 2;
 const COMPLETE_CARD_MS = 1200;
 const CANCELLED_STATUS = 409;
 
@@ -35,12 +38,15 @@ function reportResult(filename: string, report: AnalysisReport): AnalyzeItemResu
 function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchProgress; elapsedSeconds: number; onCancel: () => void }) {
   const { t } = useCopy();
   const complete = batch.phase === "complete";
-  const currentIndex = batch.results.length;
+  const finished = finishedCount(batch.results);
+  const current = Math.min(finished + 1, batch.filenames.length);
+  const activeNames = batch.active.map((index) => batch.filenames[index]).join(" · ");
   const statuses = deriveBatchStatuses(batch);
   const total = batch.filenames.length;
-  const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
+  const estimatedTotal = Math.ceil(total / BATCH_CONCURRENCY) * ESTIMATED_SECONDS_PER_CV;
+  const withinEstimate = elapsedSeconds < estimatedTotal;
   return <Card aria-live="polite" className="analysis-flow-enter mx-auto max-w-3xl"><CardContent className="py-8">
-    <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current: currentIndex + 1, total })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current: currentIndex + 1, total })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("batchResultsInHistory") : batch.filenames[currentIndex]}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {estimatedRemaining > 0 ? t("estimatedRemaining", { time: formatElapsed(estimatedRemaining) }) : t("takingLonger")}</div> : null}</div>
+    <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">{complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={t("analyzing", { current, total })} />}<div><h2 className="text-lg font-semibold">{complete ? t("analysisComplete") : t("analyzing", { current, total })}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? t("batchResultsInHistory") : activeNames}</p></div>{!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />{t("elapsed", { time: formatElapsed(elapsedSeconds) })} · {withinEstimate ? t("estimatedRemaining", { time: formatElapsed(estimatedTotal) }) : t("takingLonger")}</div> : null}</div>
     <ol className="mt-4 divide-y rounded-lg border px-3">{batch.filenames.map((name, index) => {
       const status = statuses[index];
       const result = batch.results[index];
@@ -53,6 +59,7 @@ function AnalysisProgress({ batch, elapsedSeconds, onCancel }: { batch: BatchPro
 
 export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: string | null }) {
   const { settings, t } = useCopy();
+  const routedAnalysisId = useSearchParams().get("analysis");
   const store = getBatchSessionStore();
   const { queue: files, batch, sessionIds, sessionFiles } = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [historyQuery, setHistoryQuery] = useState("");
@@ -64,6 +71,11 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const routeRequest = useRef(0);
   const openedFromHistoryPush = useRef(false);
+  const openedAnalysisId = useRef<string | null>(null);
+  const openedId = opened && "report" in opened.result ? opened.result.report.analysis_id : null;
+  useEffect(() => {
+    openedAnalysisId.current = openedId;
+  }, [openedId]);
   const running = batch?.phase === "running";
   const startedAt = batch?.startedAt;
   const historyVersion = sessionIds.size;
@@ -129,12 +141,14 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
         setRouteLoading(false);
         return;
       }
+      if (analysisId === openedAnalysisId.current) return;
       void openRoutedAnalysis(analysisId, shareToken);
     }
     syncFromLocation();
     window.addEventListener("popstate", syncFromLocation);
     return () => window.removeEventListener("popstate", syncFromLocation);
-  }, [openRoutedAnalysis]);
+    // Re-sync on client-side navigations (e.g. the sidebar "Analyze" link) that change the query without a popstate.
+  }, [openRoutedAnalysis, routedAnalysisId]);
 
   const acceptedFiles = useMemo(() => files.filter((file) => isSupportedCvFilename(file.name)), [files]);
   const unsupportedFiles = useMemo(() => files.filter((file) => !isSupportedCvFilename(file.name)), [files]);
@@ -143,10 +157,11 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     if (detail === "document_text_layer_unavailable") return t("cvNeedsTextLayer");
     if (detail === "document_conversion_failed") return t("cvCouldNotRead");
     if (detail === "upload_size_limit_exceeded") return t("cvTooLarge");
+    if (detail === "document_page_limit_exceeded") return t("cvTooManyPages");
     if (detail === "empty_upload") return t("cvEmptyFile");
     if (detail === "unsupported_file_type") return t("cvUnsupportedType");
     if (detail === "analysis_strategy_unavailable") return t("analysisTemporarilyUnavailable");
-    if (detail === "upload_read_error") return t("uploadCouldNotRead");
+    if (detail === "upload_read_error" || detail === "invalid_upload") return t("uploadCouldNotRead");
     return t("analysisFailed");
   }
 
@@ -165,23 +180,29 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
     setError(null); setNotice(null); if (!acceptedFiles.length) { setError(t("addFile")); return; }
     if (running) return;
     const queue = acceptedFiles;
-    const failedFiles: File[] = [];
-    const failureMessages: string[] = [];
+    const failures: (string | null)[] = queue.map(() => null);
     setElapsedSeconds(0);
     const token = store.start(queue);
-    for (const file of queue) {
-      const requestId = crypto.randomUUID();
-      store.beginFile(token, file, requestId);
-      let result: AnalyzeItemResult;
-      try { result = await analyzeFile(file, requestId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
-      if (result.status === "error") {
-        failedFiles.push(file);
-        failureMessages.push(`${file.name}: ${result.error}`);
-      } else {
-        void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+    let next = 0;
+    let cancelled = false;
+    // A small worker pool: each worker takes the next file in selection order.
+    async function worker() {
+      while (!cancelled && next < queue.length) {
+        const index = next++;
+        const file = queue[index];
+        const requestId = crypto.randomUUID();
+        store.beginFile(token, index, requestId);
+        let result: AnalyzeItemResult;
+        try { result = await analyzeFile(file, requestId); } catch (cause) { result = { filename: file.name, status: "error", error: cause instanceof Error ? cause.message : t("unexpectedAnalysisError") }; }
+        if (result.status === "error") failures[index] = result.error;
+        else void getAutoResearchOrchestrator()?.schedule(result.report, settings);
+        if (!store.record(result, file, token, index)) cancelled = true;
       }
-      if (!store.record(result, file, token)) return;
     }
+    await Promise.all(Array.from({ length: Math.min(BATCH_CONCURRENCY, queue.length) }, worker));
+    if (cancelled) return;
+    const failedFiles = queue.filter((_, index) => failures[index] !== null);
+    const failureMessages = queue.flatMap((file, index) => (failures[index] ? [`${file.name}: ${failures[index]}`] : []));
     store.complete();
     await new Promise((resolve) => window.setTimeout(resolve, COMPLETE_CARD_MS));
     store.clearBatch();
@@ -193,10 +214,10 @@ export function UploadPanel({ initialAnalysisId = null }: { initialAnalysisId?: 
 
   function reset() { if (running) return; store.clearQueue(); setError(null); setNotice(null); }
   function cancel() {
-    const { requestId } = store.cancel();
+    const { requestIds } = store.cancel();
     setElapsedSeconds(0);
     setNotice(t("analysisCancelled"));
-    if (requestId) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
+    for (const requestId of requestIds) void fetch("/api/analyze/cancel", { method: "POST", headers: { "X-Analysis-Request-Id": requestId } }).catch(() => undefined);
   }
   function openHistorical(item: AnalysisHistoryItem, report: AnalysisReport) {
     routeRequest.current += 1;

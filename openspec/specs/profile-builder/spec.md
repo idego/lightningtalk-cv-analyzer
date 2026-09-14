@@ -5,7 +5,7 @@ Ported from `origin/feature/profile-builder` at `5f4b934`. Analyzer contracts ar
 ## ADDED Requirements
 
 ### Requirement: Structured profile extraction
-The system SHALL accept a text-extractable PDF or DOCX and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
+The system SHALL accept a text-extractable PDF or DOCX. A PDF SHALL have at most 5 pages (the page count is checked before any text extraction; over-limit uploads fail with 422 `document_page_limit_exceeded`); DOCX files have no page check and produce a versioned `CandidateProfile` containing available personal/contact data, headline/summary, skills, technologies, experience, education, languages, certifications, and additional sections. Unknown facts SHALL remain null or empty and extraction MUST NOT anonymize the canonical profile.
 
 #### Scenario: CV contains ordinary candidate data
 - **WHEN** HR uploads a supported CV to Profile Builder
@@ -29,6 +29,8 @@ The Profile Builder UI SHALL keep one canonical current profile. Editor controls
 ### Requirement: Reversible anonymization
 Anonymization SHALL be a deterministic output policy and SHALL NOT destructively mutate the canonical profile.
 
+Anonymization controls cover personal/contact fields, employer names, links, and education institutions (`institution_mode` `show` or `hide`; the default policy hides institutions).
+
 #### Scenario: Recruiter hides email and employer names
 - **WHEN** those anonymization controls are enabled
 - **THEN** preview and DOCX omit those values while the editor still retains them
@@ -41,15 +43,19 @@ The system SHALL generate an IDEGO-style DOCX from the explicit current profile 
 - **THEN** Word/LibreOffice can edit its text and the exported values match the submitted current snapshot
 
 ### Requirement: Additive authenticated web workflow
-Profile Builder SHALL be available as `/profile-builder` inside the existing authenticated application shell and SHALL NOT change Analyze behavior.
+Profile Builder SHALL be available as `/profile-builder` inside the existing authenticated application shell and SHALL NOT change Analyze behavior. Its availability is governed by the web build-time flag `PROFILE_BUILDER_ENABLED` in `apps/web/src/lib/feature-flags.js`. While the flag is off, the sidebar SHALL show the Profile Builder item as an inert, dimmed entry; `/profile-builder`, `/profiles`, and template pages SHALL redirect to `/analyze`; the Settings page SHALL hide the Profile Builder section; and the `/api/profile-builder/*` proxy SHALL answer 404. The API routes remain deployed.
 
-#### Scenario: Authenticated recruiter opens the app
-- **WHEN** navigation is rendered
-- **THEN** Analyze, Profile Builder, and Settings are available as separate destinations
+#### Scenario: Authenticated recruiter opens the app with the flag on
+- **WHEN** navigation is rendered and `PROFILE_BUILDER_ENABLED` is true
+- **THEN** Analyze, Profile Builder, Dashboard, and Settings are available as separate destinations
+
+#### Scenario: Flag is off
+- **WHEN** `PROFILE_BUILDER_ENABLED` is false
+- **THEN** the sidebar entry is disabled, Profile Builder pages redirect to `/analyze`, and the web proxy returns 404
 
 
 ### Requirement: Recent candidate profiles
-The system SHALL persist authenticated owner-scoped Profile Builder snapshots containing the current canonical profile, anonymization policy, selected template snapshot, source filename, and timestamps. It MUST NOT persist the original uploaded CV bytes for this workflow.
+The system SHALL persist authenticated owner-scoped Profile Builder snapshots containing the current canonical profile, anonymization policy, selected template snapshot, source filename, timestamps, and an `expires_at` deadline derived from the shared analysis retention window. Each profile update renews the deadline. Expired profiles are purged by the shared retention maintenance loop and on Profile Builder request paths; templates, preferences, and custom fields are not retention-purged. It MUST NOT persist the original uploaded CV bytes for this workflow.
 
 #### Scenario: Profile extraction succeeds
 - **WHEN** an authenticated recruiter extracts a supported CV
@@ -87,7 +93,7 @@ The Template Creator SHALL let HR visually assemble a template from supported do
 
 
 ### Requirement: Promptable AI Summary
-The Profile Builder SHALL allow HR to generate or regenerate the one canonical profile Summary using the current professional profile plus an optional recruiter instruction or pasted job description. Generation SHALL use the pinned GPT-5.6 Luna model with no reasoning and a small output limit, and SHALL NOT send personal/contact fields or the existing Summary as generation input.
+The Profile Builder SHALL allow HR to generate or regenerate the one canonical profile Summary using the current professional profile plus an optional recruiter instruction or pasted job description. Personal/contact data, the existing Summary, and organization custom fields are removed from the model input. When the automatic-summary preference is on and generation fails during extraction, the profile is returned without a summary and the failure is logged with a safe error code; extraction itself does not fail. Generation SHALL use the pinned GPT-5.6 Luna model with no reasoning and a small output limit, and SHALL NOT send personal/contact fields or the existing Summary as generation input.
 
 #### Scenario: Recruiter generates a role-focused summary
 - **WHEN** HR enters an optional instruction or job description and chooses Generate or Regenerate
@@ -132,16 +138,32 @@ The system SHALL let HR run a prompt against selected professional profile secti
 Each authenticated user SHALL have persisted Profile Builder conversion preferences covering default anonymization, optional automatic Summary generation and prompt, safe technology aggregation, date-format normalization, default template, and output filename convention.
 
 ### Requirement: Controlled template sharing
-Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible and editable inside the internal organization. Saving a new template MUST NOT share it by default.
+Custom templates SHALL be explicitly Private or Shared. Private templates are owner-scoped. Shared templates are visible, editable, and deletable by any authenticated user inside the internal organization; the built-in IDEGO Default is always Shared, any user's save overwrites it for everyone, and deleting it resets it to the built-in definition. Saving a private template as Shared removes the owner's private copy; saving a Shared template as Private creates a private override and leaves the shared copy in place. Saving a new template MUST NOT share it by default.
 
 ### Requirement: Batch conversion flow
-Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot.
+Profile Builder SHALL accept up to 10 PDF/DOCX files in one batch and expose queued, processing, completed, and failed state per file. Each successful file SHALL create its own saved canonical profile snapshot. The upload card SHALL follow the Analyze upload flow: selected files wait in a removable queue until the recruiter starts the conversion, and a progress card with elapsed time, per-file status, and Cancel replaces the card while the batch runs.
+
+#### Scenario: Recruiter opens a finished profile mid-batch
+- **WHEN** a file in a running batch has completed
+- **THEN** it is already listed in Recent profiles and can be opened from there while the remaining files keep converting
+
+#### Scenario: Recruiter leaves the page mid-batch
+- **WHEN** the recruiter navigates elsewhere inside the app while a batch runs
+- **THEN** navigation is allowed, the batch continues, and its progress is shown again on return
+
+#### Scenario: Recruiter cancels a running batch
+- **WHEN** the recruiter presses Cancel while a file is converting
+- **THEN** the card closes at once, every unfinished file returns to the queue in upload order, and the API is asked to discard the in-flight extraction by its client request id; the API honors the cancel at the latest before returning the extracted profile, answers 409 `profile_extraction_cancelled`, and no profile is saved for that file
+
+#### Scenario: Batch finishes
+- **WHEN** every file has completed or failed
+- **THEN** the progress card briefly confirms completion and disappears, successful profiles appear in Recent profiles marked New, and failed files return to the queue with their errors
 
 ### Requirement: Reviewable AI translation
 The system SHALL translate selected professional profile sections to a supported target language with GPT-5.6 Luna, preserve names/URLs/technology identifiers, and require preview plus selective acceptance before changing canonical state.
 
 ### Requirement: Profiles catalog
-The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository. The catalog SHALL be reached through the outlined View all action, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
+The application SHALL expose a searchable Profiles destination for authenticated users to reopen saved profiles; Recent profiles on the upload page remain a compact shortcut rather than the only profile repository, and SHALL match Recent analyses in layout and behaviour: inline search, five rows with Show more, New badges for profiles created in this browser session, inline delete, and a Retry action when loading fails. The catalog SHALL remain reachable at `/profiles` while Profile Builder is enabled, SHALL NOT appear in the sidebar, and SHALL provide a Back action to `/profile-builder`. The Profile Builder sidebar item SHALL remain active while viewing the Profiles catalog. Profile Builder and Profiles SHALL use the application shell title without repeating it in the page content.
 
 
 ### Requirement: Latency-bounded AI profile transforms
@@ -156,7 +178,7 @@ AI Actions and Translation SHALL avoid unnecessary model work by using GPT-5.6 L
 - **THEN** the stable prompt prefix/cache key remains unchanged while the instruction is appended after that cached context
 
 ### Requirement: Defense-in-depth Profile Builder privacy
-The Profile Builder SHALL treat national-ID masking as an invariant across the whole structured-profile lifecycle rather than only an upload-time operation. Supported identifiers MUST NOT be persisted, returned from AI-generated text, sent in recruiter AI instructions, rendered into DOCX/PDF, or emitted in a download filename when introduced after extraction. Candidate/profile content supplied to AI SHALL be explicitly treated as untrusted data rather than model instructions.
+The Profile Builder SHALL treat national-ID masking as an invariant across the whole structured-profile lifecycle rather than only an upload-time operation. Supported identifiers MUST NOT be persisted, returned from AI-generated text, sent in recruiter AI instructions, rendered into DOCX/PDF, or emitted in a download filename when introduced after extraction. The export endpoints always answer with the fixed `candidate-profile.docx` / `candidate-profile.pdf` disposition; the preference-driven filename is composed in the browser from server-masked profile fields and the sanitized filename pattern. Candidate/profile content supplied to AI SHALL be explicitly treated as untrusted data rather than model instructions.
 
 #### Scenario: Recruiter manually enters a national identifier
 - **WHEN** a supported national identifier is typed into editable profile data after extraction
@@ -167,7 +189,7 @@ The Profile Builder SHALL treat national-ID masking as an invariant across the w
 - **THEN** those strings remain candidate data and the provider instruction explicitly tells the model not to follow embedded candidate instructions
 
 ### Requirement: Bounded Profile Builder uploads
-Each Profile Builder PDF/DOCX file SHALL be limited to 10 MiB before ingestion. The browser SHALL reject larger selections for immediate feedback, and the authenticated proxy/backend SHALL independently enforce the limit so clients cannot bypass it.
+Each Profile Builder PDF/DOCX file SHALL be limited to 10 MiB before ingestion. The browser SHALL reject larger selections for immediate feedback, and the authenticated proxy/backend SHALL independently enforce the limit so clients cannot bypass it. The proxy reads at most 10 MiB plus 128 KiB of multipart overhead for extraction and 4 MiB for JSON bodies.
 
 ### Requirement: Unified authenticated Profile Builder boundary
 Every Profile Builder API action SHALL require the authenticated user's derived Profile Builder access token at the FastAPI boundary, including extraction, Summary, AI Actions/Translation, exports, profiles, templates, preferences, and custom fields.
@@ -180,7 +202,7 @@ The browser SHALL preserve the latest canonical profile edit when the recruiter 
 - **THEN** the latest snapshot is persisted or the navigation is blocked when an explicit pre-navigation save fails; full browser unload warns while unsaved state exists
 
 ### Requirement: Authoritative default template preference
-The persisted per-user `default_template_id` SHALL be the only durable source for the template used by the next conversion. Browser local storage SHALL NOT maintain a competing selected-template value. Inaccessible stale defaults SHALL fall back to the built-in IDEGO template.
+The persisted per-user `default_template_id` SHALL be the only durable source for the template used by the next conversion. Browser local storage SHALL NOT maintain a competing selected-template value. When the stored default is inaccessible, reading preferences SHALL rewrite the stored `default_template_id` to `idego-default` and return that; `PUT` of preferences naming an unknown template is rejected with 400 `default_template_not_found`.
 
 
 ### Requirement: Accurate A4 export and preview

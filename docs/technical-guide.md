@@ -11,6 +11,8 @@ been removed. They are not compatibility surfaces.
 
 ## Profile Builder
 
+> **Currently disabled in the web app.** `PROFILE_BUILDER_ENABLED` in `apps/web/src/lib/feature-flags.js` is `false`: the sidebar entry is dimmed and inert, `/profile-builder` and `/profiles` redirect to `/analyze`, the Settings section is hidden, and the `/api/profile-builder/*` proxy answers 404. The API routes stay deployed. Flip the flag and rebuild the web image to re-enable it.
+
 The separate **Profile Builder** workflow turns PDF/DOCX CVs into editable,
 client-ready profiles: convert up to 10 CVs, edit the structured content, choose
 which identifying fields appear in the output, select or create a template, and
@@ -39,7 +41,7 @@ PDF or DOCX upload
     -> sequential model reviewer with validated ID-based operations
     -> base-analysis-v2 validation
     -> persistence and UI
-    -> automatic company, education, and LinkedIn research
+    -> optional company, education, and LinkedIn research
 ```
 
 Every semantic value needs literal source evidence. A reviewer may add a missing candidate
@@ -72,7 +74,7 @@ cd apps/web && pnpm build
 `make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
 through `docker-compose.dev.yml`; `make deploy` never does.
 
-The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+The web app is available at `http://127.0.0.1:3000/analyze` (`WEB_PORT`, default 3000). Compose uses
 project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
 database `/app/data/auth.db`. A stack created under the former project name
 `cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
@@ -104,7 +106,7 @@ record zero current-call tokens and separate saved usage/cost provenance.
 
 ## Deployment
 
-Production is Compose-based. Copy and fill `.env`, keep `WEB_HOST=127.0.0.1`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the loopback-bound web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](operations.md).
+Production is Compose-based. Copy and fill `.env`, set `WEB_PORT` and the matching `BASE_URL`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the published web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](operations.md).
 
 ## Privacy and persistence
 
@@ -127,10 +129,13 @@ ledger. Setup and access management are documented in
 
 ## Public research
 
-Company, education, and LinkedIn research remains optional. Subjects come only
-from accepted, evidence-supported base-analysis records. Reusable cache entries
-are keyed per public subject, support partial hits, and carry hit/miss
-provenance, original research timestamps, refresh, and cache audit entries.
+Company, education, and LinkedIn research remains optional. Subjects are
+evidence-supported base-analysis records: accepted records, plus the supported
+organization or institution name of an ambiguous record on its own. Reusable cache entries
+are keyed per public subject and report language, support partial hits, and
+carry hit/miss provenance, original research timestamps, refresh, and cache
+audit entries. The research prompts write free-text findings in the requested
+language; existing databases gain the `report_language` column automatically.
 
 Research confidence is intentionally conservative: high confidence requires
 multiple consistent public signals, and LinkedIn discovery requires both name

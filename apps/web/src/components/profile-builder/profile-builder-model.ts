@@ -211,15 +211,6 @@ export type ProfessionalProposal = Omit<
   "schema_version" | "personal" | "custom_fields"
 >;
 
-export type BatchConversionItem = {
-  id: string;
-  file: File;
-  status: "queued" | "processing" | "completed" | "failed";
-  profile_id: string | null;
-  candidate_name: string | null;
-  error: string | null;
-};
-
 export const PROFESSIONAL_SECTION_LABELS: Record<ProfessionalSectionName, string> = {
   headline: "Headline",
   summary: "Summary",

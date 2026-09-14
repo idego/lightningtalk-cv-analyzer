@@ -3,15 +3,15 @@ import test from "node:test";
 
 import { buildSidebarNav, isSidebarItemActive, titleFromPathname } from "./sidebar-data.ts";
 
-test("includes builder alongside analyzer and feedback for feedback members", () => {
+test("keeps Profile Builder visible but disabled and shows feedback for feedback members", () => {
   assert.deepEqual(
-    buildSidebarNav(true)[0].items.map(({ title, url }) => ({ title, url })),
+    buildSidebarNav(true)[0].items.map(({ title, url, disabled }) => ({ title, url, disabled: Boolean(disabled) })),
     [
-      { title: "Analyze", url: "/analyze" },
-      { title: "Profile Builder", url: "/profile-builder" },
-      { title: "Dashboard", url: "/dashboard" },
-      { title: "Feedback", url: "/feedback" },
-      { title: "Settings", url: "/settings" },
+      { title: "Analyze", url: "/analyze", disabled: false },
+      { title: "Profile Builder", url: "/profile-builder", disabled: true },
+      { title: "Dashboard", url: "/dashboard", disabled: false },
+      { title: "Feedback", url: "/feedback", disabled: false },
+      { title: "Settings", url: "/settings", disabled: false },
     ],
   );
 });

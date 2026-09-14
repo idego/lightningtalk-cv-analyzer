@@ -2,6 +2,7 @@ import { researchErrorFields, type ResearchErrorDetails } from "./research-error
 import type { AnalysisReport } from "./analyze-types.ts";
 import type { AppSettings } from "./app-settings.ts";
 import { isSelfEmploymentLabel } from "./relationship-labels.js";
+import { isContactLink } from "./contact-links.js";
 
 export const AUTO_RESEARCH_MAX_CONCURRENCY = 2;
 export type AutoResearchKind = "company" | "education" | "linkedin";
@@ -24,22 +25,18 @@ function safePublicSubject(value: string) {
     && /[^\W\d_]/u.test(normalized);
 }
 
-function acceptedRelation(record: { status: string; relation_status?: string }) {
-  return record.status === "accepted" && record.relation_status === "supported";
-}
-
 export function researchEligibility(report: AnalysisReport) {
   if (report.base_analysis.status === "failed" || report.base_analysis.status === "unavailable") {
     return { company: false, education: false, linkedin: false };
   }
+  // A supported organization or institution is a public subject on its own; an
+  // ambiguous relation (for example dates far from the entry) must not block it.
   const employment = report.base_analysis.employment.some(
-    (record) => acceptedRelation(record)
-      && supported(record.organization)
+    (record) => supported(record.organization)
       && !isSelfEmploymentLabel(record.organization?.value ?? ""),
   );
   const education = report.base_analysis.education.some(
-    (record) => acceptedRelation(record)
-      && supported(record.institution),
+    (record) => supported(record.institution),
   );
   const linkedin = supported(report.base_analysis.profile.candidate_name);
   return {
@@ -52,6 +49,15 @@ export function researchEligibility(report: AnalysisReport) {
 export function effectiveAutoResearchKinds(settings: Pick<AppSettings, "aiEnabled" | "autoResearchEnabled" | "autoCompanyResearch" | "autoEducationResearch" | "autoLinkedinDiscovery">): AutoResearchKind[] {
   if (settings.aiEnabled === false || !settings.autoResearchEnabled) return [];
   return [settings.autoCompanyResearch && "company", settings.autoEducationResearch && "education", settings.autoLinkedinDiscovery && "linkedin"].filter(Boolean) as AutoResearchKind[];
+}
+
+export function linkedinProvidedInCv(report: AnalysisReport): boolean {
+  return (report.mechanical?.literal_links ?? []).some((link) => link?.known_host === "linkedin" && isContactLink(link));
+}
+
+/** Kinds that stay available manually but are not started automatically. */
+export function automaticallySkippedKinds(report: AnalysisReport): Set<AutoResearchKind> {
+  return new Set(linkedinProvidedInCv(report) ? ["linkedin" as const] : []);
 }
 
 export function eligibleAutoResearchKinds(report: AnalysisReport): Set<AutoResearchKind> {
@@ -99,10 +105,10 @@ export function createAutoResearchOrchestrator({
   }
   function enqueue(job: () => Promise<void>) { queue.push(job); pump(); }
 
-  function request(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind, allowRetry: boolean, refresh = false) {
+  function request(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind, allowRetry: boolean) {
     const requestKey = key(report.analysis_id, kind);
     const reportResult = report[RESULT_KEYS[kind]];
-    if (reportResult && !refresh) {
+    if (reportResult) {
       publish(report.analysis_id, kind, { status: "succeeded", result: reportResult });
       return Promise.resolve();
     }
@@ -124,8 +130,8 @@ export function createAutoResearchOrchestrator({
       try {
         const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
         const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh }),
+          method: "POST", headers: { "Content-Type": "application/json", "X-Report-Language": settings.reportLanguage },
+          body: JSON.stringify({}),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
         if (!response.ok) throw Object.assign(new Error(`Automatic ${kind} research failed (${response.status}).`), { httpStatus: response.status, ...researchErrorFields(payload) });
@@ -148,8 +154,9 @@ export function createAutoResearchOrchestrator({
   async function schedule(report: AnalysisReport, settings: AppSettings) {
     if (settings.aiEnabled === false || report.ai_features_enabled === false) return;
     const eligible = eligibleAutoResearchKinds(report);
+    const skipped = automaticallySkippedKinds(report);
     const completions = effectiveAutoResearchKinds(settings)
-      .filter((kind) => eligible.has(kind))
+      .filter((kind) => eligible.has(kind) && !skipped.has(kind))
       .map((kind) => request(report, settings, kind, false));
     await Promise.all(completions);
   }
@@ -159,16 +166,9 @@ export function createAutoResearchOrchestrator({
     return request(report, settings, kind, true);
   }
 
-  function runRefresh(report: AnalysisReport, settings: AppSettings, kind: AutoResearchKind) {
-    if (settings.aiEnabled === false || report.ai_features_enabled === false || !eligibleAutoResearchKinds(report).has(kind)) return Promise.resolve();
-    states.delete(key(report.analysis_id, kind));
-    return request(report, settings, kind, true, true);
-  }
-
   return {
     schedule,
     runManual,
-    runRefresh,
     getState: (analysisId: string, kind: AutoResearchKind) => states.get(key(analysisId, kind)),
     subscribe(listener: (analysisId: string, kind: AutoResearchKind, state: AutoResearchState) => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };

@@ -209,6 +209,7 @@ def test_usage_endpoints_expose_only_aggregates_and_keep_report_scope(tmp_path) 
     app = create_app(
         db_path=tmp_path / "reports.db",
         openai_settings=OpenAISettings(enabled=False),
+        internal_admin_secret="internal-owner-secret-0123456789",
     )
     store = app.state.store
     analysis_id = "analysis-api-1"
@@ -237,9 +238,14 @@ def test_usage_endpoints_expose_only_aggregates_and_keep_report_scope(tmp_path) 
         f"/analyses/{analysis_id}/usage",
         headers={"X-Analysis-Owner-Id": "owner-token"},
     )
-    deployment = client.get("/internal/usage/summary")
+    unauthenticated = client.get("/internal/usage/summary")
+    deployment = client.get(
+        "/internal/usage/summary",
+        headers={"X-Internal-Admin-Secret": "internal-owner-secret-0123456789"},
+    )
 
     assert forbidden.status_code == 404
+    assert unauthenticated.status_code == 403
     assert report_usage.status_code == 200
     assert report_usage.json()["total_tokens"] == 110
     assert "usage_events" not in report_usage.json()

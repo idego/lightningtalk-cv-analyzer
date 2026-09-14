@@ -55,7 +55,7 @@ export function FeedbackControl({
     valid =
       failure ||
       rating !== null ||
-      (normalized.length > 0 && normalized.length <= 180),
+      (normalized.length > 0 && normalized.length <= 300),
     disabledReason = t("feedbackSelectionRequired");
   const draw = useCallback((value: number) => {
     path.current?.setAttribute("d", feedbackMorphPath(value));
@@ -219,8 +219,8 @@ export function FeedbackControl({
       setError(true);
     }
   }
-  const remaining = 180 - comment.length,
-    counterOpacity = Math.max(0, Math.min(1, (comment.length - 90) / 90)),
+  const remaining = 300 - comment.length,
+    counterOpacity = Math.max(0, Math.min(1, (comment.length - 150) / 150)),
     classes = ["feedback-cloud", phase, confirmed ? "has-response" : ""]
       .filter(Boolean)
       .join(" ");
@@ -289,7 +289,7 @@ export function FeedbackControl({
               className="feedback-editor"
               rows={1}
               value={comment}
-              maxLength={180}
+              maxLength={300}
               placeholder={
                 rating === "not_helpful" ? t("whatToImprove") : t("writeFeedback")
               }

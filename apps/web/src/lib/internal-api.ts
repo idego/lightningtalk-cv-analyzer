@@ -8,6 +8,22 @@ export function analysisOwnerHeaders(userId: string): Record<string, string> {
   return { "X-Analysis-Owner-Id": userId };
 }
 
+/**
+ * Shared secret that authorizes the web proxy against `/internal/*` and other
+ * privileged API routes. Server-only; never expose it to the browser.
+ */
+export function internalApiSecret(): string | null {
+  return process.env.INTERNAL_API_SECRET || process.env.BETTER_AUTH_SECRET || null;
+}
+
+export function internalSecretHeaders(secret: string): Record<string, string> {
+  return { "X-Internal-Admin-Secret": secret };
+}
+
+export function internalSecretUnconfigured(): NextResponse {
+  return NextResponse.json({ error: "internal_secret_unconfigured" }, { status: 503 });
+}
+
 export type InternalJsonResult = {
   status: number;
   ok: boolean;

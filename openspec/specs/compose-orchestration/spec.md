@@ -5,18 +5,18 @@ Defines the containerized web/API runtime, internal service networking,
 persistent storage, test profile, and deployment configuration.
 ## Requirements
 ### Requirement: Compose runtime services
-The root compose configuration SHALL run the long-lived `web` and `api` services plus two one-shot init services: `geonames-init`, which builds the offline reference-data indexes `api` depends on, and `feedback-init`, which seeds feedback access in the web auth database before `web` starts. `web` SHALL be the only host-published service in `docker-compose.yml`, published as `${WEB_PORT:-3000}:3000`.
+The root compose configuration SHALL run the long-lived `web` and `api` services plus three one-shot init services: `volume-init`, which fixes ownership of the named data volumes for the non-root service users; `geonames-init`, which builds the offline reference-data indexes `api` depends on; and `feedback-init`, which seeds feedback access in the web auth database before `web` starts. `web` SHALL be the only host-published service in `docker-compose.yml`, published as `${WEB_PORT:-3000}:3000`.
 
 #### Scenario: Full stack startup
 - **WHEN** `make dev` or `make deploy` runs the stack
-- **THEN** `geonames-init` and `feedback-init` complete successfully before `api` and `web` are considered started
+- **THEN** `volume-init`, `geonames-init`, and `feedback-init` complete successfully before `api` and `web` are considered started
 - **AND** only `web` publishes a host port from `docker-compose.yml`
 - **AND** `feedback-init` reads its owner configuration from its image without mounting the source repository at runtime
 
 #### Scenario: API remains internal in production
 - **WHEN** compose services are running from `docker-compose.yml` alone
 - **THEN** `api` is reachable from `web` on the internal network
-- **AND** `api` is not directly exposed on a host port, because `/internal/feedback` relies on the web layer for authorization
+- **AND** `api` is not directly exposed on a host port; `/internal/*` additionally requires the web-to-API internal secret (`INTERNAL_API_SECRET`, falling back to `BETTER_AUTH_SECRET`) so other services on the network cannot reach it
 
 #### Scenario: Local Swagger access
 - **WHEN** `make dev` starts the stack

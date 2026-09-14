@@ -32,12 +32,13 @@ from cv_validator.analysis.source import SourceDocument
 from cv_validator.analysis.strategy import AnalysisInput
 from cv_validator.location import (
     Ambiguous,
+    LocationMatch,
     LocationResolver,
     PostalCodeResolver,
     Resolved,
     ResolutionLevel,
 )
-from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical
+from cv_validator.mechanical import MECHANICAL_VERSION, extract_mechanical, tag_link_sections
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.operations import safe_log, utc_now
 from cv_validator.usage import normalize_usage
@@ -221,8 +222,12 @@ class DocumentAnalysisStrategy:
                     for record in [*state.employment, *state.education]
                 ),
             )
+        mechanical = deepcopy(mechanical)
+        mechanical["literal_links"] = tag_link_sections(
+            mechanical["literal_links"], source.blocks, state.employment, state.education,
+        )
         mechanical = _enrich_mechanical(
-            deepcopy(mechanical),
+            mechanical,
             public_profile(state.profile),
             self._location_resolver,
             self._postal_code_resolver,
@@ -421,6 +426,12 @@ def _enrich_mechanical(
                 if country
                 else None
             )
+            narrowed_city = (
+                _narrow_city_by_country(city_outcome, country_outcome)
+                if isinstance(city_outcome, Ambiguous)
+                and isinstance(country_outcome, Resolved)
+                else None
+            )
             if isinstance(city_outcome, Resolved):
                 item.update({
                     "status": "resolved",
@@ -428,6 +439,14 @@ def _enrich_mechanical(
                     "city_country_code": city_outcome.resolution.country_code,
                 })
                 declared_country_code = city_outcome.resolution.country_code
+            elif narrowed_city is not None:
+                item.update({
+                    "status": "resolved",
+                    "canonical_name": narrowed_city.canonical_name,
+                    "city_country_code": narrowed_city.country_code,
+                    "narrowed_by": "declared_country",
+                })
+                declared_country_code = narrowed_city.country_code
             elif isinstance(city_outcome, Ambiguous):
                 item["status"] = "ambiguous"
                 item["candidate_country_codes"] = sorted({
@@ -449,7 +468,9 @@ def _enrich_mechanical(
                     item["city_country_relationship"] = "unresolved"
                 elif explicit_country_code in city_codes:
                     item["city_country_relationship"] = (
-                        "same" if isinstance(city_outcome, Resolved) else "ambiguous"
+                        "same"
+                        if isinstance(city_outcome, Resolved) or narrowed_city is not None
+                        else "ambiguous"
                     )
                 else:
                     item["city_country_relationship"] = "different"
@@ -531,6 +552,23 @@ def _enrich_mechanical(
     )
     mechanical["comparisons"] = _direct_comparisons(country_codes, phone_countries)
     return mechanical
+
+
+def _narrow_city_by_country(
+    city_outcome: Ambiguous,
+    country_outcome: Resolved,
+) -> LocationMatch | None:
+    """Pick the single city match inside the explicitly stated country, if any.
+
+    The declared value names both a city and a country, so a city homonym in
+    another country is not a competing reading of the CV. Two or more matches
+    inside the stated country stay ambiguous.
+    """
+    country_code = country_outcome.resolution.country_code
+    in_country = [
+        match for match in city_outcome.matches if match.country_code == country_code
+    ]
+    return in_country[0] if len(in_country) == 1 else None
 
 
 def _declared_location_parts(value: str) -> tuple[str, str | None]:

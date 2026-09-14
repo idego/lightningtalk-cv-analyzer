@@ -21,13 +21,24 @@ from cv_validator.research.versions import (
     EDUCATION_RESEARCH_VERSION,
     LINKEDIN_DISCOVERY_VERSION,
 )
+from cv_validator.api.sqlite_support import (
+    checkpoint,
+    connect as sqlite_connect,
+    ensure_expires_at_column,
+    open_connection,
+    retention_deadline,
+)
 from cv_validator.usage import USD_PLN_FX_RATE, USD_PLN_FX_VERSION, usd_to_pln
+
+
+RETENTION_DAYS_MIN = 1
+RETENTION_DAYS_MAX = 3650
 
 
 @dataclass
 class PersistenceConfig:
     db_path: Path
-    retention_days: int = 90
+    retention_days: int = 10
     research_cache_ttl_days: int = 30
 
 
@@ -35,20 +46,44 @@ class PersistenceStore:
     def __init__(self, config: PersistenceConfig) -> None:
         self.config = config
         self._event_write_lock = threading.Lock()
+        # Called with True/False after every purge attempt, on any code path.
+        self.purge_listeners: list[Callable[[bool], None]] = []
         self.config.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.config.retention_days = self.get_retention_days()
+        self._ensure_expiry_schema()
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.config.db_path)
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.row_factory = sqlite3.Row
+        with open_connection(self.config.db_path) as conn:
+            yield conn
+
+    def vacuum(self) -> None:
+        """Rebuild the database file so freed pages of purged rows leave the file.
+
+        VACUUM under WAL writes the rebuilt pages through the ``-wal`` file, so
+        the checkpoint afterwards moves them into the main file and truncates
+        the log; otherwise it would keep a copy of the database on the volume.
+        """
+        conn = sqlite_connect(self.config.db_path)
         try:
-            with conn:
-                yield conn
+            conn.execute("VACUUM")
+            checkpoint(conn)
+        except sqlite3.Error as exc:
+            raise PersistenceError("database vacuum failed") from exc
         finally:
             conn.close()
+
+    def _deadline(self) -> str:
+        return retention_deadline(self.config.retention_days)
+
+    def _ensure_expiry_schema(self) -> None:
+        try:
+            with self._connect() as conn:
+                for table in ("reports", "analysis_runs"):
+                    ensure_expires_at_column(conn, table, "created_at", self.config.retention_days)
+        except sqlite3.Error as exc:
+            raise PersistenceError("retention deadline migration failed") from exc
 
     @staticmethod
     def _require_report_parent(conn: sqlite3.Connection, analysis_id: str) -> None:
@@ -135,7 +170,8 @@ class PersistenceStore:
                     category TEXT NOT NULL, normalized_subjects_json TEXT NOT NULL,
                     research_version TEXT NOT NULL, prompt_version TEXT NOT NULL,
                     schema_version TEXT NOT NULL, model_version TEXT NOT NULL,
-                    search_policy_version TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    search_policy_version TEXT NOT NULL, report_language TEXT NOT NULL DEFAULT 'en',
+                    payload_json TEXT NOT NULL,
                     source_accessed_at TEXT NOT NULL, created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL, invalidated_at TEXT
                 );
@@ -157,6 +193,7 @@ class PersistenceStore:
                     analysis_id TEXT NOT NULL,
                     token_hash TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
+                    expires_at TEXT,
                     FOREIGN KEY (analysis_id) REFERENCES reports(analysis_id)
                 );
                 CREATE TABLE IF NOT EXISTS runtime_settings (
@@ -225,9 +262,21 @@ class PersistenceStore:
                     completed_at TEXT NOT NULL,
                     status TEXT NOT NULL CHECK(status = 'completed')
                 );
+                CREATE TABLE IF NOT EXISTS analysis_cancel_requests (
+                    owner_user_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_user_id, request_id)
+                );
+                CREATE INDEX IF NOT EXISTS analysis_cancel_requests_expires_at
+                    ON analysis_cancel_requests(expires_at);
                 """
             )
             _ensure_ai_usage_schema(conn)
+            _ensure_share_token_expiry_schema(conn)
+            _ensure_research_cache_language_schema(conn)
+            _ensure_run_cancel_schema(conn)
             conn.execute(
                 """INSERT OR IGNORE INTO processed_report_events
                    (event_id, analysis_id, completed_at, status)
@@ -293,13 +342,81 @@ class PersistenceStore:
         analysis_id: str,
         correlation_id: str,
         owner_user_id: str,
+        request_id: str | None = None,
     ) -> None:
+        """Insert a running row; a cancel already pending for the request is stamped on it."""
         with self._connect() as conn:
+            cancel_requested_at = (
+                _pending_cancel(conn, owner_user_id, request_id) if request_id else None
+            )
             conn.execute(
                 """INSERT INTO analysis_runs
-                   (analysis_id, correlation_id, status, created_at, owner_user_id)
-                   VALUES (?, ?, 'running', ?, ?)""",
-                (analysis_id, correlation_id, _utc_now(), owner_user_id),
+                   (analysis_id, correlation_id, status, created_at, owner_user_id, expires_at,
+                    cancel_requested_at)
+                   VALUES (?, ?, 'running', ?, ?, ?, ?)""",
+                (
+                    analysis_id,
+                    correlation_id,
+                    _utc_now(),
+                    owner_user_id,
+                    self._deadline(),
+                    cancel_requested_at,
+                ),
+            )
+
+    def request_analysis_cancel(self, owner_user_id: str, request_id: str) -> None:
+        """Record a cancel for (owner, client request id) so any API process honors it.
+
+        The analysis id does not exist yet when the browser cancels, so the
+        request is keyed the way the client knows it. Rows expire after
+        ``CANCEL_REQUEST_TTL`` and are purged by retention maintenance.
+        """
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO analysis_cancel_requests
+                   (owner_user_id, request_id, requested_at, expires_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(owner_user_id, request_id) DO UPDATE SET
+                       requested_at = excluded.requested_at,
+                       expires_at = excluded.expires_at""",
+                (
+                    owner_user_id,
+                    request_id,
+                    now.isoformat(),
+                    (now + CANCEL_REQUEST_TTL).isoformat(),
+                ),
+            )
+
+    def analysis_cancel_requested(
+        self,
+        owner_user_id: str,
+        request_id: str | None,
+        analysis_id: str | None = None,
+    ) -> bool:
+        """Whether an unexpired cancel is pending; stamps the run when one is given."""
+        if request_id is None:
+            return False
+        with self._connect() as conn:
+            requested_at = _pending_cancel(conn, owner_user_id, request_id)
+            if requested_at is None:
+                return False
+            if analysis_id is not None:
+                conn.execute(
+                    """UPDATE analysis_runs SET cancel_requested_at = ?
+                       WHERE analysis_id = ? AND cancel_requested_at IS NULL""",
+                    (requested_at, analysis_id),
+                )
+            return True
+
+    def discard_analysis_cancel(self, owner_user_id: str, request_id: str | None) -> None:
+        """Consume the cancel once its analysis has finished, whichever way it ended."""
+        if request_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM analysis_cancel_requests WHERE owner_user_id = ? AND request_id = ?",
+                (owner_user_id, request_id),
             )
 
     def complete_analysis_run(
@@ -496,9 +613,9 @@ class PersistenceStore:
                     INSERT INTO reports (
                         input_hash, contract_version, strategy_name,
                         strategy_version, status, created_at, analysis_id,
-                        owner_user_id, source_filename
+                        owner_user_id, source_filename, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         input_hash,
@@ -510,6 +627,7 @@ class PersistenceStore:
                         selected_analysis_id,
                         owner_user_id,
                         source_filename,
+                        self._deadline(),
                     ),
                 )
                 conn.execute(
@@ -599,7 +717,8 @@ class PersistenceStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT reports.analysis_id, reports.source_filename,
-                          reports.status, reports.created_at, audit_log.output_json,
+                          reports.status, reports.created_at, reports.expires_at,
+                          audit_log.output_json,
                           EXISTS (
                             SELECT 1 FROM source_documents
                             WHERE source_documents.analysis_id = reports.analysis_id
@@ -621,6 +740,7 @@ class PersistenceStore:
                     "status": row["status"],
                     "strategy": payload.get("strategy", {}).get("name"),
                     "created_at": row["created_at"],
+                    "expires_at": row["expires_at"],
                     "has_document": bool(row["has_document"]),
                 }
             )
@@ -642,22 +762,29 @@ class PersistenceStore:
         analysis_id: str,
         owner_user_id: str | None,
         share_token: str,
-    ) -> bool:
+    ) -> str | None:
+        """Store a hashed share capability; returns its ISO expiry, or None when not owned.
+
+        A link lives for ``SHARE_TOKEN_TTL`` or until the analysis itself is
+        retention-purged, whichever comes first.
+        """
         if not owner_user_id:
-            return False
+            return None
+        now = datetime.now(timezone.utc)
         with self._connect() as conn:
             report = conn.execute(
-                "SELECT 1 FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
+                "SELECT expires_at FROM reports WHERE analysis_id = ? AND owner_user_id = ?",
                 (analysis_id, owner_user_id),
             ).fetchone()
             if report is None:
-                return False
+                return None
+            expires_at = _share_token_expiry(now, report["expires_at"])
             conn.execute(
-                """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at)
-                   VALUES (?, ?, ?)""",
-                (analysis_id, _token_hash(share_token), _utc_now()),
+                """INSERT INTO analysis_share_tokens (analysis_id, token_hash, created_at, expires_at)
+                   VALUES (?, ?, ?, ?)""",
+                (analysis_id, _token_hash(share_token), now.isoformat(), expires_at),
             )
-        return True
+        return expires_at
 
     def analysis_share_access_allowed(self, analysis_id: str, share_token: str | None) -> bool:
         if not share_token:
@@ -665,8 +792,9 @@ class PersistenceStore:
         token_hash = _token_hash(share_token)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT token_hash FROM analysis_share_tokens WHERE analysis_id = ? AND token_hash = ?",
-                (analysis_id, token_hash),
+                """SELECT token_hash FROM analysis_share_tokens
+                   WHERE analysis_id = ? AND token_hash = ? AND expires_at > ?""",
+                (analysis_id, token_hash, _utc_now()),
             ).fetchone()
         return row is not None and hmac.compare_digest(str(row["token_hash"]), token_hash)
 
@@ -752,10 +880,11 @@ class PersistenceStore:
             value = int(row["value"])
         except (TypeError, ValueError):
             return self.config.retention_days
-        return value if 1 <= value <= 3650 else self.config.retention_days
+        return value if RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX else self.config.retention_days
 
     def set_retention_days(self, days: int) -> dict[str, int | tuple[str, ...]]:
-        if not 1 <= days <= 3650:
+        """Change the window for rows written from now on; stored deadlines are kept."""
+        if not RETENTION_DAYS_MIN <= days <= RETENTION_DAYS_MAX:
             raise ValueError("retention_days_out_of_range")
         with self._connect() as conn:
             conn.execute(
@@ -851,11 +980,11 @@ class PersistenceStore:
                 """SELECT payload_json FROM reusable_research_cache
                    WHERE cache_key = ? AND category = ? AND cache_format_version = ?
                      AND research_version = ? AND prompt_version = ? AND schema_version = ?
-                     AND model_version = ? AND search_policy_version = ?
+                     AND model_version = ? AND search_policy_version = ? AND report_language = ?
                      AND invalidated_at IS NULL AND expires_at > ?""",
                 (descriptor.cache_key, descriptor.category, descriptor.cache_format_version,
                  descriptor.research_version, descriptor.prompt_version, descriptor.schema_version,
-                 descriptor.model_version, descriptor.search_policy_version, now),
+                 descriptor.model_version, descriptor.search_policy_version, descriptor.report_language, now),
             ).fetchone()
         return None if row is None else json.loads(row["payload_json"])
 
@@ -868,16 +997,17 @@ class PersistenceStore:
                     """INSERT INTO reusable_research_cache (
                         cache_key, cache_format_version, category, normalized_subjects_json,
                         research_version, prompt_version, schema_version, model_version,
-                        search_policy_version, payload_json, source_accessed_at, created_at, expires_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        search_policy_version, report_language, payload_json, source_accessed_at,
+                        created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,
                         source_accessed_at=excluded.source_accessed_at, created_at=excluded.created_at,
                         expires_at=excluded.expires_at, invalidated_at=NULL""",
                     (descriptor.cache_key, descriptor.cache_format_version, descriptor.category,
                      json.dumps(descriptor.normalized_subjects), descriptor.research_version,
                      descriptor.prompt_version, descriptor.schema_version, descriptor.model_version,
-                     descriptor.search_policy_version, json.dumps(payload), payload["accessed_at"],
-                     now_dt.isoformat(), expires_at.isoformat()),
+                     descriptor.search_policy_version, descriptor.report_language, json.dumps(payload),
+                     payload["accessed_at"], now_dt.isoformat(), expires_at.isoformat()),
                 )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("reusable research persistence failed") from exc
@@ -931,17 +1061,35 @@ class PersistenceStore:
             raise PersistenceError("linkedin research persistence failed") from exc
 
     def purge_expired(self) -> dict[str, int | tuple[str, ...]]:
-        cutoff_iso = (
-            datetime.now(timezone.utc) - timedelta(days=self.config.retention_days)
-        ).isoformat()
+        """Delete rows whose stored ``expires_at`` deadline has passed.
+
+        The deadline is fixed when a row is written, so changing the retention
+        setting later never shortens or extends already stored analyses.
+        Database errors surface as ``PersistenceError`` so callers such as the
+        maintenance loop can record them instead of crashing.
+        """
+        try:
+            result = self._purge_expired()
+        except sqlite3.Error as exc:
+            self._notify_purge(False)
+            raise PersistenceError("retention purge failed") from exc
+        self._notify_purge(True)
+        return result
+
+    def _notify_purge(self, succeeded: bool) -> None:
+        for listener in list(self.purge_listeners):
+            listener(succeeded)
+
+    def _purge_expired(self) -> dict[str, int | tuple[str, ...]]:
+        now_iso = _utc_now()
         deleted: dict[str, int | tuple[str, ...]] = {}
         with self._connect() as conn:
             expired_ids = sorted(
                 {
                     row[0]
                     for row in conn.execute(
-                        "SELECT analysis_id FROM reports WHERE created_at < ?",
-                        (cutoff_iso,),
+                        "SELECT analysis_id FROM reports WHERE expires_at <= ?",
+                        (now_iso,),
                     ).fetchall()
                     if isinstance(row[0], str)
                 }
@@ -951,8 +1099,8 @@ class PersistenceStore:
                         """SELECT analysis_runs.analysis_id
                            FROM analysis_runs
                            LEFT JOIN reports USING (analysis_id)
-                           WHERE reports.analysis_id IS NULL AND analysis_runs.created_at < ?""",
-                        (cutoff_iso,),
+                           WHERE reports.analysis_id IS NULL AND analysis_runs.expires_at <= ?""",
+                        (now_iso,),
                     ).fetchall()
                     if isinstance(row[0], str)
                 }
@@ -986,8 +1134,81 @@ class PersistenceStore:
                 "DELETE FROM reusable_research_cache WHERE expires_at <= ?",
                 (_utc_now(),),
             ).rowcount
+            deleted["expired_share_tokens"] = conn.execute(
+                "DELETE FROM analysis_share_tokens WHERE expires_at IS NULL OR expires_at <= ?",
+                (_utc_now(),),
+            ).rowcount
+            deleted["analysis_cancel_requests"] = conn.execute(
+                "DELETE FROM analysis_cancel_requests WHERE expires_at <= ?",
+                (now_iso,),
+            ).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
         return deleted
+
+
+SHARE_TOKEN_TTL = timedelta(days=2)
+# A cancel outlives any analysis it could target (uploads wait for a slot, then
+# run one synchronous model pass); stale rows are swept by retention maintenance.
+CANCEL_REQUEST_TTL = timedelta(hours=1)
+
+
+def _pending_cancel(
+    conn: sqlite3.Connection, owner_user_id: str, request_id: str
+) -> str | None:
+    """``requested_at`` of an unexpired cancel for the pair, else ``None``."""
+    row = conn.execute(
+        """SELECT requested_at FROM analysis_cancel_requests
+           WHERE owner_user_id = ? AND request_id = ? AND expires_at > ?""",
+        (owner_user_id, request_id, _utc_now()),
+    ).fetchone()
+    return None if row is None else str(row["requested_at"])
+
+
+def _ensure_run_cancel_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(analysis_runs)").fetchall()}
+    if columns and "cancel_requested_at" not in columns:
+        conn.execute("ALTER TABLE analysis_runs ADD COLUMN cancel_requested_at TEXT")
+
+
+def _share_token_expiry(now: datetime, report_expires_at: str | None) -> str:
+    """Earlier of the fixed share TTL and the analysis' stored retention deadline."""
+    expires_at = now + SHARE_TOKEN_TTL
+    try:
+        retention_deadline = datetime.fromisoformat(str(report_expires_at))
+    except ValueError:
+        return expires_at.isoformat()
+    if retention_deadline.tzinfo is None:
+        retention_deadline = retention_deadline.replace(tzinfo=timezone.utc)
+    return min(expires_at, retention_deadline).isoformat()
+
+
+def _ensure_research_cache_language_schema(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(reusable_research_cache)").fetchall()
+    }
+    if columns and "report_language" not in columns:
+        conn.execute("ALTER TABLE reusable_research_cache ADD COLUMN report_language TEXT NOT NULL DEFAULT 'en'")
+
+
+def _ensure_share_token_expiry_schema(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(analysis_share_tokens)").fetchall()
+    }
+    if not columns or "expires_at" in columns:
+        return
+    conn.execute("ALTER TABLE analysis_share_tokens ADD COLUMN expires_at TEXT")
+    # Links minted before expiry existed inherit the fixed TTL from their creation time.
+    for row in conn.execute("SELECT token_hash, created_at FROM analysis_share_tokens").fetchall():
+        try:
+            created_at = datetime.fromisoformat(str(row["created_at"]))
+        except ValueError:
+            created_at = datetime.now(timezone.utc)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        conn.execute(
+            "UPDATE analysis_share_tokens SET expires_at = ? WHERE token_hash = ?",
+            ((created_at + SHARE_TOKEN_TTL).isoformat(), row["token_hash"]),
+        )
 
 
 def _utc_now() -> str:

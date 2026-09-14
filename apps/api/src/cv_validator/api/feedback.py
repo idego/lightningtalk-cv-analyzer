@@ -13,6 +13,8 @@ from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cv_validator.api.sqlite_support import open_connection
+
 
 TARGET_NAMESPACE = UUID("b1541b7f-e1ec-44b2-bac8-e30bf2445772")
 CONTACT_RE = re.compile(r"(?i)(?:https?://|www\.)\S+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:\+?\d[\d ()-]{7,}\d)")
@@ -58,7 +60,7 @@ class FeedbackInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rating: Rating | None = None
     reason: Reason | None = None
-    comment: str | None = Field(default=None, max_length=180)
+    comment: str | None = Field(default=None, max_length=300)
     context_label: str | None = Field(default=None, max_length=200)
     context_text: str | None = Field(default=None, max_length=12000)
     context_report: dict[str, Any] | None = None
@@ -142,6 +144,28 @@ def _sanitize_context_report(value: Any) -> Any:
     if isinstance(value, list):
         return [_sanitize_context_report(item) for item in value]
     return value
+
+
+# Report keys the inbox needs to re-render one module. Everything else
+# (versions, usage, pass statuses, source digest, review internals, limitations)
+# is telemetry the inbox never shows and must not be retained in feedback.
+_CONTEXT_REPORT_BASE_KEYS = ("analysis_id", "base_analysis", "mechanical")
+_CONTEXT_REPORT_RESEARCH_KEYS = {
+    "company_research": "company_research",
+    "education_research": "education_research",
+    "linkedin_discovery": "linkedin_discovery",
+}
+
+
+def _project_context_report(value: dict[str, Any] | None, source_category: str | None) -> dict[str, Any] | None:
+    """Keep only the report slice the inbox renders for this target's module."""
+    if value is None:
+        return None
+    keys = list(_CONTEXT_REPORT_BASE_KEYS)
+    research_key = _CONTEXT_REPORT_RESEARCH_KEYS.get(source_category or "")
+    if research_key:
+        keys.append(research_key)
+    return {key: value[key] for key in keys if key in value}
 
 
 def _internal_context_key(key: Any) -> bool:
@@ -266,14 +290,8 @@ class FeedbackStore:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        with open_connection(self.db_path) as conn:
+            yield conn
 
     def pseudonym(self, purpose: Literal["actor", "maintainer"], value: str) -> str:
         return hashlib.sha256(f"{purpose}:{value}".encode()).hexdigest()
@@ -313,7 +331,7 @@ class FeedbackStore:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             target = conn.execute(
-                "SELECT kind FROM feedback_targets WHERE target_id=? AND analysis_id=?",
+                "SELECT kind, source_category FROM feedback_targets WHERE target_id=? AND analysis_id=?",
                 (target_id, analysis_id),
             ).fetchone()
             if target is None:
@@ -331,7 +349,8 @@ class FeedbackStore:
             if target["kind"] == TargetKind.OPERATION_FAILURE:
                 if value.rating != Rating.NOT_HELPFUL or value.reason != Reason.OPERATION_FAILED:
                     raise ValueError("failure_feedback_is_closed")
-            context_report_json = None if value.context_report is None else json.dumps(value.context_report, separators=(",", ":"))
+            context_report = _project_context_report(value.context_report, target["source_category"])
+            context_report_json = None if context_report is None else json.dumps(context_report, separators=(",", ":"))
             existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, context_report_json, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
             equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["context_report_json"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, context_report_json, normalized_email)
             if not equivalent:
@@ -392,8 +411,9 @@ class FeedbackStore:
                 params,
             ).fetchall()
             counts = {row["triage_status"]: row["count"] for row in conn.execute("SELECT COALESCE(g.status,'new') triage_status,COUNT(*) count FROM feedback_responses r LEFT JOIN feedback_triage g ON g.target_id=r.target_id AND g.actor_hash=r.actor_hash WHERE r.withdrawn_at IS NULL GROUP BY triage_status")}
+            retained = _retained_analysis_ids(conn, [row["analysis_id"] for row in rows])
         page_limit = min(max(limit, 1), 100)
-        return {"items": [_inbox_row(row) for row in rows[:page_limit]], "counts": counts, "next_cursor": rows[page_limit - 1]["cursor"] if len(rows) > page_limit else None}
+        return {"items": [_inbox_row(row, retained) for row in rows[:page_limit]], "counts": counts, "next_cursor": rows[page_limit - 1]["cursor"] if len(rows) > page_limit else None}
 
     def triage(self, target_id: str, actor_hash: str, maintainer: str, value: TriageInput) -> bool:
         now = _now()
@@ -413,7 +433,7 @@ class FeedbackStore:
 def _target_candidates(payload: dict[str, Any]):
     versions = _versions(payload)
     yield TargetKind.REPORT_OVERALL, "report", "overall", versions, None
-    yield TargetKind.REPORT_OVERALL, "worth_knowing", "section", versions, None
+    yield TargetKind.REPORT_OVERALL, "what_to_check", "section", versions, None
     yield TargetKind.COMPANY_RESEARCH_RESULT, "company_research", "section", versions, None
     yield TargetKind.EDUCATION_RESEARCH_RESULT, "education_research", "section", versions, None
     yield TargetKind.LINKEDIN_RESEARCH_RESULT, "linkedin_discovery", "section", versions, None
@@ -456,8 +476,8 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
     location = next((item for item in locations if isinstance(item, dict) and item.get("subject") == "declared_location"), None)
     if isinstance(location, dict) and location.get("status") not in {None, "unavailable"} and evidence(location):
         relationship = location.get("city_country_relationship") if isinstance(location.get("city_country_relationship"), str) else "null"
-        section = "attention" if relationship == "different" else "worth_knowing"
-        yield TargetKind.REVIEW_FINDING, section, f"location-{location['status']}-{relationship}", versions, None
+        if location.get("status") != "resolved" or relationship == "different":
+            yield TargetKind.REVIEW_FINDING, "what_to_check", f"location-{location['status']}-{relationship}", versions, None
 
     comparisons = mechanical.get("comparisons") if isinstance(mechanical.get("comparisons"), list) else []
     seen_comparisons: set[tuple[Any, ...]] = set()
@@ -475,20 +495,7 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         seen_comparisons.add(key)
         different.append(item)
     for index, _item in enumerate(different):
-        yield TargetKind.REVIEW_FINDING, "attention", f"comparison-different-{index}", versions, None
-
-    email_findings = mechanical.get("email_findings") if isinstance(mechanical.get("email_findings"), list) else []
-    seen_emails: set[tuple[Any, ...]] = set()
-    email_index = 0
-    for item in email_findings:
-        if not isinstance(item, dict) or not evidence(item):
-            continue
-        key = (item.get("kind"), item.get("observed_domain"), item.get("suggested_domain"))
-        if key in seen_emails:
-            continue
-        seen_emails.add(key)
-        yield TargetKind.REVIEW_FINDING, "attention", f"email-{email_index}", versions, None
-        email_index += 1
+        yield TargetKind.REVIEW_FINDING, "what_to_check", f"comparison-different-{index}", versions, None
 
     gaps = review.get("coverage_gaps") if isinstance(review.get("coverage_gaps"), list) else []
     seen_gaps: set[tuple[Any, ...]] = set()
@@ -503,13 +510,17 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         if key in seen_gaps:
             continue
         seen_gaps.add(key)
-        yield TargetKind.REVIEW_FINDING, "worth_knowing", f"gap-{gap_index}", versions, None
+        yield TargetKind.REVIEW_FINDING, "what_to_check", f"gap-{gap_index}", versions, None
         gap_index += 1
 
-    linkedin = payload.get("linkedin_discovery")
-    candidate = profile.get("candidate_name") if isinstance(profile.get("candidate_name"), dict) else {}
-    if isinstance(linkedin, dict) and linkedin.get("status") == "completed" and linkedin.get("linkedin_not_found") and evidence(candidate):
-        yield TargetKind.REVIEW_FINDING, "attention", "linkedin-not-found", versions, None
+    for category in ("education", "employment"):
+        records = base.get(category) if isinstance(base.get(category), list) else []
+        for item in records:
+            if not isinstance(item, dict) or item.get("status") != "ambiguous" or not evidence(item):
+                continue
+            record_id = item.get("id")
+            if isinstance(record_id, str) and record_id:
+                yield TargetKind.REVIEW_FINDING, "what_to_check", f"record-{record_id}", versions, None
 
 
 def _failure(operation: str, value: dict[str, Any], versions: dict[str, str]) -> dict[str, Any]:
@@ -533,9 +544,45 @@ def _manifest_row(row: sqlite3.Row) -> dict[str, Any]:
     return {"target_id": row["target_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "response": response}
 
 
-def _inbox_row(row: sqlite3.Row) -> dict[str, Any]:
-    failure = None if row["operation_kind"] is None else {key: row[key] for key in ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")}
-    return {"cursor": row["cursor"], "target_id": row["target_id"], "analysis_id": row["analysis_id"], "kind": row["kind"], "source_category": row["source_category"], "source_key": row["source_key"], "versions": json.loads(row["versions_json"]), "actor_hash": row["actor_hash"], "actor_email": row["actor_email"], "rating": row["rating"], "reason": row["reason"], "comment": row["comment"], "context_label": row["context_label"], "context_text": row["context_text"], "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None, "updated_at": row["updated_at"], "triage_status": row["triage_status"], "triage_note": row["note"], "failure": failure}
+def _retained_analysis_ids(conn: sqlite3.Connection, analysis_ids: list[str]) -> set[str]:
+    """Analyses that still have a report; feedback outlives deletion and retention purge."""
+    if not analysis_ids:
+        return set()
+    has_reports = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'").fetchone()
+    if has_reports is None:
+        return set()
+    unique_ids = sorted(set(analysis_ids))
+    placeholders = ",".join("?" for _ in unique_ids)
+    return {row[0] for row in conn.execute(f"SELECT analysis_id FROM reports WHERE analysis_id IN ({placeholders})", unique_ids)}
+
+
+_FAILURE_KEYS = ("operation_kind", "error_code", "retryable", "attempt_count", "occurred_at", "correlation_id")
+
+
+def _inbox_row(row: sqlite3.Row, retained_analysis_ids: set[str]) -> dict[str, Any]:
+    failure = None if row["operation_kind"] is None else {key: row[key] for key in _FAILURE_KEYS}
+    return {
+        "cursor": row["cursor"],
+        "target_id": row["target_id"],
+        "analysis_id": row["analysis_id"],
+        "analysis_available": row["analysis_id"] in retained_analysis_ids,
+        "kind": row["kind"],
+        "source_category": row["source_category"],
+        "source_key": row["source_key"],
+        "versions": json.loads(row["versions_json"]),
+        "actor_hash": row["actor_hash"],
+        "actor_email": row["actor_email"],
+        "rating": row["rating"],
+        "reason": row["reason"],
+        "comment": row["comment"],
+        "context_label": row["context_label"],
+        "context_text": row["context_text"],
+        "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None,
+        "updated_at": row["updated_at"],
+        "triage_status": row["triage_status"],
+        "triage_note": row["note"],
+        "failure": failure,
+    }
 
 
 def _now() -> str:

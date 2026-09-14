@@ -152,7 +152,7 @@ export function ProfileBuilderSettings({ scope = "team", onSaved, onDirtyChange 
           </select>
         </label>
       </div>
-      <details className="rounded-lg border p-4"><summary className="cursor-pointer text-sm font-medium">Preview template</summary><div className="mt-3 h-80 min-w-0 overflow-hidden [contain:inline-size]"><ProfileDocumentPreview profile={PROFILE_TEMPLATE_SAMPLE_PROFILE} template={previewTemplate} fillHeight /></div></details>
+      <details className="rounded-lg border p-4"><summary className="cursor-pointer text-sm font-medium">Preview template</summary><div className="mt-3 h-80 min-w-0 overflow-hidden [contain:inline-size]"><ProfileDocumentPreview profile={PROFILE_TEMPLATE_SAMPLE_PROFILE} template={previewTemplate} fillHeight zoomable /></div></details>
       <div className="rounded-lg border px-4">
         {toggle("profile-auto-summary", "Add a short summary", profileBuilderPreferences.auto_summary, auto_summary => setProfileBuilderPreferences((current) => ({ ...current, auto_summary })), false, "You can edit it afterwards.")}
         {profileBuilderPreferences.auto_summary ? <label className="mb-4 block space-y-2 text-sm"><span>What should the summary focus on? <span className="text-muted-foreground">(optional)</span></span><textarea rows={2} placeholder="For example: recent projects and leadership experience" value={profileBuilderPreferences.summary_instruction} onChange={(event) => setProfileBuilderPreferences((current) => ({ ...current, summary_instruction: event.target.value }))} className="w-full rounded-lg border bg-background p-3" /></label> : null}

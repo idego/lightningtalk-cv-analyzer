@@ -22,11 +22,13 @@ The app supports recruiter review. It does not make hiring decisions or verify a
 
 Upload one or more CVs with selectable text. The app extracts profile, employment, and education information, checks it against the document, and presents a report you can review alongside the original.
 
-Optional public research looks for company, education, and possible LinkedIn matches. It uses accepted information from the CV, shows sources, and lets you retry failed requests. Certificates are excluded from automated education research. Public matches are leads for manual review.
+Optional public research looks for company, education, and possible LinkedIn matches. It uses evidence-supported information from the CV, shows sources, and lets you retry failed requests. Certificates are excluded from automated education research. Public matches are leads for manual review.
 
 Completed analyses stay in your history until you delete them or retention removes them. You can reopen the original document, search candidates or filenames, and leave feedback on report sections.
 
 ## Profile Builder
+
+> **Currently disabled in the web app.** `PROFILE_BUILDER_ENABLED` in `apps/web/src/lib/feature-flags.js` is `false`: the sidebar entry is dimmed and inert, `/profile-builder` and `/profiles` redirect to `/analyze`, the Settings section is hidden, and the `/api/profile-builder/*` proxy answers 404. The API routes stay deployed. Flip the flag and rebuild the web image to re-enable it.
 
 Turn up to 10 CVs at a time into editable profiles:
 
@@ -74,7 +76,7 @@ This stops the stack and keeps its data volumes.
 
 The web app runs on **Next.js**. A private **FastAPI** service converts documents with **Docling**, runs the analysis, and stores reports and profiles in **SQLite**.
 
-For CV analysis, separate model passes extract profile, employment, and education information. Validation checks literal evidence and whether record fields belong together. A reviewer pass then proposes changes under the same validation rules. Optional public research runs on accepted subjects.
+For CV analysis, separate model passes extract profile, employment, and education information. Validation checks literal evidence and whether record fields belong together. A reviewer pass then proposes changes under the same validation rules. Optional public research runs on evidence-supported subjects: accepted records plus supported organization or institution names on their own.
 
 Profile Builder is a separate workflow with its own editable profile and template snapshots. It generates DOCX files and uses **LibreOffice** for PDF export. The Docker image includes LibreOffice; PDF previews use self-hosted assets.
 

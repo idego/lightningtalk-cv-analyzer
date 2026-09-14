@@ -14,10 +14,10 @@ from cv_validator.location import Ambiguous, LocationResolver, Resolved, Resolut
 from cv_validator.research.domain import EducationResearchInvalidResponse, EducationResearchRequest
 from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.versions import EDUCATION_RESEARCH_VERSION
-from cv_validator.research.subjects import accepted_records, safe_public_subject, supported_field
+from cv_validator.research.subjects import safe_public_subject, subject_records, supported_field
 
 RESEARCH_VERSION = EDUCATION_RESEARCH_VERSION
-PROMPT_VERSION = "education-research-prompt-v8"
+PROMPT_VERSION = "education-research-prompt-v9"
 SCHEMA_VERSION = "education-research-schema-v6"
 MAX_CREDENTIALS = 12
 
@@ -139,12 +139,13 @@ def apply_owner_scoped_education_context(
     return result
 
 
-def build_education_research_request(stored_report: dict[str, Any]) -> EducationResearchRequest:
+def build_education_research_request(stored_report: dict[str, Any], *, report_language: str = "en") -> EducationResearchRequest:
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for record in accepted_records(stored_report, "education"):
+    for record in subject_records(stored_report, "education", "institution"):
         institution = supported_field(record, "institution")
-        program = supported_field(record, "program")
+        # Only a supported relation proves the program belongs to this institution.
+        program = supported_field(record, "program") if record.get("relation_status") == "supported" else None
         if institution is None or not safe_public_subject(institution):
             continue
         fact: dict[str, Any] = {"institution": institution}
@@ -159,7 +160,7 @@ def build_education_research_request(stored_report: dict[str, Any]) -> Education
             break
     if not facts:
         raise ValueError("no_education_research_candidates")
-    return EducationResearchRequest(tuple(facts))
+    return EducationResearchRequest(tuple(facts), report_language)
 
 
 def validate_education_research(payload: Any, *, request: EducationResearchRequest) -> None:

@@ -15,6 +15,7 @@ type InboxItem = {
   triage_note?: string | null; comment?: string | null; context_text?: string | null;
   context_label?: string | null; context_report?: unknown; updated_at?: string | null; failure?: unknown;
   actor_email?: string | null; rating?: string | null; kind?: unknown; source_category?: unknown; source_key?: unknown;
+  analysis_available?: boolean;
 };
 type InboxData = { items: InboxItem[]; counts: Record<string, number> };
 const statuses = ["new", "reviewing", "planned", "resolved", "wont_fix"] as const;
@@ -181,7 +182,7 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
               <div className="border-t px-4 py-4 sm:px-5">
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
                   <div className="min-w-0 space-y-3">
-                    {item.comment ? <div><p className="text-xs font-medium text-muted-foreground">{t("commentFrom", { author: item.actor_email || t("unknownAuthor") })}</p><p className="mt-1.5 text-sm leading-relaxed">{item.comment}</p></div> : null}
+                    {item.comment ? <div><p className="text-xs font-medium text-muted-foreground">{t("commentFrom", { author: item.actor_email || t("unknownAuthor") })}</p><p className="mt-1.5 text-sm leading-relaxed break-words">{item.comment}</p></div> : null}
                     {moduleReport && moduleCategory ? (
                       <details className="group border-t pt-3">
                         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg py-1 text-sm font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
@@ -199,9 +200,15 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                         </summary>
                         <div className="mt-3 max-h-80 overflow-auto rounded-lg bg-muted/45 p-3">
                           {!sameLabel(item.context_label, context.section) && !sameLabel(item.context_label, context.subject) ? <p className="mb-2 text-xs font-semibold text-muted-foreground">{item.context_label}</p> : null}
-                          <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.context_text}</p>
+                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.context_text}</p>
                         </div>
                       </details>
+                    ) : moduleCategory && item.analysis_available === false ? (
+                      <div className="border-t pt-3">
+                        <p className="flex items-center gap-2 py-1 text-sm font-medium text-muted-foreground"><FileText className="size-4" />{t("showReportModule")}</p>
+                        <p className="mt-1 text-sm">{sameLabel(context.section, context.subject) ? context.section : `${context.section} · ${context.subject}`}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{t("reportModuleAnalysisDeleted")}</p>
+                      </div>
                     ) : null}
                     {item.failure ? <details className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{t("errorDetails")}</summary><pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">{JSON.stringify(item.failure, null, 2)}</pre></details> : null}
                   </div>

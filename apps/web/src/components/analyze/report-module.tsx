@@ -1,6 +1,6 @@
 "use client";
 
-import { Lightbulb } from "lucide-react";
+import { ListChecks } from "lucide-react";
 import type { AnalysisReport } from "@/lib/analyze-types";
 import { adaptReportInterface } from "@/lib/report-interface-adapter";
 import { HoverDisclosure } from "@/components/ui/hover-disclosure";
@@ -11,7 +11,8 @@ import { FlagList, StructuredFacts } from "@/components/analyze/results-list";
 import { SectionTitle } from "@/components/analyze/section-title";
 import { useCopy } from "@/lib/app-settings";
 
-export const reportModuleCategories = ["report", "attention", "worth_knowing", "company_research", "education_research", "linkedin_discovery"] as const;
+/** `attention` and `worth_knowing` are legacy categories kept so older feedback still renders the merged list. */
+export const reportModuleCategories = ["report", "what_to_check", "attention", "worth_knowing", "company_research", "education_research", "linkedin_discovery"] as const;
 export type ReportModuleCategory = (typeof reportModuleCategories)[number];
 
 export function isReportModuleCategory(value: unknown): value is ReportModuleCategory {
@@ -32,13 +33,11 @@ export function ReportModule({ report, category }: { report: AnalysisReport; cat
   switch (category) {
     case "report":
       return <StructuredFacts overview={presentation.overview} report={report} readOnly />;
+    case "what_to_check":
     case "attention":
-      return <HoverDisclosure className="rounded-md border border-rose-500/30 p-3" triggerClassName="text-sm font-medium" title={`${t("needsAttention")} (${presentation.attention.length})`} defaultOpen contentClassName="pt-3">
-        <FlagList flags={presentation.attention} />
-      </HoverDisclosure>;
     case "worth_knowing":
-      return <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<Lightbulb className="size-4" />}>{t("worthKnowing")} ({presentation.worthKnowing.length})</SectionTitle>} defaultOpen contentClassName="pt-3">
-        <FlagList flags={presentation.worthKnowing} />
+      return <HoverDisclosure className="rounded-md border border-sky-500/30 p-3" triggerClassName="text-sm font-medium" title={<SectionTitle icon={<ListChecks className="size-4" />}>{t("whatToCheck")} ({presentation.whatToCheck.length})</SectionTitle>} defaultOpen contentClassName="pt-3">
+        <FlagList flags={presentation.whatToCheck} />
       </HoverDisclosure>;
     case "company_research":
       return <CompanyResearchPanel report={report} readOnly />;

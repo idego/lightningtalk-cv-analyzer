@@ -47,5 +47,7 @@ export async function GET(
   if (!headers.has("Cache-Control")) {
     headers.set("Cache-Control", "private, no-store");
   }
+  // Never let the browser sniff an uploaded file into a different type.
+  headers.set("X-Content-Type-Options", "nosniff");
   return new Response(upstream.body, { status: upstream.status, headers });
 }

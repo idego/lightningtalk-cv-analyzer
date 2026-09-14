@@ -8,6 +8,10 @@ const t = (key, values) => translateCopy("en", key, values);
 
 test("describes feedback location and subject", () => {
   assert.deepEqual(
+    feedbackContext({ source_category: "what_to_check", source_key: "comparison-different-0" }, t),
+    { section: "What to check", subject: "Declared country and phone country differ" },
+  );
+  assert.deepEqual(
     feedbackContext({ source_category: "attention", source_key: "comparison-different-0" }, t),
     { section: "Needs attention", subject: "Declared country and phone country differ" },
   );

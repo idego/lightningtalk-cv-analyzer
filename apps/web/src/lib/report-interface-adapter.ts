@@ -1,3 +1,4 @@
+import { isContactLink } from "./contact-links.js";
 import type {
   AnalysisReport,
   Evidence,
@@ -21,30 +22,35 @@ export type OverviewRecord = {
   detail: string | null;
   searchSubject: string | null;
   searchContext: string | null;
-  needsReview?: boolean;
+};
+
+export type OverviewLinkKind = "linkedin" | "github" | "personal";
+
+export type OverviewLink = {
+  kind: OverviewLinkKind;
+  value: string;
+  url: string;
 };
 
 export type ReportOverview = {
   candidateName: string | null;
   phone: string | null;
   phoneCountry: string | null;
+  email: string | null;
+  links: OverviewLink[];
   statedLocation: string | null;
-  resolvedLocation: string | null;
-  postalCode: string | null;
-  postalCountry: string | null;
-  postalConsistency: "consistent" | "mismatch" | null;
+  resolvedCity: string | null;
+  resolvedCountry: string | null;
   euStatus: "inside" | "outside" | "unknown";
   education: OverviewRecord[];
   certifications: OverviewRecord[];
   employment: OverviewRecord[];
-  attentionRecords: OverviewRecord[];
   educationStatus?: string;
   employmentStatus?: string;
 };
 
 export type ReportInterface = {
-  attention: ReportFinding[];
-  worthKnowing: ReportFinding[];
+  whatToCheck: ReportFinding[];
   overview: ReportOverview;
 };
 
@@ -117,65 +123,37 @@ function finding(
 
 function localized(language: ReportLanguage) {
   return language === "pl" ? {
+    recordUnconfirmed: "Wpis nie został w pełni potwierdzony",
+    recordRelationWhy: "Jego pola pochodzą z różnych części CV, więc mogą nie należeć do siebie.",
+    recordReviewerWhy: "Weryfikacja nie potwierdziła tego wpisu.",
+    recordCheck: "Porównaj daty i szczegóły z wpisem w CV.",
     gap: "Nie udało się bezpiecznie uzupełnić informacji w CV.",
     gapWhy: "Brak danych ogranicza kompletność raportu.",
     gapCheck: "Sprawdź brakującą informację bezpośrednio w CV.",
     mismatch: "Deklarowany kraj i kraj numeru telefonu są różne.",
     mismatchWhy: "To sygnał niespójności, a nie dowód miejsca pobytu.",
     mismatchCheck: "Sprawdź deklarowaną lokalizację i numer telefonu w CV.",
-    emailTypo: "Adres e-mail może zawierać literówkę w popularnej domenie.",
-    emailTypoWhy: "Literówka może uniemożliwić kontakt z kandydatem.",
-    emailTypoCheck: "Porównaj adres z oryginalnym CV przed użyciem.",
-    linkedinMissing: "Nie znaleziono dopasowanego profilu LinkedIn w ograniczonym wyszukiwaniu.",
-    linkedinMissingWhy: "Brak wyniku z ograniczonego wyszukiwania nie oznacza, że profil nie istnieje.",
-    linkedinMissingCheck: "Wyszukaj profil ręcznie, używając danych kandydata z CV.",
-    outsideEu: "Informacje lokalizacyjne wskazują poza UE.",
-    outsideEuWhy: "To informacyjna klasyfikacja podanych danych; nie określa fizycznego pobytu, narodowości ani prawa do pracy.",
-    outsideEuCheck: "Potwierdź deklarowaną lokalizację i numer telefonu bezpośrednio z kandydatem.",
-    declaredSource: "deklarowana lokalizacja",
-    phoneSource: "prefiks telefonu",
-    locationResolved: "GeoNames rozpoznał deklarowane miasto i kraj.",
-    locationAmbiguous: "Deklarowane miasto jest niejednoznaczne w indeksie GeoNames.",
-    locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie GeoNames.",
-    locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje w GeoNames.",
+    locationAmbiguous: "Deklarowane miasto pasuje do kilku miejscowości.",
+    locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie lokalizacji.",
+    locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje.",
     locationWhy: "Rozpoznanie dotyczy zgodności tekstu CV z ograniczonym indeksem, nie miejsca pobytu.",
     locationCheck: "Sprawdź pisownię miasta i kraju w CV oraz potwierdź je z kandydatem.",
-    postalResolved: "Kod pocztowy jest przypisany do deklarowanego miasta i kraju w indeksie offline.",
-    postalMismatch: "Kod pocztowy jest przypisany do innego miasta w skonfigurowanym indeksie offline.",
-    postalUnresolved: "Kod pocztowy nie został potwierdzony dla deklarowanego miasta i kraju w ograniczonym indeksie offline.",
-    postalUnavailable: "Walidacja kodu pocztowego jest niedostępna, ponieważ indeks pocztowy nie jest skonfigurowany.",
-    postalWhy: "Walidacja obejmuje tylko powiązany rekord adresowy poparty dowodem z CV.",
-    postalCheck: "Sprawdź kod pocztowy, miasto i kraj jako jeden adres.",
   } : {
+    recordUnconfirmed: "Entry could not be fully confirmed",
+    recordRelationWhy: "Its fields were extracted from separate parts of the CV, so they may not belong together.",
+    recordReviewerWhy: "The review pass did not confirm this entry.",
+    recordCheck: "Compare the dates and details against the CV entry.",
     gap: "Information in the CV could not be added safely.",
     gapWhy: "Missing data limits the completeness of the report.",
     gapCheck: "Review the missing information directly in the CV.",
     mismatch: "The declared country and phone country differ.",
     mismatchWhy: "This is a consistency signal, not proof of residence.",
     mismatchCheck: "Review the declared location and phone number in the CV.",
-    emailTypo: "The email address may contain a typo in a common provider domain.",
-    emailTypoWhy: "A typo may prevent contact with the candidate.",
-    emailTypoCheck: "Compare the address with the original CV before using it.",
-    linkedinMissing: "No matching LinkedIn profile was found by the limited search.",
-    linkedinMissingWhy: "No result from a limited search does not mean that a profile does not exist.",
-    linkedinMissingCheck: "Search manually using the candidate details stated in the CV.",
-    outsideEu: "Location information points outside the EU.",
-    outsideEuWhy: "This only classifies the supplied information; it does not establish physical residence, nationality, or right to work.",
-    outsideEuCheck: "Confirm the stated location and phone number directly with the candidate.",
-    declaredSource: "declared location",
-    phoneSource: "phone prefix",
-    locationResolved: "GeoNames resolved the declared city and country.",
-    locationAmbiguous: "The declared city is ambiguous in the GeoNames index.",
-    locationUnresolved: "The declared city was not confirmed in the limited GeoNames index.",
-    locationMismatch: "The declared city and country point to different countries in GeoNames.",
+    locationAmbiguous: "The declared city matches several places.",
+    locationUnresolved: "The declared city was not confirmed in the limited location index.",
+    locationMismatch: "The declared city and country point to different countries.",
     locationWhy: "This checks CV text against a limited index; it does not establish physical residence.",
     locationCheck: "Review the city and country spelling in the CV and confirm them with the candidate.",
-    postalResolved: "The postal code is assigned to the declared city and country in the offline index.",
-    postalMismatch: "The postal code is assigned to a different city in the configured offline index.",
-    postalUnresolved: "The postal code was not confirmed for the declared city and country in the limited offline index.",
-    postalUnavailable: "Postal-code validation is unavailable because the postal index is not configured.",
-    postalWhy: "Validation covers only an evidence-supported postal code related to one declared address record.",
-    postalCheck: "Review the postal code, city, and country as one address.",
   };
 }
 
@@ -223,7 +201,6 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
     ]),
     searchSubject: institution ?? certificate,
     searchContext: value(item.program) ?? (institution ? certificate : null),
-    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -238,26 +215,42 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
     ]),
     searchSubject: value(item.organization),
     searchContext: value(item.location),
-    needsReview: item.status === "ambiguous",
   };
+}
+
+const MAX_OVERVIEW_LINKS = 8;
+
+/** Shorten a literal link for display: drop the scheme, `www.`, and a trailing slash. */
+function displayLink(literal: string): string {
+  return literal.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "") || literal;
+}
+
+function overviewLinks(items: unknown[]): OverviewLink[] {
+  const seen = new Set<string>();
+  const links: OverviewLink[] = [];
+  for (const item of items.map(record)) {
+    const literal = text(item?.value);
+    const url = text(item?.normalized_url);
+    if (!literal || !url || !/^https:\/\//i.test(url)) continue;
+    if (!isContactLink(item)) continue;
+    const key = url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const host = item?.known_host;
+    const kind: OverviewLinkKind = host === "linkedin" || host === "github" ? host : "personal";
+    links.push({ kind, value: displayLink(literal), url });
+    if (links.length >= MAX_OVERVIEW_LINKS) break;
+  }
+  return links;
 }
 
 function overview(report: AnalysisReport): ReportOverview {
   const phone = record(report.mechanical.phones[0]);
+  const email = record(report.mechanical.emails[0]);
   const resolution = report.mechanical.location_resolution
     .map(record)
     .find((item) => item?.subject === "declared_location") ?? null;
-  const postal = record(report.mechanical.accepted_postal_addresses[0]);
-  const postalCountries = Array.isArray(postal?.possible_country_codes)
-    ? postal.possible_country_codes.filter((item): item is string => typeof item === "string")
-    : [];
   const eu = record(report.mechanical.eu_status);
-  const postalValidation = record(postal?.validation);
-  const suspectedIds = new Set(
-    (report.base_analysis.review.annotations ?? [])
-      .filter((item) => item.kind === "suspected_hallucination" || item.kind === "unsupported_evidence")
-      .map((item) => item.record_id),
-  );
   const declaredSource = Array.isArray(eu?.sources)
     ? eu.sources.map(record).find((item) => item?.kind === "declared_location")
     : null;
@@ -268,29 +261,19 @@ function overview(report: AnalysisReport): ReportOverview {
     candidateName: value(report.base_analysis.profile.candidate_name),
     phone: text(phone?.value),
     phoneCountry: text(phone?.country_code),
+    email: text(email?.value),
+    links: overviewLinks(report.mechanical.literal_links),
     statedLocation: value(report.base_analysis.profile.declared_location),
-    resolvedLocation: join([text(resolution?.canonical_name), text(resolution?.country_code)]),
-    postalCode: text(postal?.value),
-    postalCountry: postalCountries.length === 1 ? postalCountries[0] : null,
-    postalConsistency: postalValidation?.status === "resolved"
-      ? "consistent"
-      : postalValidation?.status === "mismatch"
-        ? "mismatch"
-        : null,
+    resolvedCity: text(resolution?.canonical_name),
+    resolvedCountry: text(resolution?.country_code),
     euStatus: declaredCountry && outsideEu.includes(declaredCountry) ? "outside" : declaredCountry && insideEu.includes(declaredCountry) ? "inside" : "unknown",
     education: report.base_analysis.education
-      .filter((item) => !suspectedIds.has(item.id) && value(item.institution))
+      .filter((item) => value(item.institution))
       .map(educationRecord),
     certifications: report.base_analysis.education
-      .filter((item) => !suspectedIds.has(item.id) && !value(item.institution) && value(item.certificate))
+      .filter((item) => !value(item.institution) && value(item.certificate))
       .map(educationRecord),
-    employment: report.base_analysis.employment.filter((item) => !suspectedIds.has(item.id)).map(employmentRecord),
-    attentionRecords: [
-      ...report.base_analysis.education
-        .filter((item) => suspectedIds.has(item.id) && (value(item.institution) || value(item.certificate)))
-        .map(educationRecord),
-      ...report.base_analysis.employment.filter((item) => suspectedIds.has(item.id)).map(employmentRecord),
-    ],
+    employment: report.base_analysis.employment.map(employmentRecord),
     educationStatus: report.base_analysis.pass_statuses.education?.section_status,
     employmentStatus: report.base_analysis.pass_statuses.employment?.section_status,
   };
@@ -311,12 +294,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
     countryList(item.declared_country_codes),
     countryList(item.phone_country_codes),
   ].join(":"));
-  const emailFindings = unique(report.mechanical.email_findings.map(record).filter((item): item is UnknownRecord => Boolean(item)), (item) => [
-    text(item.kind),
-    text(item.observed_domain),
-    text(item.suggested_domain),
-  ].join(":"))
-    .filter((item) => firstEvidence(item).length > 0);
   const coverageGaps = unique(review.coverage_gaps.map(record).filter((item): item is UnknownRecord => Boolean(item)), (item) => [
     text(item.target),
     text(item.reason_code),
@@ -339,31 +316,18 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
   const cityCountryRelationship = text(location?.city_country_relationship);
   const locationFinding = locationStatus
     && locationStatus !== "unavailable"
+    && (locationStatus !== "resolved" || cityCountryRelationship === "different")
     && locationEvidence.length > 0
     ? findingFromEvidence(
         `location-${locationStatus}-${cityCountryRelationship}`,
         cityCountryRelationship === "different"
           ? copy.locationMismatch
-          : locationStatus === "resolved"
-            ? copy.locationResolved
-            : locationStatus === "ambiguous"
-              ? copy.locationAmbiguous
-              : copy.locationUnresolved,
+          : locationStatus === "ambiguous"
+            ? copy.locationAmbiguous
+            : copy.locationUnresolved,
         copy.locationWhy,
         copy.locationCheck,
         locationEvidence,
-      )
-    : null;
-  const linkedinNotFound = report.linkedin_discovery?.status === "completed"
-    && report.linkedin_discovery.linkedin_not_found;
-  const linkedinEvidence = report.base_analysis.profile.candidate_name?.evidence ?? [];
-  const linkedinFinding = linkedinNotFound && linkedinEvidence.length > 0
-    ? findingFromEvidence(
-        "linkedin-not-found",
-        copy.linkedinMissing,
-        copy.linkedinMissingWhy,
-        copy.linkedinMissingCheck,
-        linkedinEvidence,
       )
     : null;
   const institutionFindings: ReportFinding[] = (report.education_research?.credentials ?? []).flatMap((credential, index) => {
@@ -397,21 +361,28 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       sourceUrls: item.source_urls,
     }];
   });
-  const attention: ReportFinding[] = [
+  const recordFindings: ReportFinding[] = [
+    ...report.base_analysis.education.map((item) => ({ item, label: value(item.institution) ?? value(item.certificate) ?? value(item.program) })),
+    ...report.base_analysis.employment.map((item) => ({ item, label: value(item.organization) ?? value(item.role) })),
+  ].flatMap(({ item, label }) => {
+    if (item.status !== "ambiguous") return [];
+    const evidence = Object.values(item).flatMap((field) => (
+      field && typeof field === "object" && "evidence" in field && Array.isArray(field.evidence) ? field.evidence as Evidence[] : []
+    ));
+    if (!evidence.length) return [];
+    return [findingFromEvidence(
+      `record-${item.id}`,
+      label ? `${copy.recordUnconfirmed}: ${label}` : copy.recordUnconfirmed,
+      item.relation_status === "supported" ? copy.recordReviewerWhy : copy.recordRelationWhy,
+      copy.recordCheck,
+      evidence,
+    )];
+  });
+  // One list, ordered from research-backed contradictions to weaker consistency signals.
+  const whatToCheck: ReportFinding[] = [
     ...institutionFindings,
     ...companyFindings,
-    ...(linkedinFinding ? [linkedinFinding] : []),
     ...(locationFinding && cityCountryRelationship === "different" ? [locationFinding] : []),
-    ...emailFindings
-      .map((item, index) => finding(`email-${index}`, { ...item, summary: [
-        copy.emailTypo,
-        text(item.observed_domain) && text(item.suggested_domain)
-          ? `${text(item.observed_domain)} → ${text(item.suggested_domain)}`
-          : null,
-      ].filter(Boolean).join(" ") }, copy.emailTypo, copy.emailTypoWhy, copy.emailTypoCheck)),
-  ];
-
-  const worthKnowing: ReportFinding[] = [
     ...comparisons
       .filter((item) => item.relationship === "different")
       .map((_item, index) => findingFromEvidence(
@@ -421,6 +392,8 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         copy.mismatchCheck,
         comparisonEvidence,
       )),
+    ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
+    ...recordFindings,
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },
@@ -428,8 +401,7 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       copy.gapWhy,
       copy.gapCheck,
     )),
-    ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
   ];
 
-  return { attention, worthKnowing, overview: overview(report) };
+  return { whatToCheck, overview: overview(report) };
 }

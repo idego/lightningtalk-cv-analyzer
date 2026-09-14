@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
@@ -11,8 +13,28 @@ class SourceFormat(str, Enum):
     DOCX = "docx"
 
 
+ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+GENERIC_ERROR_CODE = "request_rejected"
+
+
+def safe_error_code(value: object, fallback: str = GENERIC_ERROR_CODE) -> str:
+    """Return `value` only when it is a bounded machine code, never free text."""
+    text = str(value)
+    return text if ERROR_CODE_PATTERN.fullmatch(text) else fallback
+
+
 class AnalysisStrategyError(RuntimeError):
-    """A safe strategy failure that can be exposed as a bounded API error."""
+    """A safe strategy failure that can be exposed as a bounded API error.
+
+    The message MUST be a machine code (`^[a-z][a-z0-9_]{1,63}$`), so a library
+    message, path, or document excerpt can never become an API `detail`.
+    """
+
+    def __init__(self, code: str) -> None:
+        if not ERROR_CODE_PATTERN.fullmatch(code):
+            raise ValueError("AnalysisStrategyError requires a machine error code")
+        super().__init__(code)
+        self.code = code
 
 
 class AnalysisStrategyUnavailable(AnalysisStrategyError):

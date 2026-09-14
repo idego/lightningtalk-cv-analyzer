@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import asyncio
 import hmac
 import json
 import os
 import secrets
 import shutil
+import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -27,11 +29,24 @@ from cv_validator.analysis import (
     AnalysisStrategyUnavailable,
 )
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
+from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
-from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
-from cv_validator.api.persistence import PersistenceConfig, PersistenceStore
+from cv_validator.api.concurrency import ResearchLockRegistry
+from cv_validator.api.maintenance import (
+    MAINTENANCE_TIME_ENV,
+    RetentionMaintenance,
+    parse_maintenance_time,
+)
+from cv_validator.api.persistence import (
+    RETENTION_DAYS_MAX,
+    RETENTION_DAYS_MIN,
+    PersistenceConfig,
+    PersistenceStore,
+)
 from cv_validator.api.profile_builder_routes import create_profile_builder_router
+from cv_validator.api.profile_builder_store import ProfileBuilderStore
 from cv_validator.api.feedback import FeedbackInput, FeedbackStore, TriageInput
+from cv_validator.api.report_view import public_report_view
 from cv_validator.config import (
     LocationConfigurationError,
     load_location_resolver,
@@ -102,6 +117,7 @@ from cv_validator.usage import load_pricing_catalog
 
 DEFAULT_DB = Path("data/cv_analyzer.db")
 DEFAULT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+DEFAULT_ANALYSIS_CONCURRENCY = 4
 
 
 class _RetentionUpdate(BaseModel):
@@ -113,7 +129,12 @@ def _db_path_from_env() -> Path:
 
 
 def _retention_days_from_env() -> int:
-    return int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    value = int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "10"))
+    if not RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX:
+        raise ValueError(
+            f"CV_VALIDATOR_RETENTION_DAYS must be between {RETENTION_DAYS_MIN} and {RETENTION_DAYS_MAX}"
+        )
+    return value
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -138,6 +159,7 @@ def create_app(
     openai_settings: OpenAISettings | None = None,
     analysis_strategy: AnalysisStrategy | None = None,
     upload_max_bytes: int | None = None,
+    analysis_concurrency: int | None = None,
     company_researcher=None,
     education_researcher=None,
     linkedin_researcher=None,
@@ -153,7 +175,11 @@ def create_app(
 ) -> FastAPI:
     configure_structured_logging()
     settings = openai_settings or load_openai_settings()
-    retention_admin_secret = internal_admin_secret or os.environ.get("BETTER_AUTH_SECRET")
+    internal_secret = (
+        internal_admin_secret
+        or os.environ.get("CV_VALIDATOR_INTERNAL_API_SECRET")
+        or os.environ.get("BETTER_AUTH_SECRET")
+    )
     reference_data_error: str | None = None
     if location_resolver is not None:
         resolver = location_resolver
@@ -247,22 +273,43 @@ def create_app(
         else _positive_int_env("CV_VALIDATOR_UPLOAD_MAX_BYTES", DEFAULT_UPLOAD_MAX_BYTES)
     )
     research_locks = ResearchLockRegistry()
-    # Analyses run off the event loop so reads stay responsive, but the shared
-    # strategy (one document converter) still processes one CV at a time.
-    analysis_lock = threading.Lock()
-    cancellations = AnalysisCancellationRegistry()
+    analysis_concurrency_limit = (
+        analysis_concurrency
+        if analysis_concurrency is not None
+        else _positive_int_env("CV_VALIDATOR_ANALYSIS_CONCURRENCY", DEFAULT_ANALYSIS_CONCURRENCY)
+    )
+    # Analyses run off the event loop so reads stay responsive, but they are
+    # bounded rather than unbounded: the container has two CPU cores for
+    # document conversion, OpenAI enforces per-key rate limits, and each
+    # analysis already fans out to four model calls. The limit is per process;
+    # research locks, telemetry, and the retention scheduler are in-memory, so
+    # scaling must stay single-process. (Cancel requests live in the database.)
+    analysis_slots = threading.BoundedSemaphore(analysis_concurrency_limit)
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
+    maintenance = RetentionMaintenance(
+        purgers=(store.purge_expired, ProfileBuilderStore(store).purge_expired),
+        vacuum=store.vacuum,
+        run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
+    )
+    # Request-path purges (list, persist, retention change) also report their
+    # outcome, so a successful one clears a stale failure flag before 03:00.
+    store.purge_listeners.append(maintenance.record_purge_outcome)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        stop_maintenance = asyncio.Event()
+        maintenance_task: asyncio.Task[None] | None = None
         try:
-            try:
-                store.purge_expired()
-            except (OSError, PersistenceError):
+            if not maintenance.run_startup():
                 safe_log("retention_purge_failed", error_code="startup_purge_failed")
+            maintenance_task = asyncio.create_task(maintenance.run_forever(stop_maintenance))
             yield
         finally:
+            stop_maintenance.set()
+            if maintenance_task is not None:
+                await maintenance_task
             research_locks.clear()
             if isinstance(resolver, SQLiteLocationResolver):
                 resolver.close()
@@ -286,6 +333,17 @@ def create_app(
             store.bind_legacy_owner(owner_user_id, legacy_token)
         except PersistenceError as exc:
             raise HTTPException(status_code=503, detail="analysis_ownership_migration_failed") from exc
+
+    def require_internal_secret(
+        x_internal_admin_secret: str | None = Header(default=None),
+    ) -> None:
+        """Guard for ``/internal/*`` and privileged writes: only the web proxy holds this secret."""
+        if not internal_secret:
+            raise HTTPException(status_code=503, detail="internal_secret_unconfigured")
+        if not x_internal_admin_secret or not hmac.compare_digest(
+            x_internal_admin_secret, internal_secret
+        ):
+            raise HTTPException(status_code=403, detail="internal_secret_required")
 
     app = FastAPI(
         title="CV Analyzer",
@@ -331,6 +389,10 @@ def create_app(
             "profile_builder": {"ready": settings.enabled},
             "profile_pdf_export": {"ready": shutil.which("soffice") is not None or shutil.which("libreoffice") is not None},
             "database": {"ready": True},
+            "retention_purge": {
+                "ready": maintenance.healthy,
+                "reason": None if maintenance.healthy else "retention_purge_failed",
+            },
             "feedback": {"ready": True, "enabled": True},
             "feedback_inbox": {"ready": True, "enabled": True},
         }
@@ -447,7 +509,11 @@ def create_app(
     @app.get("/health")
     def health() -> dict:
         current = capabilities()
-        required_ready = current["database"]["ready"] and current["base_analysis"]["ready"]
+        required_ready = (
+            current["database"]["ready"]
+            and current["retention_purge"]["ready"]
+            and current["base_analysis"]["ready"]
+        )
         if require_location_resolver:
             required_ready = (
                 required_ready
@@ -479,7 +545,7 @@ def create_app(
                 "store": settings.store,
                 "timeout_seconds": settings.timeout_seconds,
             },
-            "retention": {"days": store.config.retention_days},
+            "retention": {"days": store.config.retention_days, "maintenance": maintenance.status()},
             "research_cache": {"ttl_days": store.config.research_cache_ttl_days},
             "upload": {"max_bytes": max_upload_bytes},
         }
@@ -492,13 +558,16 @@ def create_app(
         correlation_id: str,
         request_id: str | None = None,
     ) -> dict:
-        with analysis_lock:
+        with analysis_slots:
             try:
                 return _analyze_upload(
                     content, filename, report_language, owner_user_id, correlation_id, request_id
                 )
             finally:
-                cancellations.discard(owner_user_id, request_id)
+                try:
+                    store.discard_analysis_cancel(owner_user_id, request_id)
+                except (PersistenceError, sqlite3.Error):
+                    safe_log("analysis_cancel_discard_failed", error_code="analysis_persistence_error")
 
     def _analyze_upload(
         content: bytes,
@@ -508,11 +577,11 @@ def create_app(
         correlation_id: str,
         request_id: str | None,
     ) -> dict:
-        if cancellations.is_cancelled(owner_user_id, request_id):
+        if store.analysis_cancel_requested(owner_user_id, request_id):
             raise HTTPException(status_code=409, detail="analysis_cancelled")
         analysis_id = str(uuid4())
         try:
-            store.create_analysis_run(analysis_id, correlation_id, owner_user_id)
+            store.create_analysis_run(analysis_id, correlation_id, owner_user_id, request_id)
         except PersistenceError as exc:
             raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
         recorder = AnalysisRecorder(
@@ -559,7 +628,7 @@ def create_app(
                     detail=f"analysis_{base_status}",
                     headers={"X-Analysis-ID": analysis_id},
                 )
-            if cancellations.is_cancelled(owner_user_id, request_id):
+            if store.analysis_cancel_requested(owner_user_id, request_id, analysis_id):
                 recorder.emit(
                     "analysis_cancelled",
                     operation="base_analysis",
@@ -639,21 +708,21 @@ def create_app(
                     for item in report["base_analysis"][key]
                 ),
             )
-            return response_payload
+            return public_report_view(response_payload)
         except HTTPException:
             raise
         except AnalysisStrategyUnavailable as exc:
-            store.complete_analysis_run(analysis_id, "unavailable", str(exc))
+            store.complete_analysis_run(analysis_id, "unavailable", exc.code)
             raise HTTPException(
                 status_code=503,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except AnalysisStrategyError as exc:
-            store.complete_analysis_run(analysis_id, "failed", str(exc))
+            store.complete_analysis_run(analysis_id, "failed", exc.code)
             raise HTTPException(
                 status_code=422,
-                detail=str(exc),
+                detail=exc.code,
                 headers={"X-Analysis-ID": analysis_id},
             ) from exc
         except ValueError as exc:
@@ -717,7 +786,10 @@ def create_app(
     ) -> JSONResponse:
         if not x_analysis_owner_id or not x_analysis_request_id:
             raise HTTPException(status_code=400, detail="analysis_request_id_required")
-        cancellations.request(_owner_user_id(x_analysis_owner_id), x_analysis_request_id)
+        try:
+            store.request_analysis_cancel(_owner_user_id(x_analysis_owner_id), x_analysis_request_id)
+        except (PersistenceError, sqlite3.Error) as exc:
+            raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
         return JSONResponse({"status": "cancel_requested"}, status_code=202)
 
     @app.get("/analyses")
@@ -744,7 +816,7 @@ def create_app(
     ) -> JSONResponse:
         payload = _owned_payload(store, analysis_id, _optional_owner_user_id(x_analysis_owner_id))
         attach_capabilities(payload)
-        return JSONResponse(payload)
+        return JSONResponse(public_report_view(payload))
 
     @app.post("/analyses/{analysis_id}/share")
     def create_analysis_share_link(
@@ -752,13 +824,14 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
     ) -> JSONResponse:
         share_token = secrets.token_urlsafe(32)
-        if not store.persist_analysis_share_token(
+        expires_at = store.persist_analysis_share_token(
             analysis_id,
             _optional_owner_user_id(x_analysis_owner_id),
             share_token,
-        ):
+        )
+        if expires_at is None:
             raise HTTPException(status_code=404, detail="analysis_not_found")
-        return JSONResponse({"share_token": share_token})
+        return JSONResponse({"share_token": share_token, "expires_at": expires_at})
 
     @app.get("/shared/analyses/{analysis_id}")
     def get_shared_analysis(
@@ -772,6 +845,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         _attach_completed_research(store, analysis_id, view["report"])
         attach_capabilities(view["report"])
+        view["report"] = public_report_view(view["report"])
         return JSONResponse(view)
 
     @app.get("/analyses/{analysis_id}/diagnostics")
@@ -795,7 +869,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="analysis_not_found")
         return JSONResponse(store.get_analysis_usage_summary(analysis_id))
 
-    @app.get("/internal/usage/summary")
+    @app.get("/internal/usage/summary", dependencies=[Depends(require_internal_secret)])
     def get_usage_summary() -> JSONResponse:
         return JSONResponse(store.get_usage_summary())
 
@@ -815,6 +889,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -834,6 +909,7 @@ def create_app(
             headers={
                 "Content-Disposition": _inline_disposition(document["filename"]),
                 "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -850,17 +926,8 @@ def create_app(
     def get_retention() -> JSONResponse:
         return JSONResponse({"days": store.config.retention_days})
 
-    @app.put("/settings/retention")
-    def update_retention(
-        update: _RetentionUpdate,
-        x_internal_admin_secret: str | None = Header(default=None),
-    ) -> JSONResponse:
-        if not retention_admin_secret:
-            raise HTTPException(status_code=503, detail="retention_admin_unconfigured")
-        if not x_internal_admin_secret or not hmac.compare_digest(
-            x_internal_admin_secret, retention_admin_secret
-        ):
-            raise HTTPException(status_code=403, detail="retention_owner_required")
+    @app.put("/settings/retention", dependencies=[Depends(require_internal_secret)])
+    def update_retention(update: _RetentionUpdate) -> JSONResponse:
         try:
             store.set_retention_days(update.days)
         except ValueError as exc:
@@ -882,7 +949,7 @@ def create_app(
         try:
             result = feedback_store.put(analysis_id, target_id, _owner_user_id(x_analysis_owner_id), update, actor_email=x_feedback_actor_email)
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=safe_error_code(exc, "feedback_rejected")) from exc
         if result is None:
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse(result)
@@ -895,11 +962,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"withdrawn": result})
 
-    @app.get("/internal/feedback")
+    @app.get("/internal/feedback", dependencies=[Depends(require_internal_secret)])
     def feedback_inbox(limit: int = Query(default=50, ge=1, le=100), cursor: int = Query(default=0, ge=0), rating: str | None = None, reason: str | None = None, kind: str | None = None, status: str | None = None, source: str | None = None, version: str | None = None, operation: str | None = None, error_code: str | None = None, date_from: str | None = None, date_to: str | None = None) -> JSONResponse:
         return JSONResponse(feedback_store.inbox(limit=limit, cursor=cursor, filters={"rating": rating, "reason": reason, "kind": kind, "status": status, "source": source, "version": version, "operation": operation, "error_code": error_code, "date_from": date_from, "date_to": date_to}))
 
-    @app.put("/internal/feedback/{target_id}/{actor_hash}/triage")
+    @app.put("/internal/feedback/{target_id}/{actor_hash}/triage", dependencies=[Depends(require_internal_secret)])
     def update_feedback_triage(target_id: str, actor_hash: str, update: TriageInput, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
         if not x_feedback_maintainer:
             raise HTTPException(status_code=400, detail="maintainer_required")
@@ -907,7 +974,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="feedback_not_found")
         return JSONResponse({"updated": True})
 
-    @app.delete("/internal/feedback/{target_id}/{actor_hash}")
+    @app.delete("/internal/feedback/{target_id}/{actor_hash}", dependencies=[Depends(require_internal_secret)])
     def delete_feedback_response(target_id: str, actor_hash: str, x_feedback_maintainer: str | None = Header(default=None)) -> JSONResponse:
         if not x_feedback_maintainer:
             raise HTTPException(status_code=400, detail="maintainer_required")
@@ -921,7 +988,9 @@ def create_app(
         x_analysis_owner_id: str | None,
         x_ai_enabled: bool,
         x_research_refresh: bool,
+        x_report_language: str = "en",
     ) -> JSONResponse:
+        report_language = _report_language(x_report_language)
         stored = _owned_payload(
             store, analysis_id, _optional_owner_user_id(x_analysis_owner_id)
         )
@@ -935,8 +1004,8 @@ def create_app(
         recorder.emit("research_started", operation=f"{category}_research", category="research", outcome="started")
         try:
             request = (
-                build_company_research_request(stored)
-                if category == "company" else build_education_research_request(stored)
+                build_company_research_request(stored, report_language=report_language)
+                if category == "company" else build_education_research_request(stored, report_language=report_language)
             )
         except ValueError as exc:
             _research_failure(
@@ -1095,9 +1164,10 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
         x_research_refresh: bool = Header(default=False),
+        x_report_language: str = Header(default="en"),
     ) -> JSONResponse:
         return research_subjects(
-            "company", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh,
+            "company", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh, x_report_language,
         )
 
     @app.post("/analyses/{analysis_id}/research/education")
@@ -1106,9 +1176,10 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
         x_research_refresh: bool = Header(default=False),
+        x_report_language: str = Header(default="en"),
     ) -> JSONResponse:
         return research_subjects(
-            "education", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh,
+            "education", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh, x_report_language,
         )
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")
@@ -1206,6 +1277,7 @@ def create_app(
         return JSONResponse(response)
 
     app.state.store = store
+    app.state.retention_maintenance = maintenance
     app.state.location_resolver = resolver
     app.state.openai_settings = settings
     app.state.analysis_strategy = strategy

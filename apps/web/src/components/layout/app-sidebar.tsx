@@ -62,26 +62,51 @@ export function AppSidebar({ nav, ...props }: AppSidebarProps) {
             className="group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:p-1"
           >
             <SidebarMenu>
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    isActive={isSidebarItemActive(pathname, item.url)}
-                    tooltip={item.title}
-                    className="group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0! [&>svg]:size-5!"
-                    render={
-                      <Link href={item.url}>
-                        {item.icon ? <item.icon /> : null}
-                        <span
-                          data-sidebar-motion="content"
-                          className="opacity-100 transition-[width,opacity,transform] duration-150 [transition-timing-function:var(--motion-ease-out)] group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden group-data-[collapsible=icon]:-translate-x-1 group-data-[collapsible=icon]:opacity-0"
-                        >
-                          {item.title === "Settings" ? t("settings") : item.title === "Dashboard" ? t("dashboard") : item.title === "Analyze" ? t("analyze") : item.title}
-                        </span>
-                      </Link>
-                    }
-                  />
-                </SidebarMenuItem>
-              ))}
+              {group.items.map((item) => {
+                const label =
+                  item.title === "Settings"
+                    ? t("settings")
+                    : item.title === "Dashboard"
+                      ? t("dashboard")
+                      : item.title === "Analyze"
+                        ? t("analyze")
+                        : item.title === "Profile Builder"
+                          ? t("profileBuilder")
+                          : item.title;
+                const content = (
+                  <>
+                    {item.icon ? <item.icon /> : null}
+                    <span
+                      data-sidebar-motion="content"
+                      className="opacity-100 transition-[width,opacity,transform] duration-150 [transition-timing-function:var(--motion-ease-out)] group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:w-0 group-data-[collapsible=icon]:overflow-hidden group-data-[collapsible=icon]:-translate-x-1 group-data-[collapsible=icon]:opacity-0"
+                    >
+                      {label}
+                    </span>
+                  </>
+                );
+                const buttonClassName =
+                  "group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0! [&>svg]:size-5!";
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    {item.disabled ? (
+                      <SidebarMenuButton
+                        disabled
+                        aria-disabled="true"
+                        className={`${buttonClassName} cursor-default text-[var(--sidebar-muted)] opacity-100 hover:bg-transparent hover:text-[var(--sidebar-muted)] active:bg-transparent active:text-[var(--sidebar-muted)] disabled:opacity-100`}
+                      >
+                        {content}
+                      </SidebarMenuButton>
+                    ) : (
+                      <SidebarMenuButton
+                        isActive={isSidebarItemActive(pathname, item.url)}
+                        tooltip={label}
+                        className={buttonClassName}
+                        render={<Link href={item.url}>{content}</Link>}
+                      />
+                    )}
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
         ))}

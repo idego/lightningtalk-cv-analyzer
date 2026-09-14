@@ -29,8 +29,10 @@ def test_nonroot_upgrade_prepares_existing_volumes_before_database_users_start()
 def test_consolidation_keeps_deployment_port_and_private_api_contract():
     services = yaml.safe_load((ROOT / "docker-compose.yml").read_text())["services"]
     assert services["web"]["environment"]["PORT"] == "3000"
-    assert services["web"]["ports"] == ["${WEB_HOST:-127.0.0.1}:${WEB_PORT:-3001}:3000"]
+    assert services["web"]["ports"] == ["${WEB_PORT:-3000}:3000"]
     assert "ports" not in services["api"]
     assert "CV_VALIDATOR_LEGACY_OWNER_SECRET" in services["api"]["environment"]
+    assert services["api"]["environment"]["CV_VALIDATOR_INTERNAL_API_SECRET"] == "${INTERNAL_API_SECRET:-}"
+    assert services["web"]["environment"]["INTERNAL_API_SECRET"] == "${INTERNAL_API_SECRET:-}"
     lock = dict(line.split("=", 1) for line in (ROOT / "config/geonames.lock").read_text().splitlines())
     assert services["geonames-init"]["environment"]["GEONAMES_SNAPSHOT_VERSION"] == "${GEONAMES_SNAPSHOT_VERSION:-" + lock["version"] + "}"

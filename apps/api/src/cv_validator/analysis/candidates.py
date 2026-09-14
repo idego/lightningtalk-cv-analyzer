@@ -692,13 +692,39 @@ def _apply_merge_groups(
 # Conflicts that describe a resolved, visible decision rather than unresolved doubt.
 INFORMATIONAL_CONFLICT_CODES = {"field_detached_from_record"}
 
+# Annotations produced when the validator discards an invalid reviewer operation
+# (unknown ids, duplicate or uncited additions). They describe reviewer noise that
+# was already rejected, not an unresolved area of the CV, so they stay visible in
+# the report but never make the analysis partial on their own.
+REJECTED_REVIEWER_OPERATION_CODES = {
+    "unknown_reviewer_record_id",
+    "unknown_reviewer_patch_id",
+    "unknown_reviewer_merge_id",
+    "invalid_reviewer_merge_group",
+    "invalid_reviewer_relation_patch",
+    "invalid_reviewer_merge_relation",
+    "invalid_reviewer_profile_field",
+    "invalid_reviewer_candidate_type",
+    "reviewer_profile_field_already_present",
+    "reviewer_added_candidate_invalid_evidence",
+    "reviewer_added_candidate_invalid_relation",
+}
+REJECTED_REVIEWER_OPERATION_GAP_CODES = {"invalid_addition", "unsafe_relation"}
+NON_BLOCKING_CONFLICT_CODES = INFORMATIONAL_CONFLICT_CODES | REJECTED_REVIEWER_OPERATION_CODES
+
 
 def _review_status(payload: dict[str, Any], conflicts: list[Any], gaps: list[Any]) -> str:
     declared = payload.get("status")
     if declared in {"failed", "unavailable"}:
         return declared
-    blocking = [
+    blocking_conflicts = [
         item for item in conflicts
-        if not isinstance(item, dict) or item.get("reason_code") not in INFORMATIONAL_CONFLICT_CODES
+        if not isinstance(item, dict) or item.get("reason_code") not in NON_BLOCKING_CONFLICT_CODES
     ]
-    return "partial" if blocking or gaps or declared == "partial" else "completed"
+    blocking_gaps = [
+        item for item in gaps
+        if not isinstance(item, dict) or item.get("reason_code") not in REJECTED_REVIEWER_OPERATION_GAP_CODES
+    ]
+    if blocking_conflicts or blocking_gaps or declared == "partial":
+        return "partial"
+    return "completed"

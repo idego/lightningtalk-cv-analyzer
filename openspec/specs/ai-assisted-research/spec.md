@@ -6,13 +6,14 @@ Defines optional cited public-web research after a validated base analysis.
 
 ## Requirements
 
-### Requirement: Research only accepted base-analysis subjects
+### Requirement: Research only evidence-supported base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use accepted education records with a supported relation and supported institution. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
+Company research SHALL use employment records whose organization field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; employment-date timeline comparisons SHALL still use only accepted records with a supported relation. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
-Ambiguous records, ambiguous fields, self-employment labels, skills, raw
-extractor candidates, reviewer-rejected candidates, and unvalidated model
-output MUST NOT become research subjects.
+Ambiguous fields, self-employment labels, skills, raw extractor candidates,
+reviewer-rejected candidates, and unvalidated model output MUST NOT become
+research subjects. An ambiguous record contributes only its supported
+organization or institution name.
 
 #### Scenario: Reviewer adds a missing supported employer
 
@@ -20,10 +21,15 @@ output MUST NOT become research subjects.
   relation validator accepts it
 - **THEN** the employer can become a company-research subject
 
+#### Scenario: Education dates sit far from the institution
+
+- **WHEN** an education record is ambiguous because its fields could not be related, but its institution is supported
+- **THEN** education research still checks the institution, without the program or dates
+
 #### Scenario: Technology resembles an employer
 
-- **WHEN** a technology name is ambiguous or lacks an accepted employment
-  relation
+- **WHEN** a technology name has no supported organization evidence or was
+  rejected by the reviewer
 - **THEN** company research omits it
 
 ### Requirement: Automatic and manual category starts
@@ -33,10 +39,27 @@ research category automatically. Company, education, and LinkedIn categories
 run independently and remain available as manual actions after a failed or
 disabled automatic attempt.
 
+LinkedIn discovery SHALL NOT start automatically when the CV already contains
+a literal LinkedIn profile link (an extracted link tagged `linkedin`). It
+remains eligible and available as a manual action. In that case the manual
+action SHALL require two activations: the first shows a notice that a LinkedIn
+profile is already listed in the Contact section, the second starts discovery.
+Company and education automatic starts are unaffected by CV links.
+
 #### Scenario: Eligible categories exist
 
-- **WHEN** automatic research is enabled and accepted subjects exist
+- **WHEN** automatic research is enabled and the browser finds accepted, relation-supported records with a supported organization or institution (or a supported candidate name for LinkedIn)
 - **THEN** eligible categories start without waiting for another analysis pass
+
+#### Scenario: CV already includes a LinkedIn link
+
+- **WHEN** the extracted CV links include one tagged `linkedin`
+- **THEN** LinkedIn discovery is not started automatically, the manual LinkedIn action stays enabled, and company and education research start as usual
+
+#### Scenario: Manual LinkedIn discovery with a provided link
+
+- **WHEN** the recruiter activates the LinkedIn discovery action and the CV links a LinkedIn profile
+- **THEN** the first activation shows the Contact-section notice without a request, and the second activation starts discovery
 
 #### Scenario: Research is disabled
 
@@ -84,7 +107,7 @@ Education research SHALL check public evidence for institutions, programs, degre
 ### Requirement: LinkedIn discovery
 LinkedIn discovery SHALL return possible public profile links with citations, calibrated confidence, visible photo status, and visible connection-count status. It MUST NOT claim identity, compare appearance, or automatically match a person. Unknown public data remains unknown.
 
-High confidence SHALL require supported name alignment plus at least one independently supported experience or education alignment. Name-only results, results with missing experience context, and results with material conflicts MUST be medium or low. A same-name profile with wrong or conflicting experience MUST be low confidence. The default possible-profile limit is three and is configurable from 1 to 20. The default visible connection-count threshold is 500.
+High confidence SHALL require supported name alignment plus at least one independently supported experience or education alignment. Name-only results, results with missing experience context, and results with material conflicts MUST be medium or low. A same-name profile with wrong or conflicting experience MUST be low confidence. The default possible-profile limit is three and is configurable from 1 to 20 with `CV_VALIDATOR_LINKEDIN_MAX_PROFILES`. The default visible connection-count threshold is 500 and is configurable with `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD`. Automatic LinkedIn discovery is skipped when the CV already provides a LinkedIn link in its contact block; a manual start remains available.
 
 #### Scenario: Profile data is unavailable
 - **WHEN** photo or connection-count data is not publicly supported
@@ -107,12 +130,29 @@ disclose whether a result came from cache.
 
 A repeated compatible request SHALL return the stored completed result without
 another provider call. Cache failures in one category MUST NOT block unrelated
-categories.
+categories. The web research proxies SHALL always send `X-Research-Refresh: false`;
+a browser request MUST NOT be able to invalidate the shared public-entity cache.
+The private API honours `X-Research-Refresh: true` only for direct internal
+callers. Reusable cache entries expire after
+`CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` (default 30) and are removed by the
+retention purge.
+
+Company and education research SHALL receive the report language (`en` or `pl`)
+selected in the browser; the research prompt SHALL instruct the model to write
+free-text findings in that language while leaving names, URLs, identifiers,
+dates, and enum values untranslated. The report language SHALL be part of the
+reusable cache key and stored with the entry, so a cache hit never returns text
+generated for a different language. The API SHALL reject unsupported languages with 400 `unsupported_report_language`; the web research proxies forward `pl` and send `en` for any other browser language.
 
 #### Scenario: Compatible reusable result exists
 
-- **WHEN** a current public-entity cache entry matches the request
+- **WHEN** a current public-entity cache entry matches the request, including its report language
 - **THEN** the API reuses it and records a cache hit for the owning analysis
+
+#### Scenario: Same subject requested in another language
+
+- **WHEN** a cached entry exists for a subject in one report language and a request arrives for another
+- **THEN** the API treats it as a miss and generates fresh research in the requested language
 
 
 ### Requirement: Actionable research errors

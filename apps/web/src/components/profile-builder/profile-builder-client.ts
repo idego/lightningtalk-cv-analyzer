@@ -167,14 +167,19 @@ export function deleteCustomField(fieldId: string) {
   return jsonRequest<{ deleted: boolean }>(`custom-fields/${encodeURIComponent(fieldId)}`, { method: "DELETE" });
 }
 
-export function extractProfile(file: File, aiEnabled: boolean) {
+export function extractProfile(file: File, aiEnabled: boolean, requestId?: string) {
   const form = new FormData();
   form.append("file", file, file.name);
   return jsonRequest<ProfileExtractionResponse>("extract", {
     method: "POST",
     body: form,
-    headers: { "X-AI-Enabled": String(aiEnabled) },
+    headers: { "X-AI-Enabled": String(aiEnabled), ...(requestId ? { "X-Profile-Builder-Request-Id": requestId } : {}) },
   });
+}
+
+/** Ask the API to discard the in-flight extraction identified by `requestId`; mirrors /analyze/cancel. */
+export function cancelExtraction(requestId: string) {
+  return profileRequest("extract/cancel", { method: "POST", headers: { "X-Profile-Builder-Request-Id": requestId } }).catch(() => undefined);
 }
 
 export async function generateProfileSummary(

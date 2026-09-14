@@ -1,11 +1,9 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { ClipboardList } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { SignOutButton } from "@/components/auth/sign-out-button";
-import { Button } from "@/components/ui/button";
 import { titleFromPathname } from "@/components/layout/sidebar-data";
 import { useCopy } from "@/lib/app-settings";
 
@@ -23,19 +21,6 @@ export function AppHeader() {
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <ThemeToggle />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          aria-label={t("openFeatureListBoard")}
-          title={t("openFeatureListBoard")}
-          onClick={() => {
-            window.open("https://boards.s18i.io/boards/S3q9Xbo5w63D", "_blank", "noopener,noreferrer");
-          }}
-        >
-          <ClipboardList className="size-4" />
-        </Button>
         <SignOutButton />
       </div>
     </header>

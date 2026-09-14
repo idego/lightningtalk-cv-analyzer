@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { proxyInternalJson } from "@/lib/internal-api";
+import {
+  internalApiSecret,
+  internalSecretHeaders,
+  internalSecretUnconfigured,
+  proxyInternalJson,
+} from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
 
 export async function GET() {
@@ -7,5 +12,10 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return proxyInternalJson("/internal/usage/summary", { cache: "no-store" });
+  const secret = internalApiSecret();
+  if (!secret) return internalSecretUnconfigured();
+  return proxyInternalJson("/internal/usage/summary", {
+    cache: "no-store",
+    headers: internalSecretHeaders(secret),
+  });
 }

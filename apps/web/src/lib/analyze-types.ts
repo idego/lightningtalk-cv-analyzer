@@ -177,10 +177,10 @@ export type AnalysisReport = {
     name: "document-analysis";
     version: string;
   };
+  // The API sends a browser projection: model/usage/latency telemetry, the
+  // source digest, and review internals are stripped before the response.
   source: {
     format: "pdf" | "docx";
-    sha256: string;
-    identity: string;
     block_count: number;
     conversion_status: "completed" | "partial" | "unsupported" | "failed";
   };
@@ -191,25 +191,15 @@ export type AnalysisReport = {
     education: EducationRecord[];
     pass_statuses: Record<string, {
       status: AnalysisStatus;
-      attempt_count: number;
-      latency_ms: number | null;
-      failure_reason?: string | null;
-      usage: Record<string, number>;
-      model: string | null;
-      reasoning_effort: "none" | "low";
       section_status?: "completed_with_records" | "not_present" | "unresolved" | "failed";
     }>;
     review: {
       status: AnalysisStatus;
       accepted_ids: string[];
-      rejected: Array<Record<string, unknown>>;
       annotations?: Array<{ record_id: string; kind: "suspected_hallucination" | "unsupported_evidence" | "uncertain_relation" | "conflicting_relation" | "duplicate"; reason_code: string }>;
       merged_ids: string[][];
-      merge_projections: Array<Record<string, unknown>>;
-      relation_corrections: Array<Record<string, unknown>>;
       added_profile_fields: Array<"candidate_name" | "declared_location" | "headline" | "summary" | "skills" | "languages">;
       added_candidate_ids: string[];
-      conflicts: Array<Record<string, unknown>>;
       coverage_gaps: Array<Record<string, unknown>>;
     };
   };
@@ -225,9 +215,6 @@ export type AnalysisReport = {
     comparisons: Array<Record<string, unknown>>;
   };
   research: Record<string, unknown>;
-  limitations: string[];
-  versions: Record<string, string>;
-  usage: Record<string, string | number | boolean | null>;
   company_research?: CompanyResearch;
   education_research?: EducationResearch;
   linkedin_discovery?: LinkedInDiscovery;

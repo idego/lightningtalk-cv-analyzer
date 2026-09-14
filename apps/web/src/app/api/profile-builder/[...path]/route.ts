@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { profileBuilderOwnerToken } from "@/lib/profile-builder-owner";
 import { getWebUser } from "@/lib/web-user";
+import { PROFILE_BUILDER_ENABLED } from "@/lib/feature-flags";
 import { ProfileBodyTooLarge, readProfileBody } from "@/lib/profile-request-body";
 
 const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://localhost:8000";
@@ -10,18 +11,23 @@ const privateHeaders = { "Cache-Control": "private, no-store", "X-Content-Type-O
 type Context = { params: Promise<{ path: string[] }> };
 
 async function proxy(request: Request, context: Context) {
+  if (!PROFILE_BUILDER_ENABLED) return NextResponse.json({ error: "Profile Builder is disabled" }, { status: 404, headers: privateHeaders });
   const user = await getWebUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: privateHeaders });
   const { path } = await context.params;
   const action = path.join("/");
   const validCrud = path.length <= 2 && ["profiles", "templates", "preferences", "custom-fields"].includes(path[0] ?? "");
-  const validAction = request.method === "POST" && ["extract", "summary", "transform", "export/pdf", "export/docx"].includes(action);
+  const validAction = request.method === "POST" && ["extract", "extract/cancel", "summary", "transform", "export/pdf", "export/docx"].includes(action);
   if (!validCrud && !validAction) return NextResponse.json({ error: "Unknown Profile Builder action" }, { status: 404, headers: privateHeaders });
 
   try {
     const headers: Record<string, string> = { "X-Profile-Builder-Access-Token": profileBuilderOwnerToken(user.id) };
     let body: BodyInit | undefined;
-    if (request.method === "POST" || request.method === "PUT") {
+    if (action === "extract" || action === "extract/cancel") {
+      const requestId = request.headers.get("X-Profile-Builder-Request-Id");
+      if (requestId && /^[A-Za-z0-9-]{1,64}$/.test(requestId)) headers["X-Profile-Builder-Request-Id"] = requestId;
+    }
+    if ((request.method === "POST" || request.method === "PUT") && action !== "extract/cancel") {
       if (action === "extract") {
         const bytes = await readProfileBody(request, MAX_FILE_BYTES + 128 * 1024);
         let form: FormData;
