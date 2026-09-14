@@ -123,7 +123,7 @@ function report() {
 test("shows only deduplicated recruiter-facing signals", () => {
   const presentation = adaptReportInterface(report(), "en");
 
-  assert.equal(presentation.whatToCheck.length, 2);
+  assert.equal(presentation.whatToCheck.length, 3);
   assert.equal(presentation.whatToCheck[0].evidence[0].source_id, "block-1");
   assert.equal(
     presentation.whatToCheck
@@ -197,6 +197,17 @@ test("completed LinkedIn not-found result stays out of the checklist", () => {
   const presentation = adaptReportInterface(value, "en");
 
   assert.equal(presentation.whatToCheck.find((item) => item.id === "linkedin-not-found"), undefined);
+});
+
+test("ambiguous records become What to check findings without overview labels", () => {
+  const presentation = adaptReportInterface(report(), "en");
+  const finding = presentation.whatToCheck.find((item) => item.id === "record-employment-ambiguous");
+
+  assert.match(finding.whatWeFound, /could not be fully confirmed: MongoDB/);
+  assert.match(finding.whyItMatters, /may not belong together/);
+  assert.equal(finding.evidence[0].excerpt, "MongoDB");
+  assert.equal(presentation.whatToCheck.some((item) => item.id === "record-employment-1"), false);
+  assert.equal(presentation.overview.employment.some((item) => "needsReview" in item), false);
 });
 
 test("outside-EU status is neutral overview information, not a finding", () => {

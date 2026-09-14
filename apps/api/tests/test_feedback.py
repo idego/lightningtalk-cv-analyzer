@@ -89,6 +89,11 @@ def test_materializes_feedback_for_each_visible_signal(tmp_path):
         "base_analysis": {
             "profile": {"candidate_name": {"value": "Candidate", "evidence": evidence}},
             "review": {"coverage_gaps": []},
+            "employment": [
+                {"id": "emp-ambiguous", "status": "ambiguous", "organization": {"value": "MongoDB", "evidence": evidence}},
+                {"id": "emp-accepted", "status": "accepted", "organization": {"value": "Example", "evidence": evidence}},
+                {"id": "emp-no-evidence", "status": "ambiguous", "organization": {"value": "Ghost"}},
+            ],
         },
         "mechanical": {
             "location_resolution": [{
@@ -111,6 +116,9 @@ def test_materializes_feedback_for_each_visible_signal(tmp_path):
     locations = {(target["source_category"], target["source_key"]) for target in targets}
     assert ("what_to_check", "section") in locations
     assert ("what_to_check", "location-unresolved-unresolved") in locations
+    assert ("what_to_check", "record-emp-ambiguous") in locations
+    assert ("what_to_check", "record-emp-accepted") not in locations
+    assert ("what_to_check", "record-emp-no-evidence") not in locations
     assert ("remaining", "comparison-same-0") not in locations
     assert not any(target["source_category"] in {"attention", "worth_knowing"} for target in targets)
 

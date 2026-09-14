@@ -22,7 +22,6 @@ export type OverviewRecord = {
   detail: string | null;
   searchSubject: string | null;
   searchContext: string | null;
-  needsReview?: boolean;
 };
 
 export type OverviewLinkKind = "linkedin" | "github" | "personal";
@@ -124,6 +123,10 @@ function finding(
 
 function localized(language: ReportLanguage) {
   return language === "pl" ? {
+    recordUnconfirmed: "Wpis nie został w pełni potwierdzony",
+    recordRelationWhy: "Jego pola pochodzą z różnych części CV, więc mogą nie należeć do siebie.",
+    recordReviewerWhy: "Weryfikacja nie potwierdziła tego wpisu.",
+    recordCheck: "Porównaj daty i szczegóły z wpisem w CV.",
     gap: "Nie udało się bezpiecznie uzupełnić informacji w CV.",
     gapWhy: "Brak danych ogranicza kompletność raportu.",
     gapCheck: "Sprawdź brakującą informację bezpośrednio w CV.",
@@ -136,6 +139,10 @@ function localized(language: ReportLanguage) {
     locationWhy: "Rozpoznanie dotyczy zgodności tekstu CV z ograniczonym indeksem, nie miejsca pobytu.",
     locationCheck: "Sprawdź pisownię miasta i kraju w CV oraz potwierdź je z kandydatem.",
   } : {
+    recordUnconfirmed: "Entry could not be fully confirmed",
+    recordRelationWhy: "Its fields were extracted from separate parts of the CV, so they may not belong together.",
+    recordReviewerWhy: "The review pass did not confirm this entry.",
+    recordCheck: "Compare the dates and details against the CV entry.",
     gap: "Information in the CV could not be added safely.",
     gapWhy: "Missing data limits the completeness of the report.",
     gapCheck: "Review the missing information directly in the CV.",
@@ -194,7 +201,6 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
     ]),
     searchSubject: institution ?? certificate,
     searchContext: value(item.program) ?? (institution ? certificate : null),
-    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -209,7 +215,6 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
     ]),
     searchSubject: value(item.organization),
     searchContext: value(item.location),
-    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -356,6 +361,23 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       sourceUrls: item.source_urls,
     }];
   });
+  const recordFindings: ReportFinding[] = [
+    ...report.base_analysis.education.map((item) => ({ item, label: value(item.institution) ?? value(item.certificate) ?? value(item.program) })),
+    ...report.base_analysis.employment.map((item) => ({ item, label: value(item.organization) ?? value(item.role) })),
+  ].flatMap(({ item, label }) => {
+    if (item.status !== "ambiguous") return [];
+    const evidence = Object.values(item).flatMap((field) => (
+      field && typeof field === "object" && "evidence" in field && Array.isArray(field.evidence) ? field.evidence as Evidence[] : []
+    ));
+    if (!evidence.length) return [];
+    return [findingFromEvidence(
+      `record-${item.id}`,
+      label ? `${copy.recordUnconfirmed}: ${label}` : copy.recordUnconfirmed,
+      item.relation_status === "supported" ? copy.recordReviewerWhy : copy.recordRelationWhy,
+      copy.recordCheck,
+      evidence,
+    )];
+  });
   // One list, ordered from research-backed contradictions to weaker consistency signals.
   const whatToCheck: ReportFinding[] = [
     ...institutionFindings,
@@ -371,6 +393,7 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         comparisonEvidence,
       )),
     ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
+    ...recordFindings,
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },
