@@ -72,7 +72,7 @@ cd apps/web && pnpm build
 `make dev` also publishes the API on `http://127.0.0.1:8001/docs` (Swagger)
 through `docker-compose.dev.yml`; `make deploy` never does.
 
-The web app is available at `http://127.0.0.1:3001/analyze`. Compose uses
+The web app is available at `http://127.0.0.1:3000/analyze` (`WEB_PORT`, default 3000). Compose uses
 project `cv-analyzer`, API database `/app/data/cv_analyzer.db`, and auth
 database `/app/data/auth.db`. A stack created under the former project name
 `cv-analyzer-document-analysis` keeps its volumes under that name; to reuse its
@@ -104,7 +104,7 @@ record zero current-call tokens and separate saved usage/cost provenance.
 
 ## Deployment
 
-Production is Compose-based. Copy and fill `.env`, keep `WEB_HOST=127.0.0.1`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the loopback-bound web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](operations.md).
+Production is Compose-based. Copy and fill `.env`, set `WEB_PORT` and the matching `BASE_URL`, run `make deploy-check`, then `make deploy`. The public subdomain terminates TLS at an external reverse proxy and forwards only to the published web port; the API remains private on the Compose network. Full environment, backup, rollback, feedback-access, retention, and reverse-proxy notes live in [`docs/operations.md`](operations.md).
 
 ## Privacy and persistence
 
