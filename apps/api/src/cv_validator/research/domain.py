@@ -38,6 +38,7 @@ class CompanyResearchClientError(CompanyResearchError):
 @dataclass(frozen=True)
 class CompanyResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
+    report_language: str = "en"
 
 
 class EducationResearchError(ResearchError):
@@ -67,6 +68,7 @@ class EducationResearchClientError(EducationResearchError):
 @dataclass(frozen=True)
 class EducationResearchRequest:
     input_facts: tuple[dict[str, Any], ...]
+    report_language: str = "en"
 
 
 class LinkedInResearchError(ResearchError):

@@ -971,7 +971,9 @@ def create_app(
         x_analysis_owner_id: str | None,
         x_ai_enabled: bool,
         x_research_refresh: bool,
+        x_report_language: str = "en",
     ) -> JSONResponse:
+        report_language = _report_language(x_report_language)
         stored = _owned_payload(
             store, analysis_id, _optional_owner_user_id(x_analysis_owner_id)
         )
@@ -985,8 +987,8 @@ def create_app(
         recorder.emit("research_started", operation=f"{category}_research", category="research", outcome="started")
         try:
             request = (
-                build_company_research_request(stored)
-                if category == "company" else build_education_research_request(stored)
+                build_company_research_request(stored, report_language=report_language)
+                if category == "company" else build_education_research_request(stored, report_language=report_language)
             )
         except ValueError as exc:
             _research_failure(
@@ -1145,9 +1147,10 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
         x_research_refresh: bool = Header(default=False),
+        x_report_language: str = Header(default="en"),
     ) -> JSONResponse:
         return research_subjects(
-            "company", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh,
+            "company", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh, x_report_language,
         )
 
     @app.post("/analyses/{analysis_id}/research/education")
@@ -1156,9 +1159,10 @@ def create_app(
         x_analysis_owner_id: str | None = Header(default=None),
         x_ai_enabled: bool = Header(default=True),
         x_research_refresh: bool = Header(default=False),
+        x_report_language: str = Header(default="en"),
     ) -> JSONResponse:
         return research_subjects(
-            "education", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh,
+            "education", analysis_id, x_analysis_owner_id, x_ai_enabled, x_research_refresh, x_report_language,
         )
 
     @app.post("/analyses/{analysis_id}/research/linkedin/discovery")

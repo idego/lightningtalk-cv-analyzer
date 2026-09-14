@@ -162,7 +162,8 @@ class PersistenceStore:
                     category TEXT NOT NULL, normalized_subjects_json TEXT NOT NULL,
                     research_version TEXT NOT NULL, prompt_version TEXT NOT NULL,
                     schema_version TEXT NOT NULL, model_version TEXT NOT NULL,
-                    search_policy_version TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    search_policy_version TEXT NOT NULL, report_language TEXT NOT NULL DEFAULT 'en',
+                    payload_json TEXT NOT NULL,
                     source_accessed_at TEXT NOT NULL, created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL, invalidated_at TEXT
                 );
@@ -257,6 +258,7 @@ class PersistenceStore:
             )
             _ensure_ai_usage_schema(conn)
             _ensure_share_token_expiry_schema(conn)
+            _ensure_research_cache_language_schema(conn)
             conn.execute(
                 """INSERT OR IGNORE INTO processed_report_events
                    (event_id, analysis_id, completed_at, status)
@@ -892,11 +894,11 @@ class PersistenceStore:
                 """SELECT payload_json FROM reusable_research_cache
                    WHERE cache_key = ? AND category = ? AND cache_format_version = ?
                      AND research_version = ? AND prompt_version = ? AND schema_version = ?
-                     AND model_version = ? AND search_policy_version = ?
+                     AND model_version = ? AND search_policy_version = ? AND report_language = ?
                      AND invalidated_at IS NULL AND expires_at > ?""",
                 (descriptor.cache_key, descriptor.category, descriptor.cache_format_version,
                  descriptor.research_version, descriptor.prompt_version, descriptor.schema_version,
-                 descriptor.model_version, descriptor.search_policy_version, now),
+                 descriptor.model_version, descriptor.search_policy_version, descriptor.report_language, now),
             ).fetchone()
         return None if row is None else json.loads(row["payload_json"])
 
@@ -909,16 +911,17 @@ class PersistenceStore:
                     """INSERT INTO reusable_research_cache (
                         cache_key, cache_format_version, category, normalized_subjects_json,
                         research_version, prompt_version, schema_version, model_version,
-                        search_policy_version, payload_json, source_accessed_at, created_at, expires_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        search_policy_version, report_language, payload_json, source_accessed_at,
+                        created_at, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,
                         source_accessed_at=excluded.source_accessed_at, created_at=excluded.created_at,
                         expires_at=excluded.expires_at, invalidated_at=NULL""",
                     (descriptor.cache_key, descriptor.cache_format_version, descriptor.category,
                      json.dumps(descriptor.normalized_subjects), descriptor.research_version,
                      descriptor.prompt_version, descriptor.schema_version, descriptor.model_version,
-                     descriptor.search_policy_version, json.dumps(payload), payload["accessed_at"],
-                     now_dt.isoformat(), expires_at.isoformat()),
+                     descriptor.search_policy_version, descriptor.report_language, json.dumps(payload),
+                     payload["accessed_at"], now_dt.isoformat(), expires_at.isoformat()),
                 )
         except (OSError, sqlite3.Error) as exc:
             raise PersistenceError("reusable research persistence failed") from exc
@@ -1066,6 +1069,14 @@ def _share_token_expiry(now: datetime, report_expires_at: str | None) -> str:
     if retention_deadline.tzinfo is None:
         retention_deadline = retention_deadline.replace(tzinfo=timezone.utc)
     return min(expires_at, retention_deadline).isoformat()
+
+
+def _ensure_research_cache_language_schema(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(reusable_research_cache)").fetchall()
+    }
+    if columns and "report_language" not in columns:
+        conn.execute("ALTER TABLE reusable_research_cache ADD COLUMN report_language TEXT NOT NULL DEFAULT 'en'")
 
 
 def _ensure_share_token_expiry_schema(conn: sqlite3.Connection) -> None:

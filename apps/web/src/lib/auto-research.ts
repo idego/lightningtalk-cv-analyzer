@@ -134,7 +134,7 @@ export function createAutoResearchOrchestrator({
       try {
         const suffix = kind === "linkedin" ? "linkedin/discovery" : kind;
         const response = await fetcher(`/api/analyses/${encodeURIComponent(report.analysis_id)}/research/${suffix}`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", "X-Report-Language": settings.reportLanguage },
           body: JSON.stringify({}),
         });
         const payload = await response.json().catch(() => ({})) as Record<string, unknown>;

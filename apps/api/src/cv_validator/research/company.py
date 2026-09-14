@@ -25,7 +25,7 @@ from cv_validator.research.subjects import (
 )
 
 RESEARCH_VERSION = COMPANY_RESEARCH_VERSION
-PROMPT_VERSION = "company-research-prompt-v7"
+PROMPT_VERSION = "company-research-prompt-v8"
 SCHEMA_VERSION = "company-research-schema-v3"
 MAX_ORGANIZATIONS = 12
 
@@ -65,7 +65,7 @@ class CompanyResearchService:
         return result
 
 
-def build_company_research_request(stored_report: dict[str, Any]) -> CompanyResearchRequest:
+def build_company_research_request(stored_report: dict[str, Any], *, report_language: str = "en") -> CompanyResearchRequest:
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for record in accepted_records(stored_report, "employment"):
@@ -81,7 +81,7 @@ def build_company_research_request(stored_report: dict[str, Any]) -> CompanyRese
             break
     if not facts:
         raise ValueError("no_company_research_candidates")
-    return CompanyResearchRequest(tuple(facts))
+    return CompanyResearchRequest(tuple(facts), report_language)
 
 
 def validate_company_research(payload: Any, *, request: CompanyResearchRequest) -> None:

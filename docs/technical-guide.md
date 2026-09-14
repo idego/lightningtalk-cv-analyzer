@@ -129,8 +129,10 @@ ledger. Setup and access management are documented in
 
 Company, education, and LinkedIn research remains optional. Subjects come only
 from accepted, evidence-supported base-analysis records. Reusable cache entries
-are keyed per public subject, support partial hits, and carry hit/miss
-provenance, original research timestamps, refresh, and cache audit entries.
+are keyed per public subject and report language, support partial hits, and
+carry hit/miss provenance, original research timestamps, refresh, and cache
+audit entries. The research prompts write free-text findings in the requested
+language; existing databases gain the `report_language` column automatically.
 
 Research confidence is intentionally conservative: high confidence requires
 multiple consistent public signals, and LinkedIn discovery requires both name

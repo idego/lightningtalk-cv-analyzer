@@ -127,10 +127,22 @@ another provider call. Cache failures in one category MUST NOT block unrelated
 categories. The web research proxies SHALL always send `X-Research-Refresh: false`;
 a browser request MUST NOT be able to invalidate the shared public-entity cache.
 
+Company and education research SHALL receive the report language (`en` or `pl`)
+selected in the browser; the research prompt SHALL instruct the model to write
+free-text findings in that language while leaving names, URLs, identifiers,
+dates, and enum values untranslated. The report language SHALL be part of the
+reusable cache key and stored with the entry, so a cache hit never returns text
+generated for a different language. Unsupported languages SHALL be rejected.
+
 #### Scenario: Compatible reusable result exists
 
-- **WHEN** a current public-entity cache entry matches the request
+- **WHEN** a current public-entity cache entry matches the request, including its report language
 - **THEN** the API reuses it and records a cache hit for the owning analysis
+
+#### Scenario: Same subject requested in another language
+
+- **WHEN** a cached entry exists for a subject in one report language and a request arrives for another
+- **THEN** the API treats it as a miss and generates fresh research in the requested language
 
 
 ### Requirement: Actionable research errors
