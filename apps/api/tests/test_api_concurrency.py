@@ -1,3 +1,4 @@
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event, Lock
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from conftest import valid_report
 from cv_validator.api.app import create_app
 from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
+from cv_validator.api.persistence import CANCEL_REQUEST_TTL, PersistenceConfig, PersistenceStore
 from cv_validator.openai_config import OpenAISettings
 
 
@@ -94,7 +96,7 @@ def test_analysis_concurrency_env_rejects_values_below_one(tmp_path, monkeypatch
         create_app(db_path=tmp_path / "reports.db", openai_settings=OpenAISettings(enabled=False))
 
 
-def test_cancellation_is_owner_scoped_consumable_and_bounded():
+def test_profile_builder_cancellation_registry_is_owner_scoped_consumable_and_bounded():
     registry = AnalysisCancellationRegistry()
     registry.request("owner", "request")
     assert registry.is_cancelled("owner", "request")
@@ -111,6 +113,71 @@ def test_cancellation_is_owner_scoped_consumable_and_bounded():
     assert registry.is_cancelled("owner", "0")
     assert not registry.is_cancelled("owner", "1")
     assert registry.is_cancelled("owner", "new")
+
+
+def test_analysis_cancellation_is_owner_scoped_consumable_and_expiring(tmp_path):
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    store.request_analysis_cancel("owner", "request")
+    assert store.analysis_cancel_requested("owner", "request")
+    assert not store.analysis_cancel_requested("other", "request")
+    assert not store.analysis_cancel_requested("owner", None)
+    store.discard_analysis_cancel("owner", None)
+    store.discard_analysis_cancel("owner", "request")
+    assert not store.analysis_cancel_requested("owner", "request")
+
+    # A pending cancel is stamped on the run it ends up targeting.
+    store.request_analysis_cancel("owner", "late")
+    store.create_analysis_run("analysis-late", "correlation", "owner", "late")
+    store.analysis_cancel_requested("owner", "late", "analysis-late")
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT cancel_requested_at FROM analysis_runs WHERE analysis_id = 'analysis-late'"
+        ).fetchone()
+    assert row["cancel_requested_at"] is not None
+
+    # Stale requests stop matching and retention maintenance removes them.
+    store.request_analysis_cancel("owner", "stale")
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE analysis_cancel_requests SET expires_at = '2000-01-01T00:00:00+00:00'"
+            " WHERE request_id = 'stale'"
+        )
+    assert not store.analysis_cancel_requested("owner", "stale")
+    assert store.purge_expired()["analysis_cancel_requests"] == 1
+    assert CANCEL_REQUEST_TTL.total_seconds() > 0
+
+
+def test_cancel_recorded_by_another_app_instance_is_honored(tmp_path):
+    """Two ``create_app`` instances on one database file stand in for two API processes."""
+    db_path = tmp_path / "reports.db"
+    strategy = BlockingStrategy()
+    running = create_app(
+        db_path=db_path, openai_settings=OpenAISettings(enabled=False), analysis_strategy=strategy
+    )
+    other = create_app(db_path=db_path, openai_settings=OpenAISettings(enabled=False))
+    headers = {"X-Analysis-Owner-Id": "owner-token", "X-Analysis-Request-Id": "req-shared"}
+    with TestClient(running) as first, TestClient(other) as second:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                first.post,
+                "/analyze",
+                files={"file": ("slow.pdf", b"%PDF-1.7 slow", "application/pdf")},
+                headers=headers,
+            )
+            deadline = time.monotonic() + 5
+            while not strategy.started and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert strategy.started and strategy.started[0].wait(5), "analysis never started"
+            assert second.post("/analyze/cancel", headers=headers).status_code == 202
+            strategy.release.set()
+            response = future.result(timeout=10)
+        assert response.status_code == 409
+        assert response.json()["detail"] == "analysis_cancelled"
+        assert first.get("/analyses", headers=headers).json()["analyses"] == []
+        diagnostics = first.get(
+            f"/analyses/{response.headers['X-Analysis-ID']}/diagnostics", headers=headers
+        )
+        assert diagnostics.json()["analysis"]["status"] == "cancelled"
 
 
 def test_research_locks_serialize_same_subject_without_blocking_other_subjects():

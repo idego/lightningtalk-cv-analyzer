@@ -1,22 +1,54 @@
 """Shared SQLite helpers for the API stores.
 
 Every store opens its connections here so hardening settings such as
-``secure_delete`` and the stored retention deadline are defined once.
+``secure_delete``, WAL journaling, the busy timeout, and the stored retention
+deadline are defined once.
+
+Analyses run on several threads at once (``CV_VALIDATOR_ANALYSIS_CONCURRENCY``),
+so writers overlap. WAL lets readers proceed during a write and the busy
+timeout makes a second writer wait instead of failing with "database is
+locked".
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+BUSY_TIMEOUT_ENV = "CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS"
+DEFAULT_BUSY_TIMEOUT_MS = 10_000
+
+
+def busy_timeout_ms() -> int:
+    """How long a connection waits for a lock, from the environment (positive ms)."""
+    value = int(os.environ.get(BUSY_TIMEOUT_ENV, str(DEFAULT_BUSY_TIMEOUT_MS)))
+    if value < 1:
+        raise ValueError(f"{BUSY_TIMEOUT_ENV} must be a positive integer")
+    return value
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    """A raw connection with the shared lock-wait and journaling settings applied."""
+    timeout_ms = busy_timeout_ms()
+    conn = sqlite3.connect(db_path, timeout=timeout_ms / 1000)
+    conn.execute(f"PRAGMA busy_timeout = {timeout_ms}")
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+
+def checkpoint(conn: sqlite3.Connection) -> None:
+    """Fold the WAL back into the main file and truncate it so it cannot grow unbounded."""
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
 
 @contextmanager
 def open_connection(db_path: Path, *, foreign_keys: bool = True) -> Iterator[sqlite3.Connection]:
     """Open a row-factory connection that commits on success and zeroes deleted pages."""
-    conn = sqlite3.connect(db_path)
+    conn = connect(db_path)
     if foreign_keys:
         conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA secure_delete = ON")

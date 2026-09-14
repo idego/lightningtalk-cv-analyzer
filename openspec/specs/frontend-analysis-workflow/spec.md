@@ -9,7 +9,7 @@ public-research results.
 ## Requirements
 
 ### Requirement: Bounded parallel batch analysis with visible history
-The analyze page SHALL process selected files with at most two requests in flight at a time, starting them in selection order, so a single recruiter never occupies every server analysis slot. The web analyze proxy SHALL bound the request body to the 20 MB upload limit before parsing multipart and answer 413 `upload_size_limit_exceeded` (or 400 `invalid_upload` for a malformed body) instead of buffering an oversized upload. `POST /analyze` SHALL reject a PDF with more than 5 pages with 422 `document_page_limit_exceeded` before any text extraction, and the page SHALL show a dedicated "too many pages" message for that file. While a batch runs, the page SHALL replace the upload form with an Analyzing card that lists every file with its status (waiting, analyzing, completed, failed), the files currently analyzing, elapsed time, and an estimate, and SHALL keep the Recent analyses section visible and interactive below it. Selecting files, starting another batch, and resetting the form MUST NOT be possible while a batch is running, and opening or closing a report MUST NOT reset the in-flight batch.
+The analyze page SHALL process selected files with at most two requests in flight at a time, starting them in selection order, so a single recruiter never occupies every server analysis slot. The API bounds concurrent analyses with a process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 4, minimum 1); requests beyond the limit wait for a free slot rather than failing. The web analyze proxy SHALL bound the request body to the 20 MB upload limit before parsing multipart and answer 413 `upload_size_limit_exceeded` (or 400 `invalid_upload` for a malformed body) instead of buffering an oversized upload. `POST /analyze` SHALL reject a PDF with more than 5 pages with 422 `document_page_limit_exceeded` before any text extraction, and the page SHALL show a dedicated "too many pages" message for that file. While a batch runs, the page SHALL replace the upload form with an Analyzing card that lists every file with its status (waiting, analyzing, completed, failed), the files currently analyzing, elapsed time, and an estimate, and SHALL keep the Recent analyses section visible and interactive below it. Selecting files, starting another batch, and resetting the form MUST NOT be possible while a batch is running, and opening or closing a report MUST NOT reset the in-flight batch.
 
 #### Scenario: Batch is running
 - **WHEN** the recruiter starts a batch of several files
@@ -18,6 +18,10 @@ The analyze page SHALL process selected files with at most two requests in fligh
 #### Scenario: Last file finishes
 - **WHEN** the final file completes with a result or an error
 - **THEN** the Analyzing card briefly shows a complete state pointing to Recent analyses and then disappears, leaving the upload form and Recent analyses
+
+#### Scenario: Some files failed
+- **WHEN** one or more files in the batch ended with an error
+- **THEN** after the complete state those files return to the upload queue and the form shows each failure as `filename: message`, so the recruiter can retry or remove them
 
 ### Requirement: Batch state survives navigation within the app
 The upload queue, the in-flight batch, the session's new-analysis markers, and the in-memory uploads SHALL live outside the analyze page so that leaving through the sidebar and returning while files are still processing shows the Analyzing card, its statuses, and the new markers again. A finished result MUST NOT be lost because the analyze page was unmounted while its request was pending.
@@ -61,6 +65,10 @@ The analyze page SHALL open a report only from a Recent analyses row, showing a 
 - **WHEN** the recruiter opens a Recent analyses row while later files are still processing
 - **THEN** the single report opens at its analysis URL, and pressing browser Back shows the upload page with the Analyzing card still tracking the remaining files
 
+#### Scenario: Sidebar Analyze link while a report is open
+- **WHEN** the recruiter clicks the sidebar `Analyze` item while `/analyze?analysis={id}` is open
+- **THEN** the page re-syncs from the URL and closes the report without remounting the analyze page
+
 #### Scenario: Refresh an opened owner report
 - **WHEN** the owning recruiter refreshes `/analyze?analysis={analysis_id}` for a persisted analysis
 - **THEN** the persisted report and available stored document are reloaded instead of showing a blank upload form
@@ -99,19 +107,19 @@ When a report is opened from Recent analyses, the document preview SHALL use the
 - **THEN** the report opens without a document preview
 
 ### Requirement: Contextual manual Google Search actions
-The analyze UI SHALL provide manual Google Search actions for each visible company and education entry in the structured CV overview and for each completed Company Research organization and Education Research credential. These actions SHALL remain independent of automatic and user-started research state and SHALL NOT change analysis or research output.
+The analyze UI SHALL provide manual Google Search actions for each visible certificate entry in the structured CV overview and for each completed Company Research organization and Education Research credential. Employment and education rows in the overview SHALL NOT carry a Google Search action; their public subjects are searched from the research panels. These actions SHALL remain independent of automatic and user-started research state and SHALL NOT change analysis or research output.
 
-#### Scenario: Search before optional research
-- **WHEN** the structured CV overview shows a company or education entry before optional research has completed
-- **THEN** that entry provides a compact icon-only Google Search action
+#### Scenario: Search a certificate before optional research
+- **WHEN** the structured CV overview shows a certificate entry
+- **THEN** that entry provides a compact icon-only Google Search action regardless of research state
 
 #### Scenario: Search a completed research subject
 - **WHEN** Company Research shows an organization or Education Research shows a credential
 - **THEN** that result provides the same compact icon-only Google Search action in its header area, next to its confidence and feedback controls
 
 #### Scenario: Repeated subject entries
-- **WHEN** the overview shows the same company or institution in more than one entry
-- **THEN** each visible entry retains its own contextual Google Search action
+- **WHEN** Company Research or Education Research shows the same organization or institution in more than one result
+- **THEN** each visible result retains its own contextual Google Search action
 
 ### Requirement: Deterministic public-subject search queries
 Google Search actions SHALL construct their query only from the visible public subject and the allowed disambiguating fields for that entry. A company query SHALL contain its organization name and SHALL append its available company location. An education query SHALL use its institution when present, otherwise its certificate as the public subject. With an institution it SHALL append the program when present, otherwise the certificate when present; certificate-only entries SHALL search the certificate once. The query MUST NOT include candidate name, contact details, dates, raw CV evidence, or hidden report context.
@@ -167,10 +175,10 @@ The analyze UI SHALL omit a Google Search action when its required public subjec
 - **THEN** no Google Search action is rendered for that value
 
 ### Requirement: Search all saved analysis history
-Recent analyses SHALL provide a localized, keyboard-accessible candidate-name and filename search over every returned owner-scoped history entry, including entries beyond the collapsed list. Matching SHALL ignore case and diacritics, preserve newest-first ordering, and support multiple words across both fields. It SHALL distinguish no matches, no saved analyses, and loading failures. Clear/Escape SHALL reset search; opening a report and returning SHALL preserve the query. Show more SHALL expose all matching entries instead of a fixed fifteen-item cutoff.
+Recent analyses SHALL provide a localized, keyboard-accessible candidate-name and filename search over every returned owner-scoped history entry, including entries beyond the collapsed list. Matching SHALL ignore case and diacritics, preserve newest-first ordering, and support multiple words across both fields. It SHALL distinguish no matches, no saved analyses, and loading failures. Clear/Escape SHALL reset search; opening a report and returning SHALL preserve the query. Show more SHALL expose all matching entries instead of the collapsed five-item cutoff.
 
 #### Scenario: Find an older candidate
-- **WHEN** an analysis outside the first fifteen entries matches a typed name or filename
+- **WHEN** an analysis outside the first five entries matches a typed name or filename
 - **THEN** it appears in filtered history and opens the same owner-scoped report
 
 #### Scenario: Return to filtered history

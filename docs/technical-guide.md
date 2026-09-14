@@ -11,6 +11,8 @@ been removed. They are not compatibility surfaces.
 
 ## Profile Builder
 
+> **Currently disabled in the web app.** `PROFILE_BUILDER_ENABLED` in `apps/web/src/lib/feature-flags.js` is `false`: the sidebar entry is dimmed and inert, `/profile-builder` and `/profiles` redirect to `/analyze`, the Settings section is hidden, and the `/api/profile-builder/*` proxy answers 404. The API routes stay deployed. Flip the flag and rebuild the web image to re-enable it.
+
 The separate **Profile Builder** workflow turns PDF/DOCX CVs into editable,
 client-ready profiles: convert up to 10 CVs, edit the structured content, choose
 which identifying fields appear in the output, select or create a template, and
@@ -39,7 +41,7 @@ PDF or DOCX upload
     -> sequential model reviewer with validated ID-based operations
     -> base-analysis-v2 validation
     -> persistence and UI
-    -> automatic company, education, and LinkedIn research
+    -> optional company, education, and LinkedIn research
 ```
 
 Every semantic value needs literal source evidence. A reviewer may add a missing candidate
@@ -127,8 +129,9 @@ ledger. Setup and access management are documented in
 
 ## Public research
 
-Company, education, and LinkedIn research remains optional. Subjects come only
-from accepted, evidence-supported base-analysis records. Reusable cache entries
+Company, education, and LinkedIn research remains optional. Subjects are
+evidence-supported base-analysis records: accepted records, plus the supported
+organization or institution name of an ambiguous record on its own. Reusable cache entries
 are keyed per public subject and report language, support partial hits, and
 carry hit/miss provenance, original research timestamps, refresh, and cache
 audit entries. The research prompts write free-text findings in the requested

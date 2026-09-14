@@ -66,6 +66,12 @@ process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 4) caps
 how many run at once because of the two-core container, OpenAI rate limits,
 and the four model calls each analysis fans out to. The analyze page runs a
 batch with at most two files in flight, leaving slots for other recruiters.
+Cancel requests are not in-memory state: `POST /analyze/cancel` stores the
+(owner, client request id) pair in `analysis_cancel_requests` with a one-hour
+TTL, the running analysis consults that table before it starts and before it
+persists, stamps `analysis_runs.cancel_requested_at`, and deletes the request
+when it exits. Research locks, telemetry, and the retention scheduler remain
+per-process.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`
@@ -110,13 +116,21 @@ ownership and research hardening remain separate concerns. Profile conversion is
   invariant. It does not introduce a masking pass into CV Analyzer.
 - `api/profile_builder_routes.py` and `api/profile_builder_store.py` own the
   separate API and owner-scoped profile tables in the existing database. Existing
-  profile/template/preferences rows from the old branch remain readable.
+  profile/template/preferences rows from the old branch remain readable; a
+  one-time startup migration (`profile_builder_storage_sanitized_v1` marker)
+  re-sanitizes stored rows.
 - The authenticated Next.js catch-all proxy derives the owner capability server
   side, bounds multipart/JSON bytes before parsing, and marks responses private
   and non-cacheable. Keep the FastAPI service private behind this proxy.
 - Saved profiles include the exact template and visibility snapshot. Private
   templates remain owner scoped; explicitly shared templates and custom-field
   definitions retain the existing internal-organization scope.
+- Saved profiles carry an `expires_at` deadline from the shared retention window,
+  renewed on every edit, and are purged by the same maintenance loop as analyses.
+  Templates, preferences, and custom fields are not retention-purged.
+- The web tier gates the whole workflow behind `PROFILE_BUILDER_ENABLED` in
+  `apps/web/src/lib/feature-flags.js` (currently `false`): pages redirect to
+  `/analyze`, the proxy answers 404, and the sidebar entry is disabled.
 
 Profile Builder availability is independent of the per-browser switch for optional
 public-company/education/LinkedIn research. Missing PDF conversion does not make

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
@@ -205,6 +206,56 @@ def test_connections_enable_secure_delete(tmp_path) -> None:
     store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
     with store._connect() as connection:
         assert connection.execute("PRAGMA secure_delete").fetchone()[0] == 1
+
+
+def test_connections_use_wal_with_busy_timeout(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS", "2500")
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    with store._connect() as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 2500
+
+
+def test_busy_timeout_env_must_be_positive(monkeypatch) -> None:
+    from cv_validator.api.sqlite_support import busy_timeout_ms
+
+    monkeypatch.setenv("CV_VALIDATOR_SQLITE_BUSY_TIMEOUT_MS", "0")
+    with pytest.raises(ValueError):
+        busy_timeout_ms()
+
+
+def test_concurrent_threads_persist_reports_without_lock_errors(tmp_path) -> None:
+    store = PersistenceStore(PersistenceConfig(tmp_path / "reports.db"))
+    thread_count = 8
+
+    def persist(index: int) -> None:
+        for round_ in range(5):
+            _persist(store, f"analysis-parallel-{index}-{round_}")
+
+    with ThreadPoolExecutor(max_workers=thread_count) as pool:
+        for future in [pool.submit(persist, index) for index in range(thread_count)]:
+            future.result()
+
+    assert len(store.list_analyses("owner-1")) == thread_count * 5
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == thread_count * 5
+
+
+def test_vacuum_truncates_the_wal_file(tmp_path) -> None:
+    db_path = tmp_path / "reports.db"
+    store = PersistenceStore(PersistenceConfig(db_path))
+    wal_path = tmp_path / "reports.db-wal"
+    # An idle open connection keeps the -wal file alive, as overlapping
+    # analyses do in the running API.
+    with store._connect() as idle:
+        idle.execute("SELECT 1").fetchone()
+        for index in range(5):
+            _persist(store, f"analysis-wal-{index}")
+        assert wal_path.stat().st_size > 0
+
+        store.vacuum()
+
+        assert wal_path.stat().st_size == 0
 
 
 def test_vacuum_reclaims_space_after_purge(tmp_path) -> None:

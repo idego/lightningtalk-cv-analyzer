@@ -6,7 +6,7 @@ Defines optional cited public-web research after a validated base analysis.
 
 ## Requirements
 
-### Requirement: Research only accepted base-analysis subjects
+### Requirement: Research only evidence-supported base-analysis subjects
 
 Company research SHALL use employment records whose organization field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; employment-date timeline comparisons SHALL still use only accepted records with a supported relation. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
@@ -48,7 +48,7 @@ Company and education automatic starts are unaffected by CV links.
 
 #### Scenario: Eligible categories exist
 
-- **WHEN** automatic research is enabled and accepted subjects exist
+- **WHEN** automatic research is enabled and the browser finds accepted, relation-supported records with a supported organization or institution (or a supported candidate name for LinkedIn)
 - **THEN** eligible categories start without waiting for another analysis pass
 
 #### Scenario: CV already includes a LinkedIn link
@@ -107,7 +107,7 @@ Education research SHALL check public evidence for institutions, programs, degre
 ### Requirement: LinkedIn discovery
 LinkedIn discovery SHALL return possible public profile links with citations, calibrated confidence, visible photo status, and visible connection-count status. It MUST NOT claim identity, compare appearance, or automatically match a person. Unknown public data remains unknown.
 
-High confidence SHALL require supported name alignment plus at least one independently supported experience or education alignment. Name-only results, results with missing experience context, and results with material conflicts MUST be medium or low. A same-name profile with wrong or conflicting experience MUST be low confidence. The default possible-profile limit is three and is configurable from 1 to 20. The default visible connection-count threshold is 500.
+High confidence SHALL require supported name alignment plus at least one independently supported experience or education alignment. Name-only results, results with missing experience context, and results with material conflicts MUST be medium or low. A same-name profile with wrong or conflicting experience MUST be low confidence. The default possible-profile limit is three and is configurable from 1 to 20 with `CV_VALIDATOR_LINKEDIN_MAX_PROFILES`. The default visible connection-count threshold is 500 and is configurable with `CV_VALIDATOR_LINKEDIN_CONNECTION_THRESHOLD`. Automatic LinkedIn discovery is skipped when the CV already provides a LinkedIn link in its contact block; a manual start remains available.
 
 #### Scenario: Profile data is unavailable
 - **WHEN** photo or connection-count data is not publicly supported
@@ -132,13 +132,17 @@ A repeated compatible request SHALL return the stored completed result without
 another provider call. Cache failures in one category MUST NOT block unrelated
 categories. The web research proxies SHALL always send `X-Research-Refresh: false`;
 a browser request MUST NOT be able to invalidate the shared public-entity cache.
+The private API honours `X-Research-Refresh: true` only for direct internal
+callers. Reusable cache entries expire after
+`CV_VALIDATOR_RESEARCH_CACHE_TTL_DAYS` (default 30) and are removed by the
+retention purge.
 
 Company and education research SHALL receive the report language (`en` or `pl`)
 selected in the browser; the research prompt SHALL instruct the model to write
 free-text findings in that language while leaving names, URLs, identifiers,
 dates, and enum values untranslated. The report language SHALL be part of the
 reusable cache key and stored with the entry, so a cache hit never returns text
-generated for a different language. Unsupported languages SHALL be rejected.
+generated for a different language. The API SHALL reject unsupported languages with 400 `unsupported_report_language`; the web research proxies forward `pl` and send `en` for any other browser language.
 
 #### Scenario: Compatible reusable result exists
 
