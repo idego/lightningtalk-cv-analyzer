@@ -163,3 +163,26 @@ def test_education_research_maps_reversed_model_rows_by_echoed_subject() -> None
         "Computer Science",
         "Physics",
     ]
+
+
+def test_research_requests_carry_the_output_language() -> None:
+    source = "https://first.example/"
+    payload = {
+        "schema_version": "company-research-schema-v3",
+        "outcome": "completed",
+        "organizations": [company_item("First Systems", source)],
+        "searches_performed": ["placeholder"],
+        "search_limitations": ["Public indexed sources only."],
+    }
+    client = Client(Response(deepcopy(payload), [source]))
+    captured: dict = {}
+    original = client.responses.create
+    client.responses.create = lambda **kwargs: captured.update(kwargs) or original(**kwargs)
+
+    OpenAIResponsesCompanyResearcher(client=client).research(
+        CompanyResearchRequest(({"organization": "First Systems"},), "pl")
+    )
+
+    assert json.loads(captured["input"])["output_language"] == "pl"
+    assert captured["prompt_cache_key"].endswith("-pl")
+    assert "output_language" in captured["instructions"]

@@ -37,7 +37,7 @@ PDF or DOCX upload
   compares high-confidence, unambiguous business bounds with accepted employment
   start dates using date intervals. Unclear continuity, missing evidence and
   ambiguous entities produce no flag. These comparisons are never cached publicly.
-- Company, education, and LinkedIn research receives only accepted subjects.
+- LinkedIn research receives only accepted subjects; company and education research also accept a supported organization or institution name from an ambiguous record, without its other fields.
   Research is optional, cited, read-only decision support and cannot mutate the
   base analysis.
 - The overview EU row classifies only the declared location. A phone prefix alone
@@ -61,6 +61,11 @@ documents fail explicitly; OCR is not attempted. OpenAI response storage is
 disabled. Upload bytes are processed in memory during analysis; after a report
 commits, the original PDF/DOCX is retained only for the analysis-retention
 window. Raw CV text, evidence, model output, and secrets must not enter logs.
+Analyses run in the request threadpool and are bounded, not serialized: a
+process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 4) caps
+how many run at once because of the two-core container, OpenAI rate limits,
+and the four model calls each analysis fans out to. The analyze page runs a
+batch with at most two files in flight, leaving slots for other recruiters.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`

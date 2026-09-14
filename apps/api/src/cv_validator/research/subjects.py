@@ -40,6 +40,29 @@ def accepted_records(
     )
 
 
+def subject_records(stored_report: dict[str, Any], category: str, field: str) -> tuple[dict[str, Any], ...]:
+    """Records whose named subject field (institution or organization) is literally supported.
+
+    The subject name is public on its own, so a record whose other fields
+    (typically dates) sit too far away to prove they belong together still
+    qualifies. Callers must not pair such a record's other fields with the
+    subject unless its relation is supported.
+    """
+    base_analysis = stored_report.get("base_analysis")
+    if not isinstance(base_analysis, dict):
+        return ()
+    records = base_analysis.get(category)
+    if not isinstance(records, list):
+        return ()
+    return tuple(
+        record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("status") in {"accepted", "ambiguous"}
+        and supported_field(record, field) is not None
+    )
+
+
 def supported_profile_field(
     stored_report: dict[str, Any],
     name: str,

@@ -13,14 +13,14 @@ const failed = { filename: "b.pdf", status: "error", error: "boom" };
 
 test("statuses follow the sequential position of the batch", () => {
   const filenames = ["a.pdf", "b.pdf", "c.pdf"];
-  assert.deepEqual(deriveBatchStatuses({ filenames, results: [], phase: "running" }), ["analyzing", "waiting", "waiting"]);
-  assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a")], phase: "running" }), ["completed", "analyzing", "waiting"]);
-  assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed], phase: "running" }), ["completed", "failed", "analyzing"]);
-  assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed, ok("c")], phase: "complete" }), ["completed", "failed", "completed"]);
+  assert.deepEqual(deriveBatchStatuses({ filenames, results: [null, null, null], active: [0, 1], phase: "running" }), ["analyzing", "analyzing", "waiting"]);
+  assert.deepEqual(deriveBatchStatuses({ filenames, results: [null, ok("b"), null], active: [0, 2], phase: "running" }), ["analyzing", "completed", "analyzing"]);
+  assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed, null], active: [2], phase: "running" }), ["completed", "failed", "analyzing"]);
+  assert.deepEqual(deriveBatchStatuses({ filenames, results: [ok("a"), failed, ok("c")], active: [], phase: "complete" }), ["completed", "failed", "completed"]);
 });
 
 test("completed ids skip failed files", () => {
-  assert.deepEqual(completedBatchIds([ok("a"), failed, ok("c")]), ["a", "c"]);
+  assert.deepEqual(completedBatchIds([ok("a"), failed, null, ok("c")]), ["a", "c"]);
 });
 
 test("supported CV filenames accept only PDF and DOCX extensions", () => {

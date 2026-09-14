@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { analysisOwnerHeaders, proxyInternalJson } from "@/lib/internal-api";
 import { getWebUser } from "@/lib/web-user";
 
+function reportLanguage(request: Request): "en" | "pl" {
+  return request.headers.get("X-Report-Language") === "pl" ? "pl" : "en";
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ analysisId: string }> },
@@ -20,6 +24,7 @@ export async function POST(
         "X-AI-Enabled": "true",
         // The browser can never force a shared-cache refresh; the proxy pins it off.
         "X-Research-Refresh": "false",
+        "X-Report-Language": reportLanguage(request),
       },
     },
   );

@@ -24,7 +24,7 @@ export function SettingsPanel() {
   const [health, setHealth] = useState<Health | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshFeedback, setRefreshFeedback] = useState<RefreshFeedback>("idle");
-  const [retentionDays, setRetentionDays] = useState("90");
+  const [retentionDays, setRetentionDays] = useState("10");
   const [retentionLoading, setRetentionLoading] = useState(true);
   const [retentionMessage, setRetentionMessage] = useState<string | null>(null);
   const [retentionCanManage, setRetentionCanManage] = useState(false);

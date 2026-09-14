@@ -8,11 +8,12 @@ Defines optional cited public-web research after a validated base analysis.
 
 ### Requirement: Research only accepted base-analysis subjects
 
-Company research SHALL use accepted employment records with a supported relation and supported named organization. Education research SHALL use accepted education records with a supported relation and supported institution. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
+Company research SHALL use employment records whose organization field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; employment-date timeline comparisons SHALL still use only accepted records with a supported relation. Education research SHALL use education records whose institution field is supported, including ambiguous records whose dates or other fields could not be tied to the entry; the program SHALL be sent alongside the institution only when the record's relation is supported. Certificate-only rows SHALL NOT trigger education research and certificate values SHALL NOT be sent to the researcher. LinkedIn discovery SHALL require a supported candidate name and may use only supported fields from accepted, relation-supported records as search hints.
 
-Ambiguous records, ambiguous fields, self-employment labels, skills, raw
-extractor candidates, reviewer-rejected candidates, and unvalidated model
-output MUST NOT become research subjects.
+Ambiguous fields, self-employment labels, skills, raw extractor candidates,
+reviewer-rejected candidates, and unvalidated model output MUST NOT become
+research subjects. An ambiguous record contributes only its supported
+organization or institution name.
 
 #### Scenario: Reviewer adds a missing supported employer
 
@@ -20,10 +21,15 @@ output MUST NOT become research subjects.
   relation validator accepts it
 - **THEN** the employer can become a company-research subject
 
+#### Scenario: Education dates sit far from the institution
+
+- **WHEN** an education record is ambiguous because its fields could not be related, but its institution is supported
+- **THEN** education research still checks the institution, without the program or dates
+
 #### Scenario: Technology resembles an employer
 
-- **WHEN** a technology name is ambiguous or lacks an accepted employment
-  relation
+- **WHEN** a technology name has no supported organization evidence or was
+  rejected by the reviewer
 - **THEN** company research omits it
 
 ### Requirement: Automatic and manual category starts
@@ -127,10 +133,22 @@ another provider call. Cache failures in one category MUST NOT block unrelated
 categories. The web research proxies SHALL always send `X-Research-Refresh: false`;
 a browser request MUST NOT be able to invalidate the shared public-entity cache.
 
+Company and education research SHALL receive the report language (`en` or `pl`)
+selected in the browser; the research prompt SHALL instruct the model to write
+free-text findings in that language while leaving names, URLs, identifiers,
+dates, and enum values untranslated. The report language SHALL be part of the
+reusable cache key and stored with the entry, so a cache hit never returns text
+generated for a different language. Unsupported languages SHALL be rejected.
+
 #### Scenario: Compatible reusable result exists
 
-- **WHEN** a current public-entity cache entry matches the request
+- **WHEN** a current public-entity cache entry matches the request, including its report language
 - **THEN** the API reuses it and records a cache hit for the owning analysis
+
+#### Scenario: Same subject requested in another language
+
+- **WHEN** a cached entry exists for a subject in one report language and a request arrives for another
+- **THEN** the API treats it as a miss and generates fresh research in the requested language
 
 
 ### Requirement: Actionable research errors

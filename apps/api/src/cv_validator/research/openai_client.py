@@ -33,13 +33,13 @@ class OpenAIResponsesCompanyResearcher:
                 model=PINNED_OPENAI_MODEL,
                 reasoning={"effort": "medium"},
                 instructions=prompt,
-                input=json.dumps({"organization_facts": request.input_facts}, ensure_ascii=False),
+                input=json.dumps({"organization_facts": request.input_facts, "output_language": request.report_language}, ensure_ascii=False),
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"],
                 max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "company_research", "strict": True, "schema": schema}},
                 store=False,
-                prompt_cache_key="cv-research-company-v1",
+                prompt_cache_key=f"cv-research-company-v2-{request.report_language}",
                 max_output_tokens=MAX_OUTPUT_TOKENS["company"],
             )
         except openai.APITimeoutError as exc:
@@ -86,11 +86,11 @@ class OpenAIResponsesEducationResearcher:
         try:
             response = self._client.responses.create(
                 model=PINNED_OPENAI_MODEL, reasoning={"effort": "medium"}, instructions=prompt,
-                input=json.dumps({"education_facts": request.input_facts}, ensure_ascii=False),
+                input=json.dumps({"education_facts": request.input_facts, "output_language": request.report_language}, ensure_ascii=False),
                 tools=[{"type": "web_search", "search_context_size": "low"}],
                 include=["web_search_call.action.sources"], max_tool_calls=4,
                 text={"format": {"type": "json_schema", "name": "education_research", "strict": True, "schema": schema}},
-                store=False, prompt_cache_key="cv-research-education-v1",
+                store=False, prompt_cache_key=f"cv-research-education-v2-{request.report_language}",
                 max_output_tokens=MAX_OUTPUT_TOKENS["education"],
             )
         except openai.APITimeoutError as exc:

@@ -352,3 +352,41 @@ def test_education_cache_subject_encoding_avoids_delimiter_collisions() -> None:
     },)))
 
     assert first[0].cache_key != second[0].cache_key
+
+
+def test_cache_key_and_lookup_are_scoped_by_report_language(tmp_path) -> None:
+    from cv_validator.research.cache import company_subject_descriptors
+    from cv_validator.research.domain import CompanyResearchRequest
+
+    english = company_subject_descriptors(CompanyResearchRequest(({"organization": "A"},), "en"))
+    polish = company_subject_descriptors(CompanyResearchRequest(({"organization": "A"},), "pl"))
+    assert english[0].cache_key != polish[0].cache_key
+    assert english[0].report_language == "en" and polish[0].report_language == "pl"
+
+    researcher = FakeResearcher(company_result())
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=researcher,
+    )
+    seed_two_reports(app)
+    client = client_for(app)
+
+    first = client.post("/analyses/analysis-1/research/company", headers={"X-Report-Language": "en"})
+    second = client.post("/analyses/analysis-2/research/company", headers={"X-Report-Language": "pl"})
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["company_research"]["cache"]["status"] == "miss"
+    assert second.json()["company_research"]["cache"]["status"] == "miss"
+    assert [call.report_language for call in researcher.calls] == ["en", "pl"]
+
+
+def test_unsupported_report_language_is_rejected_for_research(tmp_path) -> None:
+    app = create_app(
+        db_path=tmp_path / "reports.db",
+        openai_settings=OpenAISettings(enabled=True, api_key="test-key"),
+        company_researcher=FakeResearcher(company_result()),
+    )
+    seed_two_reports(app)
+    response = client_for(app).post("/analyses/analysis-1/research/company", headers={"X-Report-Language": "de"})
+    assert response.status_code == 400

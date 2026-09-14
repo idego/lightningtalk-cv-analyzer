@@ -9,6 +9,12 @@ evidence, calibrated uncertainty, neutral context, and readable source links.
 ### Requirement: Recruiter-facing output omits implementation provenance
 The report UI SHALL NOT present code-owned, AI-added, unknown-field, institution-status, or accreditation-status badges as recruiter findings or overview labels. Base-analysis findings SHALL present the observation, why it matters, what to check, and supported evidence without confidence badges.
 
+Ambiguous education and employment records SHALL appear as "What to check" findings rather than as inline overview labels. Each finding SHALL name the entry, explain whether its fields could not be related to each other or the review pass did not confirm it, attach the record's evidence, and be feedback-addressable under the `record-<id>` key.
+
+#### Scenario: Ambiguous record is surfaced once
+- **WHEN** an education or employment record has status `ambiguous` with evidence
+- **THEN** the "What to check" list contains one finding for it and the CV overview row carries no review label
+
 #### Scenario: Accepted and enriched facts are displayed
 - **WHEN** the report contains code-owned values, AI additions, unknown fields, institution status, or accreditation metadata
 - **THEN** the recruiter-facing report omits those provenance/status badges while retaining the supported fact content

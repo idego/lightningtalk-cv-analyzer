@@ -111,12 +111,13 @@ function ConversionProgress({ batch, elapsedSeconds, onCancel }: { batch: Profil
   const pendingIndex = batch.items.findIndex((item) => item.status === "processing" || item.status === "queued");
   const currentIndex = pendingIndex < 0 ? total - 1 : pendingIndex;
   const current = batch.items[currentIndex];
-  const estimatedRemaining = total * ESTIMATED_SECONDS_PER_CV - elapsedSeconds;
+  const estimatedTotal = total * ESTIMATED_SECONDS_PER_CV;
+  const withinEstimate = elapsedSeconds < estimatedTotal;
   return <Card aria-live="polite" className="analysis-flow-enter"><CardContent className="py-8">
     <div key={complete ? "complete" : "working"} className="analysis-status-swap flex flex-col items-center gap-4 text-center">
       {complete ? <span className="flex size-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"><Check className="size-7" /></span> : <ThinkingOrb state="working" size={64} theme="auto" aria-label={`Converting ${currentIndex + 1} of ${total}`} />}
       <div><h2 className="text-lg font-semibold">{complete ? "Conversion complete" : `Converting ${currentIndex + 1} of ${total}`}</h2><p className="mt-1 max-w-lg truncate text-sm text-muted-foreground">{complete ? "Finished profiles are listed under Recent profiles." : current?.file.name}</p></div>
-      {!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {estimatedRemaining > 0 ? `Estimated remaining about ${formatElapsed(estimatedRemaining)}` : "Taking longer than usual"}</div> : null}
+      {!complete ? <div className="flex items-center gap-2 text-xs text-muted-foreground"><Clock3 className="size-4" />Elapsed {formatElapsed(elapsedSeconds)} · {withinEstimate ? `Estimated about ${formatElapsed(estimatedTotal)}` : "Taking longer than usual"}</div> : null}
     </div>
     <ol className="mt-4 divide-y rounded-lg border px-3">{batch.items.map((item, index) => {
       const status = item.status;

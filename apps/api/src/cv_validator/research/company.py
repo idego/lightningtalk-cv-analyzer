@@ -18,14 +18,14 @@ from cv_validator.openai_config import PINNED_OPENAI_MODEL
 from cv_validator.research.company_timeline import date_bounds
 from cv_validator.research.versions import COMPANY_RESEARCH_VERSION
 from cv_validator.research.subjects import (
-    accepted_records,
+    subject_records,
     safe_public_subject,
     subject_key,
     supported_field,
 )
 
 RESEARCH_VERSION = COMPANY_RESEARCH_VERSION
-PROMPT_VERSION = "company-research-prompt-v7"
+PROMPT_VERSION = "company-research-prompt-v8"
 SCHEMA_VERSION = "company-research-schema-v3"
 MAX_ORGANIZATIONS = 12
 
@@ -65,10 +65,10 @@ class CompanyResearchService:
         return result
 
 
-def build_company_research_request(stored_report: dict[str, Any]) -> CompanyResearchRequest:
+def build_company_research_request(stored_report: dict[str, Any], *, report_language: str = "en") -> CompanyResearchRequest:
     facts: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for record in accepted_records(stored_report, "employment"):
+    for record in subject_records(stored_report, "employment", "organization"):
         subject = supported_field(record, "organization")
         if subject is None or not safe_public_subject(subject) or _is_self_employment_label(subject):
             continue
@@ -81,7 +81,7 @@ def build_company_research_request(stored_report: dict[str, Any]) -> CompanyRese
             break
     if not facts:
         raise ValueError("no_company_research_candidates")
-    return CompanyResearchRequest(tuple(facts))
+    return CompanyResearchRequest(tuple(facts), report_language)
 
 
 def validate_company_research(payload: Any, *, request: CompanyResearchRequest) -> None:

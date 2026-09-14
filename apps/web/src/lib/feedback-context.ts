@@ -33,6 +33,7 @@ export function feedbackContext(item: FeedbackContextInput, t: Translate) {
   else if (key.startsWith("comparison-different")) subject = t("feedbackPhoneCountryMismatch");
   else if (key.startsWith("email-")) subject = t("feedbackEmailTypo");
   else if (key.startsWith("gap-")) subject = t("feedbackMissingCvInformation");
+  else if (key.startsWith("record-")) subject = t("feedbackUnconfirmedEntry");
   else if (key === "linkedin-not-found") subject = t("feedbackLinkedinNotFound");
   else if (category.endsWith("_research")) subject = t("feedbackResultNumber", { index: Number(key) + 1 });
   else if (category === "linkedin_discovery" && /^\d+$/.test(key)) subject = t("feedbackProfileNumber", { index: Number(key) + 1 });

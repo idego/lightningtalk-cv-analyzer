@@ -16,7 +16,7 @@ from cv_validator.research.education import PROMPT_VERSION as EDUCATION_PROMPT_V
 from cv_validator.research.education import RESEARCH_VERSION as EDUCATION_RESEARCH_VERSION
 from cv_validator.research.education import SCHEMA_VERSION as EDUCATION_SCHEMA_VERSION
 
-CACHE_FORMAT_VERSION = "public-research-per-subject-cache-v3"
+CACHE_FORMAT_VERSION = "public-research-per-subject-cache-v4"
 MODEL_VERSION = PINNED_OPENAI_MODEL
 SEARCH_POLICY_VERSION = "openai-web-search-low-max4-v1"
 CacheCategory = Literal["company", "education"]
@@ -34,6 +34,7 @@ class CacheDescriptor:
     research_version: str
     prompt_version: str
     schema_version: str
+    report_language: str = "en"
     model_version: str = MODEL_VERSION
     search_policy_version: str = SEARCH_POLICY_VERSION
     cache_format_version: str = CACHE_FORMAT_VERSION
@@ -47,6 +48,7 @@ def company_subject_descriptors(request: CompanyResearchRequest) -> tuple[CacheD
             COMPANY_RESEARCH_VERSION,
             COMPANY_PROMPT_VERSION,
             COMPANY_SCHEMA_VERSION,
+            request.report_language,
         )
         for fact in request.input_facts
     )
@@ -60,6 +62,7 @@ def education_subject_descriptors(request: EducationResearchRequest) -> tuple[Ca
             EDUCATION_RESEARCH_VERSION,
             EDUCATION_PROMPT_VERSION,
             EDUCATION_SCHEMA_VERSION,
+            request.report_language,
         )
         for fact in request.input_facts
     )
@@ -211,11 +214,14 @@ def materialize_cache_hit(category: CacheCategory, payload: dict[str, Any], *, d
     return result
 
 
-def _descriptor(category: CacheCategory, subjects: tuple[str, ...], research: str, prompt: str, schema: str) -> CacheDescriptor:
+def _descriptor(
+    category: CacheCategory, subjects: tuple[str, ...], research: str, prompt: str, schema: str, report_language: str,
+) -> CacheDescriptor:
     material = {"cache_format": CACHE_FORMAT_VERSION, "category": category, "subjects": subjects, "research": research,
-                "prompt": prompt, "schema": schema, "model": MODEL_VERSION, "search_policy": SEARCH_POLICY_VERSION}
+                "prompt": prompt, "schema": schema, "language": report_language, "model": MODEL_VERSION,
+                "search_policy": SEARCH_POLICY_VERSION}
     key = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return CacheDescriptor(key, category, subjects, research, prompt, schema)
+    return CacheDescriptor(key, category, subjects, research, prompt, schema, report_language)
 
 
 def _education_subject(fact: dict[str, Any]) -> str:

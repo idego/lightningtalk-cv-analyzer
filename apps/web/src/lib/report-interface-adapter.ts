@@ -22,7 +22,6 @@ export type OverviewRecord = {
   detail: string | null;
   searchSubject: string | null;
   searchContext: string | null;
-  needsReview?: boolean;
 };
 
 export type OverviewLinkKind = "linkedin" | "github" | "personal";
@@ -124,30 +123,32 @@ function finding(
 
 function localized(language: ReportLanguage) {
   return language === "pl" ? {
+    recordUnconfirmed: "Wpis nie został w pełni potwierdzony",
+    recordRelationWhy: "Jego pola pochodzą z różnych części CV, więc mogą nie należeć do siebie.",
+    recordReviewerWhy: "Weryfikacja nie potwierdziła tego wpisu.",
+    recordCheck: "Porównaj daty i szczegóły z wpisem w CV.",
     gap: "Nie udało się bezpiecznie uzupełnić informacji w CV.",
     gapWhy: "Brak danych ogranicza kompletność raportu.",
     gapCheck: "Sprawdź brakującą informację bezpośrednio w CV.",
     mismatch: "Deklarowany kraj i kraj numeru telefonu są różne.",
     mismatchWhy: "To sygnał niespójności, a nie dowód miejsca pobytu.",
     mismatchCheck: "Sprawdź deklarowaną lokalizację i numer telefonu w CV.",
-    linkedinMissing: "Nie znaleziono dopasowanego profilu LinkedIn w ograniczonym wyszukiwaniu.",
-    linkedinMissingWhy: "Brak wyniku z ograniczonego wyszukiwania nie oznacza, że profil nie istnieje.",
-    linkedinMissingCheck: "Wyszukaj profil ręcznie, używając danych kandydata z CV.",
     locationAmbiguous: "Deklarowane miasto pasuje do kilku miejscowości.",
     locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie lokalizacji.",
     locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje.",
     locationWhy: "Rozpoznanie dotyczy zgodności tekstu CV z ograniczonym indeksem, nie miejsca pobytu.",
     locationCheck: "Sprawdź pisownię miasta i kraju w CV oraz potwierdź je z kandydatem.",
   } : {
+    recordUnconfirmed: "Entry could not be fully confirmed",
+    recordRelationWhy: "Its fields were extracted from separate parts of the CV, so they may not belong together.",
+    recordReviewerWhy: "The review pass did not confirm this entry.",
+    recordCheck: "Compare the dates and details against the CV entry.",
     gap: "Information in the CV could not be added safely.",
     gapWhy: "Missing data limits the completeness of the report.",
     gapCheck: "Review the missing information directly in the CV.",
     mismatch: "The declared country and phone country differ.",
     mismatchWhy: "This is a consistency signal, not proof of residence.",
     mismatchCheck: "Review the declared location and phone number in the CV.",
-    linkedinMissing: "No matching LinkedIn profile was found by the limited search.",
-    linkedinMissingWhy: "No result from a limited search does not mean that a profile does not exist.",
-    linkedinMissingCheck: "Search manually using the candidate details stated in the CV.",
     locationAmbiguous: "The declared city matches several places.",
     locationUnresolved: "The declared city was not confirmed in the limited location index.",
     locationMismatch: "The declared city and country point to different countries.",
@@ -200,7 +201,6 @@ function educationRecord(item: AnalysisReport["base_analysis"]["education"][numb
     ]),
     searchSubject: institution ?? certificate,
     searchContext: value(item.program) ?? (institution ? certificate : null),
-    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -215,7 +215,6 @@ function employmentRecord(item: AnalysisReport["base_analysis"]["employment"][nu
     ]),
     searchSubject: value(item.organization),
     searchContext: value(item.location),
-    needsReview: item.status === "ambiguous",
   };
 }
 
@@ -331,18 +330,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         locationEvidence,
       )
     : null;
-  const linkedinNotFound = report.linkedin_discovery?.status === "completed"
-    && report.linkedin_discovery.linkedin_not_found;
-  const linkedinEvidence = report.base_analysis.profile.candidate_name?.evidence ?? [];
-  const linkedinFinding = linkedinNotFound && linkedinEvidence.length > 0
-    ? findingFromEvidence(
-        "linkedin-not-found",
-        copy.linkedinMissing,
-        copy.linkedinMissingWhy,
-        copy.linkedinMissingCheck,
-        linkedinEvidence,
-      )
-    : null;
   const institutionFindings: ReportFinding[] = (report.education_research?.credentials ?? []).flatMap((credential, index) => {
     if (credential.institution_existence !== "conflicting" || !credential.resolved_institution) return [];
     const supported = credential.findings.filter((item) => item.kind === "institution_existence" && item.confidence === "high" && item.source_urls.length);
@@ -374,6 +361,23 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       sourceUrls: item.source_urls,
     }];
   });
+  const recordFindings: ReportFinding[] = [
+    ...report.base_analysis.education.map((item) => ({ item, label: value(item.institution) ?? value(item.certificate) ?? value(item.program) })),
+    ...report.base_analysis.employment.map((item) => ({ item, label: value(item.organization) ?? value(item.role) })),
+  ].flatMap(({ item, label }) => {
+    if (item.status !== "ambiguous") return [];
+    const evidence = Object.values(item).flatMap((field) => (
+      field && typeof field === "object" && "evidence" in field && Array.isArray(field.evidence) ? field.evidence as Evidence[] : []
+    ));
+    if (!evidence.length) return [];
+    return [findingFromEvidence(
+      `record-${item.id}`,
+      label ? `${copy.recordUnconfirmed}: ${label}` : copy.recordUnconfirmed,
+      item.relation_status === "supported" ? copy.recordReviewerWhy : copy.recordRelationWhy,
+      copy.recordCheck,
+      evidence,
+    )];
+  });
   // One list, ordered from research-backed contradictions to weaker consistency signals.
   const whatToCheck: ReportFinding[] = [
     ...institutionFindings,
@@ -389,6 +393,7 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         comparisonEvidence,
       )),
     ...(locationFinding && cityCountryRelationship !== "different" ? [locationFinding] : []),
+    ...recordFindings,
     ...coverageGaps.map((item, index) => finding(
       `gap-${index}`,
       { ...item, summary: `${copy.gap} (${text(item.target) ?? "CV"})` },
@@ -396,7 +401,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       copy.gapWhy,
       copy.gapCheck,
     )),
-    ...(linkedinFinding ? [linkedinFinding] : []),
   ];
 
   return { whatToCheck, overview: overview(report) };

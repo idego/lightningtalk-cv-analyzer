@@ -127,7 +127,6 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
   const hasContact = Boolean(overview.candidateName || overview.phone || overview.email || overview.links.length > 0);
   const hasLocation = Boolean(overview.statedLocation || overview.resolvedCity || overview.resolvedCountry || overview.euStatus);
   const hasFacts = hasContact || hasLocation || overview.education.length > 0 || overview.certifications.length > 0 || overview.employment.length > 0 || Boolean(overview.educationStatus || overview.employmentStatus);
-  const reviewLabel = t("needsReview");
   const emptySection = (sectionStatus: string | undefined) => {
     if (sectionStatus === "not_present") return t("noEntriesFound");
     if (sectionStatus === "failed") return t("sectionAnalysisFailed");
@@ -184,7 +183,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                 icon={<GraduationCap className="size-4" />}
                 label={t("educationEntry")}
                 value={item.value}
-                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                detail={item.detail}
                 tone={educationTone}
               />)}
             </div>
@@ -201,7 +200,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                   icon={<Award className="size-4" />}
                   label={t("certificationEntry")}
                   value={item.value}
-                  detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                  detail={item.detail}
                   tone={educationTone}
                   action={href && item.searchSubject ? <GoogleSearchAction href={href} subject={item.searchSubject} /> : null}
                 />;
@@ -217,7 +216,7 @@ export function StructuredFacts({ overview, report, feedbackManifest, readOnly =
                 icon={<BriefcaseBusiness className="size-4" />}
                 label={t("employmentEntry")}
                 value={item.value}
-                detail={joinDisplay(item.detail, item.needsReview ? reviewLabel : null)}
+                detail={item.detail}
                 tone={employmentTone}
               />)}
             </div>
