@@ -182,7 +182,7 @@ test("CV overview ignores review annotations", () => {
   assert.equal(Object.hasOwn(overview, "attentionRecords"), false);
 });
 
-test("completed LinkedIn not-found result becomes one cautious checklist finding", () => {
+test("completed LinkedIn not-found result stays out of the checklist", () => {
   const value = report();
   value.linkedin_discovery = {
     status: "completed",
@@ -195,11 +195,8 @@ test("completed LinkedIn not-found result becomes one cautious checklist finding
   };
 
   const presentation = adaptReportInterface(value, "en");
-  const linkedin = presentation.whatToCheck.find((item) => item.id === "linkedin-not-found");
 
-  assert.match(linkedin.whatWeFound, /limited search/i);
-  assert.match(linkedin.whyItMatters, /does not mean.*does not exist/i);
-  assert.equal(linkedin.evidence[0].excerpt, "Alex Example");
+  assert.equal(presentation.whatToCheck.find((item) => item.id === "linkedin-not-found"), undefined);
 });
 
 test("outside-EU status is neutral overview information, not a finding", () => {

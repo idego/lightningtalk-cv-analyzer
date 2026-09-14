@@ -130,9 +130,6 @@ function localized(language: ReportLanguage) {
     mismatch: "Deklarowany kraj i kraj numeru telefonu są różne.",
     mismatchWhy: "To sygnał niespójności, a nie dowód miejsca pobytu.",
     mismatchCheck: "Sprawdź deklarowaną lokalizację i numer telefonu w CV.",
-    linkedinMissing: "Nie znaleziono dopasowanego profilu LinkedIn w ograniczonym wyszukiwaniu.",
-    linkedinMissingWhy: "Brak wyniku z ograniczonego wyszukiwania nie oznacza, że profil nie istnieje.",
-    linkedinMissingCheck: "Wyszukaj profil ręcznie, używając danych kandydata z CV.",
     locationAmbiguous: "Deklarowane miasto pasuje do kilku miejscowości.",
     locationUnresolved: "Deklarowane miasto nie zostało potwierdzone w ograniczonym indeksie lokalizacji.",
     locationMismatch: "Deklarowane miasto i kraj wskazują na różne kraje.",
@@ -145,9 +142,6 @@ function localized(language: ReportLanguage) {
     mismatch: "The declared country and phone country differ.",
     mismatchWhy: "This is a consistency signal, not proof of residence.",
     mismatchCheck: "Review the declared location and phone number in the CV.",
-    linkedinMissing: "No matching LinkedIn profile was found by the limited search.",
-    linkedinMissingWhy: "No result from a limited search does not mean that a profile does not exist.",
-    linkedinMissingCheck: "Search manually using the candidate details stated in the CV.",
     locationAmbiguous: "The declared city matches several places.",
     locationUnresolved: "The declared city was not confirmed in the limited location index.",
     locationMismatch: "The declared city and country point to different countries.",
@@ -331,18 +325,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
         locationEvidence,
       )
     : null;
-  const linkedinNotFound = report.linkedin_discovery?.status === "completed"
-    && report.linkedin_discovery.linkedin_not_found;
-  const linkedinEvidence = report.base_analysis.profile.candidate_name?.evidence ?? [];
-  const linkedinFinding = linkedinNotFound && linkedinEvidence.length > 0
-    ? findingFromEvidence(
-        "linkedin-not-found",
-        copy.linkedinMissing,
-        copy.linkedinMissingWhy,
-        copy.linkedinMissingCheck,
-        linkedinEvidence,
-      )
-    : null;
   const institutionFindings: ReportFinding[] = (report.education_research?.credentials ?? []).flatMap((credential, index) => {
     if (credential.institution_existence !== "conflicting" || !credential.resolved_institution) return [];
     const supported = credential.findings.filter((item) => item.kind === "institution_existence" && item.confidence === "high" && item.source_urls.length);
@@ -396,7 +378,6 @@ export function adaptReportInterface(report: AnalysisReport, language: ReportLan
       copy.gapWhy,
       copy.gapCheck,
     )),
-    ...(linkedinFinding ? [linkedinFinding] : []),
   ];
 
   return { whatToCheck, overview: overview(report) };

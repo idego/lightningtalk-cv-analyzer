@@ -513,11 +513,6 @@ def _presentation_feedback_candidates(payload: dict[str, Any], versions: dict[st
         yield TargetKind.REVIEW_FINDING, "what_to_check", f"gap-{gap_index}", versions, None
         gap_index += 1
 
-    linkedin = payload.get("linkedin_discovery")
-    candidate = profile.get("candidate_name") if isinstance(profile.get("candidate_name"), dict) else {}
-    if isinstance(linkedin, dict) and linkedin.get("status") == "completed" and linkedin.get("linkedin_not_found") and evidence(candidate):
-        yield TargetKind.REVIEW_FINDING, "what_to_check", "linkedin-not-found", versions, None
-
 
 def _failure(operation: str, value: dict[str, Any], versions: dict[str, str]) -> dict[str, Any]:
     failure = value.get("failure") if isinstance(value.get("failure"), dict) else {}
