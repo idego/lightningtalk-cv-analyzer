@@ -262,11 +262,21 @@ class PersistenceStore:
                     completed_at TEXT NOT NULL,
                     status TEXT NOT NULL CHECK(status = 'completed')
                 );
+                CREATE TABLE IF NOT EXISTS analysis_cancel_requests (
+                    owner_user_id TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    PRIMARY KEY (owner_user_id, request_id)
+                );
+                CREATE INDEX IF NOT EXISTS analysis_cancel_requests_expires_at
+                    ON analysis_cancel_requests(expires_at);
                 """
             )
             _ensure_ai_usage_schema(conn)
             _ensure_share_token_expiry_schema(conn)
             _ensure_research_cache_language_schema(conn)
+            _ensure_run_cancel_schema(conn)
             conn.execute(
                 """INSERT OR IGNORE INTO processed_report_events
                    (event_id, analysis_id, completed_at, status)
@@ -332,13 +342,81 @@ class PersistenceStore:
         analysis_id: str,
         correlation_id: str,
         owner_user_id: str,
+        request_id: str | None = None,
     ) -> None:
+        """Insert a running row; a cancel already pending for the request is stamped on it."""
         with self._connect() as conn:
+            cancel_requested_at = (
+                _pending_cancel(conn, owner_user_id, request_id) if request_id else None
+            )
             conn.execute(
                 """INSERT INTO analysis_runs
-                   (analysis_id, correlation_id, status, created_at, owner_user_id, expires_at)
-                   VALUES (?, ?, 'running', ?, ?, ?)""",
-                (analysis_id, correlation_id, _utc_now(), owner_user_id, self._deadline()),
+                   (analysis_id, correlation_id, status, created_at, owner_user_id, expires_at,
+                    cancel_requested_at)
+                   VALUES (?, ?, 'running', ?, ?, ?, ?)""",
+                (
+                    analysis_id,
+                    correlation_id,
+                    _utc_now(),
+                    owner_user_id,
+                    self._deadline(),
+                    cancel_requested_at,
+                ),
+            )
+
+    def request_analysis_cancel(self, owner_user_id: str, request_id: str) -> None:
+        """Record a cancel for (owner, client request id) so any API process honors it.
+
+        The analysis id does not exist yet when the browser cancels, so the
+        request is keyed the way the client knows it. Rows expire after
+        ``CANCEL_REQUEST_TTL`` and are purged by retention maintenance.
+        """
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO analysis_cancel_requests
+                   (owner_user_id, request_id, requested_at, expires_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(owner_user_id, request_id) DO UPDATE SET
+                       requested_at = excluded.requested_at,
+                       expires_at = excluded.expires_at""",
+                (
+                    owner_user_id,
+                    request_id,
+                    now.isoformat(),
+                    (now + CANCEL_REQUEST_TTL).isoformat(),
+                ),
+            )
+
+    def analysis_cancel_requested(
+        self,
+        owner_user_id: str,
+        request_id: str | None,
+        analysis_id: str | None = None,
+    ) -> bool:
+        """Whether an unexpired cancel is pending; stamps the run when one is given."""
+        if request_id is None:
+            return False
+        with self._connect() as conn:
+            requested_at = _pending_cancel(conn, owner_user_id, request_id)
+            if requested_at is None:
+                return False
+            if analysis_id is not None:
+                conn.execute(
+                    """UPDATE analysis_runs SET cancel_requested_at = ?
+                       WHERE analysis_id = ? AND cancel_requested_at IS NULL""",
+                    (requested_at, analysis_id),
+                )
+            return True
+
+    def discard_analysis_cancel(self, owner_user_id: str, request_id: str | None) -> None:
+        """Consume the cancel once its analysis has finished, whichever way it ended."""
+        if request_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM analysis_cancel_requests WHERE owner_user_id = ? AND request_id = ?",
+                (owner_user_id, request_id),
             )
 
     def complete_analysis_run(
@@ -1060,11 +1138,36 @@ class PersistenceStore:
                 "DELETE FROM analysis_share_tokens WHERE expires_at IS NULL OR expires_at <= ?",
                 (_utc_now(),),
             ).rowcount
+            deleted["analysis_cancel_requests"] = conn.execute(
+                "DELETE FROM analysis_cancel_requests WHERE expires_at <= ?",
+                (now_iso,),
+            ).rowcount
             deleted["analysis_ids"] = tuple(expired_ids)
         return deleted
 
 
 SHARE_TOKEN_TTL = timedelta(days=2)
+# A cancel outlives any analysis it could target (uploads wait for a slot, then
+# run one synchronous model pass); stale rows are swept by retention maintenance.
+CANCEL_REQUEST_TTL = timedelta(hours=1)
+
+
+def _pending_cancel(
+    conn: sqlite3.Connection, owner_user_id: str, request_id: str
+) -> str | None:
+    """``requested_at`` of an unexpired cancel for the pair, else ``None``."""
+    row = conn.execute(
+        """SELECT requested_at FROM analysis_cancel_requests
+           WHERE owner_user_id = ? AND request_id = ? AND expires_at > ?""",
+        (owner_user_id, request_id, _utc_now()),
+    ).fetchone()
+    return None if row is None else str(row["requested_at"])
+
+
+def _ensure_run_cancel_schema(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(analysis_runs)").fetchall()}
+    if columns and "cancel_requested_at" not in columns:
+        conn.execute("ALTER TABLE analysis_runs ADD COLUMN cancel_requested_at TEXT")
 
 
 def _share_token_expiry(now: datetime, report_expires_at: str | None) -> str:

@@ -40,6 +40,10 @@ class AnalysisCancellationRegistry:
     The model call is synchronous and cannot be interrupted, so a cancel takes
     effect at the next checkpoint: before the run starts or before its report is
     persisted. Entries are bounded and dropped once consumed or superseded.
+
+    Only Profile Builder extraction still uses this in-process registry; CV
+    analysis cancels are stored in ``analysis_cancel_requests`` so they hold
+    across API processes.
     """
 
     _MAX_ENTRIES = 256

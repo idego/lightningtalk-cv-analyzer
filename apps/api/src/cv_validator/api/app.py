@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from copy import deepcopy
@@ -30,7 +31,7 @@ from cv_validator.analysis import (
 from cv_validator.analysis.document_analysis import DocumentAnalysisStrategy
 from cv_validator.analysis.strategy import safe_error_code
 from cv_validator.analysis.model_client import OpenAIResponsesAnalysisClient
-from cv_validator.api.concurrency import AnalysisCancellationRegistry, ResearchLockRegistry
+from cv_validator.api.concurrency import ResearchLockRegistry
 from cv_validator.api.maintenance import (
     MAINTENANCE_TIME_ENV,
     RetentionMaintenance,
@@ -281,10 +282,9 @@ def create_app(
     # bounded rather than unbounded: the container has two CPU cores for
     # document conversion, OpenAI enforces per-key rate limits, and each
     # analysis already fans out to four model calls. The limit is per process;
-    # the cancellation registry, research locks, telemetry, and the retention
-    # scheduler are in-memory, so scaling must stay single-process.
+    # research locks, telemetry, and the retention scheduler are in-memory, so
+    # scaling must stay single-process. (Cancel requests live in the database.)
     analysis_slots = threading.BoundedSemaphore(analysis_concurrency_limit)
-    cancellations = AnalysisCancellationRegistry()
     telemetry = OperationsTelemetry()
     pricing = load_pricing_catalog()
 
@@ -564,7 +564,10 @@ def create_app(
                     content, filename, report_language, owner_user_id, correlation_id, request_id
                 )
             finally:
-                cancellations.discard(owner_user_id, request_id)
+                try:
+                    store.discard_analysis_cancel(owner_user_id, request_id)
+                except (PersistenceError, sqlite3.Error):
+                    safe_log("analysis_cancel_discard_failed", error_code="analysis_persistence_error")
 
     def _analyze_upload(
         content: bytes,
@@ -574,11 +577,11 @@ def create_app(
         correlation_id: str,
         request_id: str | None,
     ) -> dict:
-        if cancellations.is_cancelled(owner_user_id, request_id):
+        if store.analysis_cancel_requested(owner_user_id, request_id):
             raise HTTPException(status_code=409, detail="analysis_cancelled")
         analysis_id = str(uuid4())
         try:
-            store.create_analysis_run(analysis_id, correlation_id, owner_user_id)
+            store.create_analysis_run(analysis_id, correlation_id, owner_user_id, request_id)
         except PersistenceError as exc:
             raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
         recorder = AnalysisRecorder(
@@ -625,7 +628,7 @@ def create_app(
                     detail=f"analysis_{base_status}",
                     headers={"X-Analysis-ID": analysis_id},
                 )
-            if cancellations.is_cancelled(owner_user_id, request_id):
+            if store.analysis_cancel_requested(owner_user_id, request_id, analysis_id):
                 recorder.emit(
                     "analysis_cancelled",
                     operation="base_analysis",
@@ -783,7 +786,10 @@ def create_app(
     ) -> JSONResponse:
         if not x_analysis_owner_id or not x_analysis_request_id:
             raise HTTPException(status_code=400, detail="analysis_request_id_required")
-        cancellations.request(_owner_user_id(x_analysis_owner_id), x_analysis_request_id)
+        try:
+            store.request_analysis_cancel(_owner_user_id(x_analysis_owner_id), x_analysis_request_id)
+        except (PersistenceError, sqlite3.Error) as exc:
+            raise HTTPException(status_code=500, detail="analysis_persistence_error") from exc
         return JSONResponse({"status": "cancel_requested"}, status_code=202)
 
     @app.get("/analyses")

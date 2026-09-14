@@ -66,6 +66,12 @@ process-wide semaphore (`CV_VALIDATOR_ANALYSIS_CONCURRENCY`, default 4) caps
 how many run at once because of the two-core container, OpenAI rate limits,
 and the four model calls each analysis fans out to. The analyze page runs a
 batch with at most two files in flight, leaving slots for other recruiters.
+Cancel requests are not in-memory state: `POST /analyze/cancel` stores the
+(owner, client request id) pair in `analysis_cancel_requests` with a one-hour
+TTL, the running analysis consults that table before it starts and before it
+persists, stamps `analysis_runs.cancel_requested_at`, and deletes the request
+when it exits. Research locks, telemetry, and the retention scheduler remain
+per-process.
 
 The API persists validated reports and owner-scoped lifecycle data in SQLite.
 AI accounting is separate from mutable report/research rows: `ai_usage_events`

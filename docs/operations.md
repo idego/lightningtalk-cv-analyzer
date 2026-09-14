@@ -25,7 +25,7 @@
   parallel analyses queue on the write lock instead of failing; expect
   `cv_analyzer.db-wal` and `-shm` files next to the database on the volume,
   and back them up together with it. The daily vacuum checkpoints and
-  truncates the WAL. Do not scale with uvicorn `--workers`: cancellation,
+  truncates the WAL. Do not scale with uvicorn `--workers`:
   research locks, telemetry, and the retention scheduler are per-process
   in-memory state.
 
