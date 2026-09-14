@@ -36,7 +36,7 @@ RETENTION_DAYS_MAX = 3650
 @dataclass
 class PersistenceConfig:
     db_path: Path
-    retention_days: int = 90
+    retention_days: int = 10
     research_cache_ttl_days: int = 30
 
 

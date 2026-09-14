@@ -127,7 +127,7 @@ def _db_path_from_env() -> Path:
 
 
 def _retention_days_from_env() -> int:
-    value = int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "90"))
+    value = int(os.environ.get("CV_VALIDATOR_RETENTION_DAYS", "10"))
     if not RETENTION_DAYS_MIN <= value <= RETENTION_DAYS_MAX:
         raise ValueError(
             f"CV_VALIDATOR_RETENTION_DAYS must be between {RETENTION_DAYS_MIN} and {RETENTION_DAYS_MAX}"
