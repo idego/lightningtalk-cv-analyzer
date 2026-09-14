@@ -4,6 +4,7 @@ import io
 import json
 import sqlite3
 import zipfile
+from datetime import datetime, timezone
 
 from docx import Document
 from PIL import Image
@@ -1515,6 +1516,8 @@ def test_profile_builder_startup_sanitizes_legacy_profile_builder_rows(
         "default_value": "SSN: 123-45-6789",
     }
 
+    # Recent enough to survive the retention backfill applied on the next startup.
+    legacy_timestamp = datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             "DELETE FROM runtime_settings WHERE key = ?",
@@ -1534,8 +1537,8 @@ def test_profile_builder_startup_sanitizes_legacy_profile_builder_rows(
                 json.dumps(profile),
                 json.dumps(AnonymizationPolicy().model_dump(mode="json")),
                 json.dumps(template),
-                "2026-08-31T00:00:00+00:00",
-                "2026-08-31T00:00:00+00:00",
+                legacy_timestamp,
+                legacy_timestamp,
             ),
         )
         conn.execute(
@@ -1666,3 +1669,160 @@ def test_profile_builder_extraction_cancel_is_scoped_to_request_id_and_consumed(
         "/profile-builder/extract", files=_cancel_files(), headers={"X-Profile-Builder-Request-Id": "req-1"}
     )
     assert again.status_code == 200
+
+
+def _pdf_with_pages(page_count: int) -> bytes:
+    from reportlab.pdfgen.canvas import Canvas
+
+    output = io.BytesIO()
+    canvas = Canvas(output)
+    for page in range(page_count):
+        canvas.drawString(72, 760, f"Jane Example page {page + 1} Backend Engineer at Acme")
+        canvas.showPage()
+    canvas.save()
+    return output.getvalue()
+
+
+def test_profile_builder_rejects_pdf_over_page_limit_before_extraction(
+    tmp_path,
+    location_resolver,
+) -> None:
+    from cv_validator.analysis.docling_converter import MAX_DOCUMENT_PAGES
+
+    extractor = _Extractor()
+    client = _client(tmp_path, location_resolver, extractor)
+    response = client.post(
+        "/profile-builder/extract",
+        files={"file": ("long.pdf", _pdf_with_pages(MAX_DOCUMENT_PAGES + 1), "application/pdf")},
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "document_page_limit_exceeded"}
+    assert extractor.requests == []
+
+
+def test_shared_template_can_be_edited_and_deleted_by_another_owner(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    shared = default_profile_template().model_copy(deep=True)
+    shared.id = "org-template"
+    shared.name = "Org Template"
+    shared.visibility = "shared"
+    assert client.put(
+        "/profile-builder/templates/org-template",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=shared.model_dump(mode="json"),
+    ).status_code == 200
+
+    renamed = shared.model_copy(deep=True)
+    renamed.name = "Org Template v2"
+    assert client.put(
+        "/profile-builder/templates/org-template",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+        json=renamed.model_dump(mode="json"),
+    ).status_code == 200
+    owner_a_view = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+    ).json()["templates"]
+    item = next(item for item in owner_a_view if item["template"]["id"] == "org-template")
+    assert item["template"]["name"] == "Org Template v2"
+    assert item["shared"] is True
+
+    deleted = client.delete(
+        "/profile-builder/templates/org-template",
+        headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    owner_a_after = client.get(
+        "/profile-builder/templates",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+    ).json()["templates"]
+    assert all(item["template"]["id"] != "org-template" for item in owner_a_after)
+
+
+def test_saving_shared_template_as_private_keeps_the_shared_copy(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    shared = default_profile_template().model_copy(deep=True)
+    shared.id = "unshared-template"
+    shared.name = "Shared Name"
+    shared.visibility = "shared"
+    assert client.put(
+        "/profile-builder/templates/unshared-template",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=shared.model_dump(mode="json"),
+    ).status_code == 200
+
+    private = shared.model_copy(deep=True)
+    private.name = "Private Name"
+    private.visibility = "private"
+    assert client.put(
+        "/profile-builder/templates/unshared-template",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=private.model_dump(mode="json"),
+    ).status_code == 200
+
+    owner_a = next(
+        item
+        for item in client.get(
+            "/profile-builder/templates",
+            headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        ).json()["templates"]
+        if item["template"]["id"] == "unshared-template"
+    )
+    assert owner_a["template"]["name"] == "Private Name"
+    assert owner_a["shared"] is False
+    assert owner_a["overrides_shared"] is True
+
+    owner_b = next(
+        item
+        for item in client.get(
+            "/profile-builder/templates",
+            headers={"X-Profile-Builder-Access-Token": OTHER_PROFILE_TOKEN},
+        ).json()["templates"]
+        if item["template"]["id"] == "unshared-template"
+    )
+    assert owner_b["template"]["name"] == "Shared Name"
+    assert owner_b["shared"] is True
+
+
+def test_saving_private_template_as_shared_removes_the_private_copy(
+    tmp_path,
+    location_resolver,
+) -> None:
+    client = _client(tmp_path, location_resolver, _Extractor())
+    private = default_profile_template().model_copy(deep=True)
+    private.id = "promoted-template"
+    private.name = "Mine"
+    private.visibility = "private"
+    assert client.put(
+        "/profile-builder/templates/promoted-template",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=private.model_dump(mode="json"),
+    ).status_code == 200
+    shared = private.model_copy(deep=True)
+    shared.name = "Everyone's"
+    shared.visibility = "shared"
+    assert client.put(
+        "/profile-builder/templates/promoted-template",
+        headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        json=shared.model_dump(mode="json"),
+    ).status_code == 200
+
+    items = [
+        item
+        for item in client.get(
+            "/profile-builder/templates",
+            headers={"X-Profile-Builder-Access-Token": PROFILE_TOKEN},
+        ).json()["templates"]
+        if item["template"]["id"] == "promoted-template"
+    ]
+    assert len(items) == 1
+    assert items[0]["shared"] is True
+    assert items[0]["overrides_shared"] is False
+    assert items[0]["template"]["name"] == "Everyone's"
