@@ -93,17 +93,22 @@ in `cv_validator_data`; reviewer roles live with Better Auth in
 feedback is long-lived platform and review data that survives analysis deletion
 and retention purge, similar to the AI usage ledger. Normal report deletion
 (`DELETE /analyses/{id}`, `DELETE /analyses`) and retention purge leave feedback
-targets, reviewer responses, triage notes, displayed context snapshots, and
-diagnostic failure context intact. The retained `analysis_id` is kept as a
-historical correlation identifier. Feedback is enabled by default. Responses
-retain the signed-in author's email and a snapshot of the displayed CV/report
-section (label up to 200 characters, text up to 12000 characters, and the
-report JSON up to 400000 serialized characters) so the inbox can re-render the
-referenced report section with the same components as the analysis view, even
-after the analysis itself is gone. Each inbox item carries
-`analysis_available`; when the analysis was deleted and neither a report
-snapshot nor a CV excerpt exists, the inbox shows the section name in place of
-the report section. Comments are 12 to 300 characters; team
+targets, reviewer responses, triage notes, and diagnostic failure context
+intact. The retained `analysis_id` is kept as a historical correlation
+identifier. Feedback is enabled by default. Responses retain the signed-in
+author's email and a snapshot of the displayed CV/report section (label up to
+200 characters, text up to 12000 characters, and the report JSON up to 400000
+serialized characters) so the inbox can re-render the referenced report section
+with the same components as the analysis view, even after the analysis itself
+is gone. The snapshot is CV-derived, so it follows the analysis retention
+window: every write stamps `context_expires_at` with now plus the current
+retention days, and the daily retention maintenance nulls the label, text, and
+report JSON once that passes while keeping the rating, comment, author, and
+triage. Snapshots written before the column existed are backfilled from their
+last write on startup. Each inbox item carries `analysis_available` and
+`context_expired`; when no snapshot is stored the inbox shows the section name
+in place of the report section, with a note saying whether the analysis was
+deleted or the snapshot expired. Comments are 12 to 300 characters; team
 notes are limited to 500 characters; contact details and URLs are rejected from
 both. The web proxy caps a feedback write at 512 KiB and a triage note at 2
 KiB. The inbox never stores the uploaded original, raw model output, raw

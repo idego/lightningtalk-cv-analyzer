@@ -33,7 +33,9 @@ A signed-in user who can open an analysis SHALL be able to submit a comment with
 - **THEN** the API responds 422 `feedback_rate_limit`
 
 ### Requirement: Feedback lifecycle and analysis decoupling
-Analysis data is transient and recruiter-owned. Feedback is long-lived platform and review data that survives analysis deletion and retention purge, similar to the AI usage ledger. When an analysis is deleted through single deletion (`DELETE /analyses/{id}`), bulk deletion (`DELETE /analyses`), or automated retention purge, all associated feedback targets, responses, triage notes, displayed context snapshots, and diagnostic context SHALL remain intact. The `analysis_id` SHALL be retained as a historical correlation identifier without a foreign key cascade to `reports`.
+Analysis data is transient and recruiter-owned. Feedback is long-lived platform and review data that survives analysis deletion and retention purge, similar to the AI usage ledger. When an analysis is deleted through single deletion (`DELETE /analyses/{id}`), bulk deletion (`DELETE /analyses`), or automated retention purge, all associated feedback targets, responses, triage notes, and diagnostic context SHALL remain intact. The `analysis_id` SHALL be retained as a historical correlation identifier without a foreign key cascade to `reports`.
+
+The displayed context snapshot (`context_label`, `context_text`, `context_report`) is CV-derived and SHALL NOT outlive the analysis retention window. Each response stores `context_expires_at`, set on every write to now plus the current analysis retention days; snapshots stored before the deadline existed are backfilled from their last write. Analysis deletion does not remove the snapshot early. The scheduled retention maintenance SHALL null the three snapshot fields once the deadline passes while keeping the rating, reason, comment, author, triage, and events. The inbox item SHALL carry `context_expired` (a snapshot was captured and has since expired) so the inbox can show the section name with an expiry note instead of the deleted-analysis note.
 
 #### Scenario: Single analysis deletion preserves feedback
 - **WHEN** an analysis is deleted by an authorized recruiter
@@ -41,7 +43,15 @@ Analysis data is transient and recruiter-owned. Feedback is long-lived platform 
 
 #### Scenario: Retention purge preserves feedback
 - **WHEN** expired analysis reports are removed by automated retention purge
-- **THEN** all associated feedback data and displayed context snapshots remain preserved
+- **THEN** all associated feedback responses, comments, triage notes, and events remain preserved
+
+#### Scenario: Context snapshot expires with the retention window
+- **WHEN** a response's `context_expires_at` has passed and retention maintenance runs
+- **THEN** `context_label`, `context_text`, and `context_report` are removed, the response stays in the inbox with `context_expired: true`, and the inbox shows the section name with an expiry note
+
+#### Scenario: Resubmission renews the snapshot deadline
+- **WHEN** an actor writes feedback again for the same target
+- **THEN** the stored snapshot and its `context_expires_at` are replaced using the current retention days
 
 ### Requirement: Maintainer inbox and triage
 Users holding an active `owner` or `reviewer` role SHALL see the `/feedback` inbox listing responses with filters for rating, reason, kind, triage status, source, version, operation, error code, and date range. They SHALL be able to set a triage status (`new`, `reviewing`, `planned`, `resolved`, `wont_fix`) with a team note of up to 500 characters (2 KiB request cap, same contact-data rule as comments) and delete a response. The API SHALL record the acting maintainer from the `X-Feedback-Maintainer` header that only the web proxy sets. Every `/internal/feedback*` API route SHALL require the web-to-API internal secret (`X-Internal-Admin-Secret`, compared in constant time) and SHALL respond 403 `internal_secret_required` without it, or 503 `internal_secret_unconfigured` when no secret is configured. The web proxy SHALL return the author's email only to `owner` role holders; `reviewer` role holders receive pseudonymous `actor_hash` values only. The inbox MUST NOT store the uploaded original, raw model output, raw exceptions, request bodies, or logs.
