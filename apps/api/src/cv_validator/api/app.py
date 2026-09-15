@@ -266,7 +266,7 @@ def create_app(
             ),
         )
     )
-    feedback_store = FeedbackStore(store.config.db_path)
+    feedback_store = FeedbackStore(store.config.db_path, retention_days=store.get_retention_days)
     max_upload_bytes = (
         upload_max_bytes
         if upload_max_bytes is not None
@@ -289,7 +289,11 @@ def create_app(
     pricing = load_pricing_catalog()
 
     maintenance = RetentionMaintenance(
-        purgers=(store.purge_expired, ProfileBuilderStore(store).purge_expired),
+        purgers=(
+            store.purge_expired,
+            ProfileBuilderStore(store).purge_expired,
+            feedback_store.purge_expired_context,
+        ),
         vacuum=store.vacuum,
         run_at=parse_maintenance_time(os.environ.get(MAINTENANCE_TIME_ENV)),
     )

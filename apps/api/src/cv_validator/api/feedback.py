@@ -8,12 +8,12 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Callable, Iterator, Literal
 from uuid import UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cv_validator.api.sqlite_support import open_connection
+from cv_validator.api.sqlite_support import open_connection, retention_deadline
 
 
 TARGET_NAMESPACE = UUID("b1541b7f-e1ec-44b2-bac8-e30bf2445772")
@@ -280,13 +280,60 @@ def init_feedback_schema(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_report_json TEXT")
     if "actor_email" not in response_columns:
         conn.execute("ALTER TABLE feedback_responses ADD COLUMN actor_email TEXT")
+    if "context_expires_at" not in response_columns:
+        conn.execute("ALTER TABLE feedback_responses ADD COLUMN context_expires_at TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS feedback_responses_context_expires ON feedback_responses(context_expires_at)")
+
+
+def _backfill_context_deadlines(conn: sqlite3.Connection, retention_days: int) -> None:
+    """Give snapshots stored before the deadline existed one, counted from their last write."""
+    rows = conn.execute(
+        """SELECT rowid AS row_id, updated_at FROM feedback_responses
+           WHERE context_expires_at IS NULL
+             AND (context_label IS NOT NULL OR context_text IS NOT NULL OR context_report_json IS NOT NULL)"""
+    ).fetchall()
+    for row in rows:
+        try:
+            since = datetime.fromisoformat(str(row["updated_at"]))
+        except ValueError:
+            since = datetime.now(timezone.utc)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        conn.execute(
+            "UPDATE feedback_responses SET context_expires_at = ? WHERE rowid = ?",
+            (retention_deadline(retention_days, since), row["row_id"]),
+        )
+
+
+# Mirrors PersistenceConfig.retention_days; the app passes the live setting instead.
+DEFAULT_CONTEXT_RETENTION_DAYS = 10
 
 
 class FeedbackStore:
-    def __init__(self, db_path: Path) -> None:
+    """Feedback outlives its analysis; only the displayed CV/report snapshot follows the analysis retention window."""
+
+    def __init__(self, db_path: Path, retention_days: Callable[[], int] | None = None) -> None:
         self.db_path = db_path
+        self._retention_days = retention_days or (lambda: DEFAULT_CONTEXT_RETENTION_DAYS)
         with self._connect() as conn:
             init_feedback_schema(conn)
+            _backfill_context_deadlines(conn, self._retention_days())
+
+    def purge_expired_context(self) -> int:
+        """Drop expired CV/report snapshots; the rating, comment, triage, and author stay.
+
+        The deadline column is kept so the inbox can say the snapshot expired
+        rather than that none was ever captured.
+        """
+        with self._connect() as conn:
+            result = conn.execute(
+                """UPDATE feedback_responses
+                   SET context_label = NULL, context_text = NULL, context_report_json = NULL
+                   WHERE context_expires_at <= ?
+                     AND (context_label IS NOT NULL OR context_text IS NOT NULL OR context_report_json IS NOT NULL)""",
+                (_now(),),
+            )
+        return result.rowcount
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -354,14 +401,17 @@ class FeedbackStore:
             existing = conn.execute("SELECT rating, reason, comment, context_label, context_text, context_report_json, actor_email, withdrawn_at FROM feedback_responses WHERE target_id=? AND actor_hash=?", (target_id, actor_hash)).fetchone()
             equivalent = existing and existing["withdrawn_at"] is None and (existing["rating"], existing["reason"], existing["comment"], existing["context_label"], existing["context_text"], existing["context_report_json"], existing["actor_email"]) == (value.rating, value.reason, value.comment, value.context_label, value.context_text, context_report_json, normalized_email)
             if not equivalent:
+                has_context = any(item is not None for item in (value.context_label, value.context_text, context_report_json))
+                context_expires_at = retention_deadline(self._retention_days()) if has_context else None
                 conn.execute(
                     """INSERT INTO feedback_responses(
-                         target_id,actor_hash,rating,reason,comment,created_at,updated_at,withdrawn_at,context_label,context_text,context_report_json,actor_email
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                         target_id,actor_hash,rating,reason,comment,created_at,updated_at,withdrawn_at,context_label,context_text,context_report_json,actor_email,context_expires_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                        ON CONFLICT(target_id, actor_hash) DO UPDATE SET rating=excluded.rating, reason=excluded.reason,
                        comment=excluded.comment, updated_at=excluded.updated_at, withdrawn_at=NULL,
-                       context_label=excluded.context_label, context_text=excluded.context_text, context_report_json=excluded.context_report_json, actor_email=excluded.actor_email""",
-                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now, value.context_label, value.context_text, context_report_json, normalized_email),
+                       context_label=excluded.context_label, context_text=excluded.context_text, context_report_json=excluded.context_report_json, actor_email=excluded.actor_email,
+                       context_expires_at=excluded.context_expires_at""",
+                    (target_id, actor_hash, value.rating, value.reason, value.comment, now, now, value.context_label, value.context_text, context_report_json, normalized_email, context_expires_at),
                 )
                 conn.execute("INSERT INTO feedback_events(target_id,actor_hash,event_type,rating,reason,created_at) VALUES(?,?,?,?,?,?)", (target_id, actor_hash, "submitted", value.rating, value.reason, now))
                 conn.execute("INSERT OR IGNORE INTO feedback_triage(target_id,actor_hash,status,updated_at) VALUES(?,?,?,?)", (target_id, actor_hash, TriageStatus.NEW, now))
@@ -402,7 +452,7 @@ class FeedbackStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""SELECT r.rowid AS cursor,t.target_id,t.analysis_id,t.kind,t.source_category,t.source_key,t.versions_json,
-                    r.actor_hash,r.actor_email,r.rating,r.reason,r.comment,r.context_label,r.context_text,r.context_report_json,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
+                    r.actor_hash,r.actor_email,r.rating,r.reason,r.comment,r.context_label,r.context_text,r.context_report_json,r.context_expires_at,r.updated_at,COALESCE(g.status,'new') AS triage_status,g.note,
                     f.operation_kind,f.error_code,f.retryable,f.attempt_count,f.occurred_at,f.correlation_id,f.versions_json AS failure_versions
                     FROM feedback_responses r JOIN feedback_targets t ON t.target_id=r.target_id
                     LEFT JOIN feedback_triage g ON g.target_id=r.target_id AND g.actor_hash=r.actor_hash
@@ -578,11 +628,20 @@ def _inbox_row(row: sqlite3.Row, retained_analysis_ids: set[str]) -> dict[str, A
         "context_label": row["context_label"],
         "context_text": row["context_text"],
         "context_report": json.loads(row["context_report_json"]) if row["context_report_json"] else None,
+        "context_expired": _context_expired(row),
         "updated_at": row["updated_at"],
         "triage_status": row["triage_status"],
         "triage_note": row["note"],
         "failure": failure,
     }
+
+
+def _context_expired(row: sqlite3.Row) -> bool:
+    """A snapshot was captured but has since been purged by retention (or is due to be)."""
+    if row["context_label"] is not None or row["context_text"] is not None or row["context_report_json"] is not None:
+        return False
+    deadline = row["context_expires_at"]
+    return deadline is not None and str(deadline) <= _now()
 
 
 def _now() -> str:

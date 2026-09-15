@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from conftest import valid_report
@@ -529,3 +530,107 @@ def test_context_report_is_projected_to_the_flagged_module(tmp_path):
     store.put("analysis-1", research["target_id"], "actor-2", FeedbackInput(comment="Research", context_report=full_report))
     stored = {item["target_id"]: item["context_report"] for item in store.inbox()["items"]}
     assert set(stored[research["target_id"]]) == {"analysis_id", "base_analysis", "mechanical", "education_research"}
+
+
+def test_context_snapshot_gets_the_analysis_retention_deadline(tmp_path):
+    store, db_path = _store(tmp_path)
+    target = store.materialize("analysis-1", {"findings": [{"id": "finding-1"}]})[0]
+    store.put(
+        "analysis-1",
+        target["target_id"],
+        "actor",
+        FeedbackInput(comment="Needs context", context_label="Education", context_text="Education\nSome school"),
+    )
+    with sqlite3.connect(db_path) as conn:
+        stored = conn.execute("SELECT context_expires_at FROM feedback_responses").fetchone()[0]
+    deadline = datetime.fromisoformat(stored)
+    expected = datetime.now(timezone.utc) + timedelta(days=10)
+    assert abs((deadline - expected).total_seconds()) < 60
+
+
+def test_context_snapshot_deadline_follows_the_current_retention_setting(tmp_path):
+    db_path = tmp_path / "retention.db"
+    p_store = PersistenceStore(PersistenceConfig(db_path=db_path, retention_days=30))
+    f_store = FeedbackStore(db_path, retention_days=p_store.get_retention_days)
+    p_store.create_analysis_run("analysis-1", "corr", "owner-1")
+    p_store.persist_report("0" * 64, valid_report(), analysis_id="analysis-1", owner_user_id="owner-1", source_filename="cv.pdf")
+    p_store.set_retention_days(3)
+    target = f_store.materialize("analysis-1", valid_report())[0]
+    f_store.put("analysis-1", target["target_id"], "actor", FeedbackInput(comment="Short window", context_text="Excerpt"))
+    with sqlite3.connect(db_path) as conn:
+        stored = conn.execute("SELECT context_expires_at FROM feedback_responses").fetchone()[0]
+    expected = datetime.now(timezone.utc) + timedelta(days=3)
+    assert abs((datetime.fromisoformat(stored) - expected).total_seconds()) < 60
+
+
+def test_context_snapshot_expires_with_retention_but_feedback_stays(tmp_path):
+    store, db_path = _store(tmp_path)
+    targets = store.materialize("analysis-1", {"findings": [{"id": "finding-1"}, {"id": "finding-2"}]})
+    expired, fresh = targets[0], targets[1]
+    for target in (expired, fresh):
+        store.put(
+            "analysis-1",
+            target["target_id"],
+            "actor",
+            FeedbackInput(
+                rating="not_helpful",
+                reason="inaccurate",
+                comment="Wrong school",
+                context_label="Education",
+                context_text="Education\nSome school",
+                context_report={"analysis_id": "analysis-1", "base_analysis": {"education": [{"id": "edu-1"}]}},
+            ),
+            actor_email="dev@idego.pl",
+        )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE feedback_responses SET context_expires_at='2020-01-01T00:00:00+00:00' WHERE target_id=?",
+            (expired["target_id"],),
+        )
+
+    assert store.purge_expired_context() == 1
+    assert store.purge_expired_context() == 0
+
+    items = {item["target_id"]: item for item in store.inbox()["items"]}
+    gone = items[expired["target_id"]]
+    assert gone["context_label"] is None
+    assert gone["context_text"] is None
+    assert gone["context_report"] is None
+    assert gone["context_expired"] is True
+    assert gone["comment"] == "Wrong school"
+    assert gone["rating"] == "not_helpful"
+    assert gone["actor_email"] == "dev@idego.pl"
+    assert gone["triage_status"] == "new"
+    kept = items[fresh["target_id"]]
+    assert kept["context_text"] == "Education\nSome school"
+    assert kept["context_expired"] is False
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM feedback_responses").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM feedback_events").fetchone()[0] == 2
+
+
+def test_resubmitting_feedback_renews_the_context_deadline(tmp_path):
+    store, db_path = _store(tmp_path)
+    target = store.materialize("analysis-1", {"findings": [{"id": "finding-1"}]})[0]
+    store.put("analysis-1", target["target_id"], "actor", FeedbackInput(comment="First take", context_text="Excerpt"))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE feedback_responses SET context_expires_at='2020-01-01T00:00:00+00:00'")
+    store.put("analysis-1", target["target_id"], "actor", FeedbackInput(comment="Second take", context_text="Excerpt"))
+    assert store.purge_expired_context() == 0
+    item = store.inbox()["items"][0]
+    assert item["context_text"] == "Excerpt"
+    assert item["context_expired"] is False
+
+
+def test_legacy_context_snapshots_are_backfilled_with_a_deadline(tmp_path):
+    store, db_path = _store(tmp_path)
+    target = store.materialize("analysis-1", {"findings": [{"id": "finding-1"}]})[0]
+    store.put("analysis-1", target["target_id"], "actor", FeedbackInput(comment="Old one", context_text="Excerpt"))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP INDEX feedback_responses_context_expires")
+        conn.execute("ALTER TABLE feedback_responses DROP COLUMN context_expires_at")
+        conn.execute("UPDATE feedback_responses SET updated_at='2026-01-01T00:00:00+00:00'")
+    FeedbackStore(db_path)
+    with sqlite3.connect(db_path) as conn:
+        stored = conn.execute("SELECT context_expires_at FROM feedback_responses").fetchone()[0]
+    assert datetime.fromisoformat(stored) == datetime(2026, 1, 11, tzinfo=timezone.utc)

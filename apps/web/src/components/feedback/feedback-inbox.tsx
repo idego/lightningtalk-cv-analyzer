@@ -15,7 +15,7 @@ type InboxItem = {
   triage_note?: string | null; comment?: string | null; context_text?: string | null;
   context_label?: string | null; context_report?: unknown; updated_at?: string | null; failure?: unknown;
   actor_email?: string | null; rating?: string | null; kind?: unknown; source_category?: unknown; source_key?: unknown;
-  analysis_available?: boolean;
+  analysis_available?: boolean; context_expired?: boolean;
 };
 type InboxData = { items: InboxItem[]; counts: Record<string, number> };
 const statuses = ["new", "reviewing", "planned", "resolved", "wont_fix"] as const;
@@ -203,11 +203,11 @@ export function FeedbackInbox({ owner }: { owner: boolean }) {
                           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.context_text}</p>
                         </div>
                       </details>
-                    ) : moduleCategory && item.analysis_available === false ? (
+                    ) : moduleCategory && (item.analysis_available === false || item.context_expired) ? (
                       <div className="border-t pt-3">
                         <p className="flex items-center gap-2 py-1 text-sm font-medium text-muted-foreground"><FileText className="size-4" />{t("showReportModule")}</p>
                         <p className="mt-1 text-sm">{sameLabel(context.section, context.subject) ? context.section : `${context.section} · ${context.subject}`}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{t("reportModuleAnalysisDeleted")}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{t(item.analysis_available === false ? "reportModuleAnalysisDeleted" : "reportModuleContextExpired")}</p>
                       </div>
                     ) : null}
                     {item.failure ? <details className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{t("errorDetails")}</summary><pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">{JSON.stringify(item.failure, null, 2)}</pre></details> : null}
