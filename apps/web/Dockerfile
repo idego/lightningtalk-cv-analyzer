@@ -29,8 +29,7 @@ ENV NODE_ENV=production
 COPY --chown=node:node --from=build /app/.next/standalone ./
 COPY --chown=node:node --from=build /app/.next/static ./.next/static
 COPY --chown=node:node --from=build /app/public ./public
-COPY --chown=node:node --from=build /app/src/auth.ts ./src/auth.ts
 RUN mkdir -p /app/data /pnpm && chown -R node:node /app/data /pnpm
 USER node
 EXPOSE 3000
-CMD ["sh", "-lc", "pnpm --config.minimumReleaseAge=0 dlx @better-auth/cli@1.6.20 migrate --cwd /app --config ./src/auth.ts --yes || true; node server.js"]
+CMD ["node", "server.js"]
